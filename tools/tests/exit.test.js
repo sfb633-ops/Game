@@ -4,15 +4,32 @@
 // while someone walking away from a shared match must not disturb it.
 const WebSocket = require('../../node_modules/ws');
 
+// Every socket keeps a log of what it has been sent, and `next` reads the log
+// before it starts waiting. Without that this test was flaky: the server sends
+// `init` and `lobbyState` back to back, so by the time an await on the first one
+// resolved and the next await attached its listener, the second had already
+// arrived and was gone. A test that can only see the future misses anything
+// that happens in the same breath.
 const open = () => new Promise((res) => {
   const ws = new WebSocket('ws://localhost:3000');
+  ws.seen = [];
+  ws.on('message', (raw) => ws.seen.push(JSON.parse(raw)));
   ws.on('open', () => res(ws));
 });
 const next = (ws, type, timeoutMs = 6000) => new Promise((res, rej) => {
+  const taken = ws.seen.findIndex(m => m.type === type);
+  if (taken >= 0) { res(ws.seen.splice(taken, 1)[0]); return; }
   const timer = setTimeout(() => { ws.off('message', on); rej(new Error('timeout waiting for ' + type)); }, timeoutMs);
   const on = (raw) => {
     const msg = JSON.parse(raw);
-    if (msg.type === type) { clearTimeout(timer); ws.off('message', on); res(msg); }
+    if (msg.type !== type) return;
+    clearTimeout(timer);
+    ws.off('message', on);
+    // Drop it from the log too, so a later await for the same kind waits for a
+    // genuinely new one rather than replaying this.
+    const i = ws.seen.findIndex(m => m.type === type);
+    if (i >= 0) ws.seen.splice(i, 1);
+    res(msg);
   };
   ws.on('message', on);
 });

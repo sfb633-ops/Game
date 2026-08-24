@@ -3,7 +3,7 @@
 // here and only the results are broadcast out.
 
 const {
-  MAP, OUTPOST, RACES, RACE_ABILITIES, CASTLE, BUILDING_TYPES, UNIT_TYPES,
+  MAP, VISION, OUTPOST, RACES, RACE_ABILITIES, CASTLE, BUILDING_TYPES, UNIT_TYPES,
   AI_CAMP, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
   TOWER_REDUCTION_CAP, TERRAIN_CLEAR_COST,
   TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA,
@@ -437,6 +437,11 @@ class Match {
       // The race ability: ready at spawn, then on its own cooldown. Both
       // halves are seconds and both are counted down by stepAbility.
       ability: { cooldownRemaining: 0, activeRemaining: 0 },
+      // One byte per tile: has this empire ever had something near here. Kept
+      // on the server so it survives a reconnect, and shipped to the client as
+      // a list of newly-lit tiles rather than the whole map every tick.
+      explored: new Uint8Array(MAP.width * MAP.height),
+      exploredDelta: [],
       mods: { ...BASE_MODS },
       // Held in the lobby, a player has no hand yet: start() deals every one of
       // them at the same moment. A player who arrives after the match is
@@ -445,6 +450,7 @@ class Match {
     };
     player.mods = computeMods(player);
     this.players.set(id, player);
+    this.stepVision(player);          // an empire can see where it woke up
     // Once a match has been a contest it stays one, however many walk out
     // later. checkWinCondition reads this rather than the current head count.
     if (this.started && this.players.size >= 2) this.contested = true;
@@ -622,6 +628,76 @@ class Match {
       reduction += def.damageReduction || 0;
     }
     return { power, hp, structures, reduction: Math.min(TOWER_REDUCTION_CAP, reduction) };
+  }
+
+  // Everything this empire owns, with how far each of them sees. One list, so
+  // vision and the fog that reads it can never disagree about what is looking.
+  *eyesOf(player) {
+    for (const b of Object.values(player.buildings)) {
+      if (b.underConstruction) continue;
+      const r = b.type === 'castle' ? VISION.castle
+        : b.type === 'tower' ? VISION.tower
+        : b.type === 'wall' ? 0
+        : VISION.building;
+      if (r > 0) yield { x: b.x, y: b.y, r };
+    }
+    for (const army of this.armies.values()) {
+      if (army.ownerId !== player.id || armyCount(army) === 0) continue;
+      yield { x: army.x, y: army.y, r: VISION.army };
+    }
+    // A captured camp is ground you hold, so it watches itself.
+    for (const o of player.outposts) yield { x: o.x, y: o.y, r: VISION.building };
+  }
+
+  // Is this point being watched right now? Used to decide whether an enemy
+  // group appears on somebody's screen at all.
+  canSee(player, x, y) {
+    for (const eye of this.eyesOf(player)) {
+      if (Math.hypot(eye.x - x, eye.y - y) <= eye.r) return true;
+    }
+    return false;
+  }
+
+  // Light up whatever this empire can currently see. Only tiles that were dark
+  // are recorded, so the delta shipped to the client is the *new* ground and
+  // settles to nothing once an army stops moving.
+  stepVision(player) {
+    for (const eye of this.eyesOf(player)) {
+      const cx = Math.round(eye.x), cy = Math.round(eye.y);
+      const r = eye.r, rr = r * r;
+      const y0 = Math.max(0, cy - r), y1 = Math.min(MAP.height - 1, cy + r);
+      const x0 = Math.max(0, cx - r), x1 = Math.min(MAP.width - 1, cx + r);
+      for (let y = y0; y <= y1; y++) {
+        const dy = y - cy, row = y * MAP.width;
+        for (let x = x0; x <= x1; x++) {
+          const dx = x - cx;
+          if (dx * dx + dy * dy > rr) continue;
+          const i = row + x;
+          if (player.explored[i]) continue;
+          player.explored[i] = 1;
+          player.exploredDelta.push(i);
+        }
+      }
+    }
+  }
+
+  // Handed to the client and cleared, the same way events are.
+  drainExplored(playerId) {
+    const player = this.players.get(playerId);
+    if (!player || !player.exploredDelta.length) return null;
+    const out = player.exploredDelta;
+    player.exploredDelta = [];
+    return out;
+  }
+
+  // The groups this player may be shown: their own always, anyone else's only
+  // while something of theirs is watching that ground. Buildings are not
+  // filtered — a keep you have walked past stays on your map, which is what the
+  // remembered layer of the fog is for.
+  visibleArmiesFor(playerId, armies) {
+    const player = this.players.get(playerId);
+    if (!player) return armies;
+    return armies.filter(a => a.ownerId === playerId || this.canSee(player, a.x, a.y));
   }
 
   // Every finished tower looses an arrow at the nearest enemy army in range on
@@ -1721,6 +1797,7 @@ class Match {
       if (player.woundCarry > 0) player.woundCarry = Math.max(0, player.woundCarry - COMBAT.woundHealPerSec * dt);
       this.stepAbility(player, dt);
       this.stepSpellRecharge(player, dt);
+      this.stepVision(player);
       player.gold += this.incomePerSec(player) * dt;
 
       this.stepCastleRepair(player, dt);

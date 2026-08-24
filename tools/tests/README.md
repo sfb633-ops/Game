@@ -56,6 +56,17 @@ what an ability must *not* cost: a cast that raises nobody is not put on
 cooldown, and garbage coordinates never reach the distance tests — the same
 NaN hole the spells had.
 
+Fog gets its own block, because most of it is about what is *not* sent: an
+empire starts able to see its own doorstep and almost nothing else, marching
+uncovers ground and the deltas add up exactly to what was learned, standing still
+uncovers nothing more (which is what keeps the traffic at nothing), and an enemy
+group is only in your state message while something of yours is watching it —
+including the case where it walks back out of range and disappears again. Vision
+is pinned as a property of the thing rather than of owning ground: a wall adds
+none, and a tower sees further than it shoots. The doubled map is checked for the
+thing that would break first — that it still seats a full twelve and keeps them
+the required distance apart.
+
 The territory rule for deployment gets a block of its own, because it is a split
 rather than a restriction: troops refuse to muster outside your ground and say
 so, they muster fine inside it, and — the half that matters — a group already on

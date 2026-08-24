@@ -258,6 +258,69 @@ tower's tile to where the target stood at that moment. The client flies it
 across that gap; it does not chase, because chasing would mean streaming the
 shot every frame and the flight is a third of a second.
 
+### A bigger map, and fog over it
+
+240x160, four times the ground. Everything measured in tiles scaled with it —
+lakes, camps, spawn spacing, spawn margin — or the map would have been the same
+game with longer walks between the interesting parts. Generation is ~20ms and
+the terrain is 75KB once, at init.
+
+#### Three states, and the whole look hangs off keeping them apart
+
+    unexplored   never had anything of ours near it — near-black, nothing drawn
+    explored     seen once, not watched now — terrain remembered, groups hidden
+    visible      something of ours is near it right now — live
+
+**Explored is the server's.** `player.explored` is a byte per tile, and
+`stepVision` lights whatever the empire can currently see each tick. Only tiles
+that were dark are recorded, so what ships is the *new* ground: a few hundred
+bytes a second while an army is crossing open country, and nothing at all once it
+stops. `init` carries the whole list, because a socket that has just arrived —
+or come back after a drop — missed every delta.
+
+**Visible is the client's**, worked out every frame from its own units and
+buildings. It changes constantly and the server would be sending it forever.
+`Match.eyesOf` and the client's `myEyes` are deliberate mirrors: the server
+decides what has been *explored*, the client only decides what is lit right now.
+
+#### What the fog actually hides
+
+Enemy **groups** are filtered server-side in `visibleArmiesFor` — a group you
+cannot see is not in your state message at all, so no client can draw it however
+it is modified. Enemy **buildings** are not filtered: a keep you have walked past
+stays on your map, which is exactly what the remembered layer is for, and it
+keeps the per-room building cache in `thinState` working unchanged.
+
+Fog forces one encode per player, since what you are shown depends on what you
+can see. That costs CPU and *saves* bandwidth: a busy twelve-player match on the
+four-times-bigger map runs at **61 KB/s per player and 2.5 GB/hour**, against 78
+KB/s and 3.2 GB/hour before fog on the small map, because most of the enemy
+armies are no longer in anybody's view.
+
+#### Why it is drawn two different ways
+
+The fog is two problems and gets two tools, which is the only interesting thing
+about the rendering:
+
+- What you **remember** is per-tile and changes rarely — one pixel per tile,
+  upscaled with smoothing on, rebuilt only when the server lights new ground.
+- What you can **see right now** moves every frame and is a circle. Drawing that
+  from the same one-pixel-per-tile mask was the first attempt and it looked
+  wrong: blown up thirty-two times, the rim of an eleven-tile circle becomes four
+  soft blobs sticking out at the compass points, because that is what a
+  rasterised circle's extremes *are* at that resolution. Live vision is punched
+  out with real radial gradients instead — round, smooth, and cheaper than
+  rebuilding a mask every time a group takes a step.
+
+The holes are cut on a viewport-sized layer of their own (`drawFog`), because
+`destination-out` has to erase the veil and not the map underneath it.
+
+`FOG_DARK` is 251, not 236: at 236 you could make out where the lakes were
+before going to look, which rather defeats sending anyone to look.
+
+Anything standing on never-seen ground is not drawn at all (`isExplored`).
+Darkening is not hiding — a camp under a shadow is still a camp you can click.
+
 ### Playtest pass
 
 #### Groups fight each other in the field

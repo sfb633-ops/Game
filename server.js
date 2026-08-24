@@ -221,9 +221,19 @@ function broadcast(room, message) {
 }
 
 function sendInit(ws, room, playerId) {
+  // Everything this empire has uncovered so far, as a plain list of tile
+  // indices. Deltas are fine while a socket is attached, but one that has just
+  // arrived — or come back after a drop — missed all of them.
+  const player = room.match.players.get(playerId);
+  const explored = [];
+  if (player && player.explored) {
+    for (let i = 0; i < player.explored.length; i++) if (player.explored[i]) explored.push(i);
+  }
   ws.send(JSON.stringify({
     type: 'init',
     playerId,
+    explored,
+    vision: config.VISION,
     // The client keeps this and offers it back after a drop, which is what
     // makes a reconnect land on the same empire instead of a new one.
     session: ws.sessionToken,
@@ -242,6 +252,7 @@ function sendInit(ws, room, playerId) {
     castle: config.CASTLE,
     cards: config.CARDS,
     cardDraft: config.CARD_DRAFT,
+    terrainClearCost: config.TERRAIN_CLEAR_COST,
     outpost: config.OUTPOST,
   }));
 }
@@ -566,14 +577,21 @@ setInterval(() => {
     room.match.tick(dt);
     const snapshot = room.match.serialize();
     thinState(room, snapshot);
-    // Battle reports are addressed to one player, so they are not broadcast to
-    // the room. Most ticks produce none, and that path stays a single encode.
     const reports = snapshot.events;
-    if (!reports.length) { broadcast(room, { type: 'state', ...snapshot }); continue; }
+    const allArmies = snapshot.armies;
+    // One view per player. Fog makes this unavoidable — what you are shown
+    // depends on what you can see — and it is also where battle reports get
+    // filtered down to the player they were addressed to.
     for (const [id, ws] of room.sockets) {
       if (ws.readyState !== ws.OPEN) continue;
-      snapshot.events = reports.filter(e => e.playerId === id);
-      ws.send(JSON.stringify({ type: 'state', ...snapshot }));
+      ws.send(JSON.stringify({
+        type: 'state',
+        ...snapshot,
+        events: reports.filter(e => e.playerId === id),
+        armies: room.match.visibleArmiesFor(id, allArmies),
+        // Tiles this empire has just laid eyes on, and nothing it already knew.
+        explored: room.match.drainExplored(id),
+      }));
     }
   }
 }, config.TICK_MS);

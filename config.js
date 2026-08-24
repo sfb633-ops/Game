@@ -2,8 +2,12 @@
 // only for labels/costs in the UI (never trusts client-side calculations).
 
 const MAP = {
-  width: 120,
-  height: 80,
+  // Doubled in both directions, so four times the ground. Everything below that
+  // is measured in tiles was scaled with it — lakes, camps and how far apart
+  // empires start — or the map would simply be the same game with longer walks
+  // between the interesting parts.
+  width: 240,
+  height: 160,
   // Pixels per tile at 1x zoom. Matches the native cell size of the tilesets
   // and character sheets in public/assets, so art draws 1:1 with no resampling.
   tileSize: 32,
@@ -11,14 +15,14 @@ const MAP = {
   // when players arrive, so the terrain every client is sent stays fixed for
   // the whole match. That fixes how many empires a map can seat.
   maxPlayers: 12,
-  spawnSpacing: 24,   // minimum tiles between two starting positions
+  spawnSpacing: 40,   // minimum tiles between two starting positions
   // How far from the edge of the map an empire prefers to start. A base close
   // to the edge can't be centred on screen — the camera stops at the world
   // edge — so it sits in a corner of the view with half its border off-map.
   // Relaxed automatically if the map runs out of room; see prepareSpawns.
-  spawnMargin: 16,
-  lakeCount: 9,       // bodies of water grown into the map
-  lakeSize: [45, 130],// tiles each one covers, before the shoreline is drawn
+  spawnMargin: 24,
+  lakeCount: 34,      // bodies of water grown into the map
+  lakeSize: [60, 200],// tiles each one covers, before the shoreline is drawn
 };
 
 // Free-form building placement. A player may place a building on any land tile
@@ -26,6 +30,21 @@ const MAP = {
 // "territory" is simply the disc of tiles around the town center. The live
 // radius comes from CASTLE.buildRadius[level - 1] — upgrading the town center
 // pushes the border out — and this is the level-1 value the client starts from.
+// How far each thing sees, in tiles. Vision is what lifts the fog: ground you
+// have never had something near is black, ground you have seen is remembered
+// but not watched, and ground something of yours is standing near is live.
+//
+// A keep sees furthest because an empire should be able to see its own doorstep
+// without garrisoning it, and a tower sees further than it shoots so that it
+// warns before it fires. Everything else is short — the map is meant to be
+// explored by marching, not by building.
+const VISION = {
+  army:     7,
+  castle:   11,
+  tower:    9,
+  building: 5,
+};
+
 const BUILD = {
   radius: 7, // starting border radius, in tiles, before any upgrade
 };
@@ -197,7 +216,7 @@ const UNIT_TYPES = {
 const AI_CAMP = {
   // Deliberately sparse — the map is four times the old one but this is only
   // doubled, so camps stay something you go looking for rather than trip over.
-  count: 8,
+  count: 26,
   hp: 120,
   garrison: { swordsman: 4 },
   lootGold: 200,
@@ -206,7 +225,7 @@ const AI_CAMP = {
   plunderPerDamage: 0.6,
   clearBonusGold: 250,
   respawnSec: 60,
-  spacing: 10,      // minimum tiles between camps, and from any starting position
+  spacing: 14,      // minimum tiles between camps, and from any starting position
 };
 
 // Battles play out over time rather than resolving the instant an army lands,
@@ -343,7 +362,7 @@ const TRAIN_QUEUE_PER_EXTRA = 2;
 const TICK_MS = 200;
 
 module.exports = {
-  MAP, BUILD, OUTPOST, RACES, RACE_ABILITIES, CASTLE, BUILDING_TYPES, UNIT_TYPES,
+  MAP, VISION, BUILD, OUTPOST, RACES, RACE_ABILITIES, CASTLE, BUILDING_TYPES, UNIT_TYPES,
   AI_CAMP, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
   TOWER_REDUCTION_CAP, TERRAIN_CLEAR_COST,
   TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA, TICK_MS,

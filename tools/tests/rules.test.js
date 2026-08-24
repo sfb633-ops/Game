@@ -1408,5 +1408,122 @@ function facingOff(aCount, bCount) {
   check('and a run can still be extended', walls().length === before2 + 1);
 }
 
+
+// --- fog of war -----------------------------------------------------------
+
+// An empire starts able to see its own doorstep and nothing else.
+{
+  const m = new Match({ started: false });
+  const p = m.addPlayer('p', 'human', 'P');
+  m.start(); p.draft = null;
+  const tot = cfg.MAP.width * cfg.MAP.height;
+  const lit = () => p.explored.reduce((n, v) => n + v, 0);
+  check('a new empire can see where it woke up', lit() > 0, `${lit()} tiles`);
+  check('and almost nothing else', lit() / tot < 0.05,
+    `${(lit() / tot * 100).toFixed(1)}% of the map`);
+  check('the first delta carries exactly what was lit', p.exploredDelta.length === lit());
+  check('draining it hands it over once', m.drainExplored('p').length > 0 &&
+    m.drainExplored('p') === null);
+}
+
+// Marching uncovers ground, and only ground that was dark.
+{
+  const m = new Match({ started: false });
+  const p = m.addPlayer('p', 'human', 'P');
+  m.start(); p.draft = null;
+  p.idleUnits.swordsman = 5;
+  m.drainExplored('p');
+  m.cmdDeployUnits('p', { swordsman: 5 }, p.baseX + 2, p.baseY);
+  const army = [...m.armies.values()][0];
+  let dest = null;
+  for (let d = 40; d > 10 && !dest; d--) {
+    for (const [dx, dy] of [[d, 0], [-d, 0], [0, d], [0, -d]]) {
+      if (m.validMoveTile(p.baseX + dx, p.baseY + dy)) { dest = { x: p.baseX + dx, y: p.baseY + dy }; break; }
+    }
+  }
+  const before = p.explored.reduce((n, v) => n + v, 0);
+  m.cmdMoveArmy('p', army.id, dest.x, dest.y);
+  let revealed = 0;
+  for (let t = 0; t < 6000 && army.order !== 'hold'; t++) {
+    m.tick(0.2);
+    const d = m.drainExplored('p');
+    if (d) revealed += d.length;
+  }
+  const after = p.explored.reduce((n, v) => n + v, 0);
+  check('sending troops out uncovers new ground', revealed > 100, `${revealed} tiles`);
+  check('and the deltas add up to what was learned', after - before === revealed,
+    `${after - before} vs ${revealed}`);
+  // Standing still teaches nothing, which is what keeps the traffic at nothing.
+  for (let t = 0; t < 100; t++) m.tick(0.2);
+  check('standing still uncovers nothing more', m.drainExplored('p') === null);
+}
+
+// An enemy group is only shown while something of yours is watching it.
+{
+  const m = new Match({ started: false });
+  const a = m.addPlayer('a', 'human', 'A'), b = m.addPlayer('b', 'orc', 'B');
+  m.start(); a.draft = b.draft = null;
+  a.idleUnits.swordsman = 5; b.idleUnits.swordsman = 5;
+  m.cmdDeployUnits('a', { swordsman: 5 }, a.baseX + 2, a.baseY);
+  m.cmdDeployUnits('b', { swordsman: 5 }, b.baseX + 2, b.baseY);
+  const all = m.serialize().armies;
+  check('both groups exist on the server', all.length === 2);
+  check('but each empire is only shown its own while they are apart',
+    m.visibleArmiesFor('a', all).length === 1 && m.visibleArmiesFor('b', all).length === 1);
+
+  const A = [...m.armies.values()].find(x => x.ownerId === 'a');
+  const B = [...m.armies.values()].find(x => x.ownerId === 'b');
+  B.x = A.x + 2; B.y = A.y;
+  const near = m.serialize().armies;
+  check('and both once one walks into the other\'s vision',
+    m.visibleArmiesFor('a', near).length === 2 && m.visibleArmiesFor('b', near).length === 2);
+
+  // Clear of the army *and* of the keep back home, which also has eyes and the
+  // longest pair of them.
+  B.x = A.x + cfg.VISION.castle + 6; B.y = A.y + cfg.VISION.castle + 6;
+  const gone = m.serialize().armies;
+  check('a group that walks back out of range stops being shown',
+    m.visibleArmiesFor('a', gone).length === 1, `${m.visibleArmiesFor('a', gone).length}`);
+}
+
+// A keep sees further than a group, and a wall sees nothing — vision is a
+// property of the thing, not of owning ground.
+{
+  const m = new Match({ started: false });
+  const p = m.addPlayer('p', 'human', 'P');
+  m.start(); p.draft = null; p.gold = 99999;
+  const eyes = [...m.eyesOf(p)];
+  check('a lone keep is one pair of eyes', eyes.length === 1 && eyes[0].r === cfg.VISION.castle);
+  m.cmdBuildWall('p', [{ x: p.baseX + 4, y: p.baseY }]);
+  check('a wall adds none', [...m.eyesOf(p)].length === 1);
+  m.cmdBuild('p', p.baseX + 5, p.baseY, 'tower');
+  const withTower = [...m.eyesOf(p)];
+  check('a tower does, and sees further than it shoots',
+    withTower.length === 2 && cfg.VISION.tower > cfg.BUILDING_TYPES.tower.range,
+    `vision ${cfg.VISION.tower} vs range ${cfg.BUILDING_TYPES.tower.range}`);
+}
+
+// The doubled map still seats everyone, far enough apart to be worth crossing.
+{
+  const m = new Match({ started: false });
+  const seated = [];
+  for (let i = 0; i < cfg.MAP.maxPlayers; i++) {
+    const p = m.addPlayer('p' + i, 'human', 'P' + i);
+    if (p) seated.push(p);
+  }
+  check('the bigger map still seats a full game',
+    seated.length === cfg.MAP.maxPlayers, `${seated.length} of ${cfg.MAP.maxPlayers}`);
+  let closest = Infinity;
+  for (let i = 0; i < seated.length; i++) {
+    for (let j = i + 1; j < seated.length; j++) {
+      closest = Math.min(closest, Math.hypot(seated[i].baseX - seated[j].baseX,
+        seated[i].baseY - seated[j].baseY));
+    }
+  }
+  check('and keeps them the required distance apart',
+    closest >= cfg.MAP.spawnSpacing, `${closest.toFixed(1)} vs ${cfg.MAP.spawnSpacing}`);
+  check('camps scaled with the ground', m.aiCamps.length === cfg.AI_CAMP.count);
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');
 process.exit(failures ? 1 : 0);

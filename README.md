@@ -209,7 +209,12 @@ sprite anchors and layering can be eyeballed as a PNG.
   and siege factories do the same for knights and catapults, each on its own
   queue. Diminishing on purpose — with a cap on buildings, a second barracks
   should earn its slot and a fifth shouldn't.
-- The map is 120x80 tiles of grass, mountain ridges and lakes. Neither rock
+- **The map is 240x160 and most of it is dark.** You start seeing your own
+  doorstep and nothing else; sending troops out is how the map gets discovered.
+  Ground you have seen stays on your map but dims once nobody is watching it —
+  the terrain is remembered, enemy troops are not. Ground you have never visited
+  is simply black.
+- The map is 240x160 tiles of grass, mountain ridges and lakes. Neither rock
   nor water can be built on or marched onto, so they shape where empires can
   grow and which way an army has to go.
 - You spawn with a town center (the Keep) and may build anywhere inside your

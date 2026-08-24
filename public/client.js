@@ -31,10 +31,29 @@ let lobbyHostId = null;    // who may press Start — the server decides, not us
 let armedAbility = false;  // an aimed race ability waiting for its map click
 let mapCfg = null, terrain = null, buildCfg = null;
 let buildingTypes = null, unitTypes = null, castleCfg = null;
+let terrainClearCost = 0;  // gold per tile of rock or water bought back
 let latestState = null;
 let armedDeploy = false;   // staged troops waiting for a map click to land on
+let armedClear = false;    // buying a tile of rock or water back as open ground
 let selectedArmy = null;   // id of one of my armies, selected for orders
 let terrainCanvas = null;
+// ---- Fog of war -----------------------------------------------------------
+// Three states per tile, and the whole look hangs off keeping them separate:
+//   unexplored  never had anything of ours near it — solid dark, nothing drawn
+//   explored    seen once, not watched now — terrain remembered, units hidden
+//   visible     something of ours is near it right now — live
+//
+// `explored` is the server's, arriving as tile indices (whole list at init, new
+// ones per tick after). `visible` is worked out here every few frames from our
+// own units and buildings, because it changes constantly and the server would
+// be sending it forever.
+let explored = null;        // Uint8Array, one byte per tile
+let visionCfg = null;       // how far each kind of thing sees
+let fogCanvas = null;       // one pixel per tile; scaled up with smoothing on
+let fogCtx = null, fogData = null;
+let fogDirty = true;        // rebuild the tile mask on the next frame
+let fogLayer = null;        // viewport-sized veil the vision holes are cut from
+let fogLayerCtx = null;
 let wallMode = false;      // wall drag tool active?
 let wallDrag = null;       // Set of "x,y" tiles in the in-progress drag
 let camera = { x: 0, y: 0 }; // viewport top-left in world pixels
@@ -425,6 +444,13 @@ function onInit(msg) {
   castleCfg = msg.castle;
   cardDefs = msg.cards;
   abilityDefs = msg.raceAbilities || null;
+  terrainClearCost = msg.terrainClearCost || 0;
+  visionCfg = msg.vision || null;
+  // The whole of what this empire had already uncovered. A reconnecting client
+  // missed every delta while it was away, so init carries the lot.
+  explored = new Uint8Array(msg.map.width * msg.map.height);
+  if (msg.explored) for (const i of msg.explored) explored[i] = 1;
+  fogCanvas = null; fogLayer = null; fogDirty = true;
   draftCfg = msg.cardDraft;
   outpostCfg = msg.outpost;
   myRoom = msg.room || null;
@@ -438,7 +464,7 @@ function onInit(msg) {
   latestState = null;
   terrainCanvas = null;
   selectedArmy = null; armedDeploy = false;
-  armedSpell = null; armedAbility = false; draftShown = null;
+  armedSpell = null; armedAbility = false; armedClear = false; draftShown = null;
   // Held in the lobby, or straight into a match already in progress. Either
   // way everything below is built now, so pressing Start costs nothing.
   showLobby(msg.started === false);
@@ -480,6 +506,7 @@ function onInit(msg) {
   window.addEventListener('keyup', onKeyUp);
   requestAnimationFrame(frame); // continuous render + camera pan loop
   document.getElementById('wall-tool-btn').addEventListener('click', () => toggleWallMode(!wallMode));
+  document.getElementById('clear-tool-btn').addEventListener('click', () => armClear(!armedClear));
   buildPalette();
   log(myRoom ? `Joined game ${myRoom.code} as ${myRace}. Share the code to invite friends.`
              : `Joined as ${myRace}. Build your empire.`);
@@ -760,8 +787,24 @@ function renderCards(me) {
   }
 }
 
+// Rock and water inside your border can be bought back as buildable ground, a
+// tile at a time. Armed like the wall tool rather than the build palette, since
+// what it is aimed at is terrain and not a thing you are carrying.
+function armClear(on) {
+  armedClear = !!on;
+  if (armedClear) {
+    armedSpell = null; armedAbility = false; armedDeploy = false;
+    armBuild(null);
+    if (wallMode) toggleWallMode(false);
+  }
+  document.getElementById('clear-tool-btn').classList.toggle('active', armedClear);
+  canvas.style.cursor = armedClear ? 'crosshair' : (wallMode ? 'cell' : 'crosshair');
+  render(); renderPanel();
+}
+
 function toggleWallMode(on) {
   wallMode = on;
+  if (wallMode && armedClear) armClear(false);
   document.getElementById('wall-tool-btn').classList.toggle('active', wallMode);
   wallDrag = null; wallLast = null;
   if (wallMode) armedBuild = null;
@@ -1050,6 +1093,15 @@ function isMarchable(tx, ty) {
 
 // A tile whose wall or tower was broken on it, still choked with rubble. The
 // server decides; this only stops the UI from offering ground it would refuse.
+// Has this empire ever laid eyes on this tile? Anything standing on ground we
+// have never seen is not drawn at all — that is the difference between a fog
+// that hides things and a dark filter over a map you can still read.
+function isExplored(tx, ty) {
+  if (!explored || !mapCfg) return true;
+  if (tx < 0 || ty < 0 || tx >= mapCfg.width || ty >= mapCfg.height) return false;
+  return !!explored[ty * mapCfg.width + tx];
+}
+
 function isRubble(tx, ty) {
   if (!latestState || !latestState.rubble) return false;
   for (const r of latestState.rubble) if (r.x === tx && r.y === ty) return true;
@@ -1233,9 +1285,20 @@ function render() {
   scene.sort((m, n) => m.y - n.y);
 
   for (const item of scene) {
-    if (item.kind === 'camp') drawCamp(item.camp, ts);
-    else if (item.kind === 'building') drawPlayerBuilding(item.b, item.p, ts, hasWall);
-    else drawArmy(item.a, ts);
+    // Nothing stands on ground this empire has never laid eyes on. The fog
+    // would darken it anyway, but darkening is not hiding — a camp under a
+    // shadow is still a camp you can see and click. Enemy *groups* are already
+    // filtered by the server, which is the half that has to be authoritative;
+    // this is the half that stops the map reading as a lit board behind glass.
+    if (item.kind === 'camp') {
+      if (!isExplored(item.camp.x, item.camp.y)) continue;
+      drawCamp(item.camp, ts);
+    } else if (item.kind === 'building') {
+      if (!isExplored(item.b.x, item.b.y)) continue;
+      drawPlayerBuilding(item.b, item.p, ts, hasWall);
+    } else {
+      drawArmy(item.a, ts);
+    }
   }
 
   // Damage and unit counts go on last. Both are things you have to be able to
@@ -1251,6 +1314,10 @@ function render() {
     return Sprites.drawSmoke(ctx, fx.x, fx.y, age, fx);
   });
   spellFlash = spellFlash.filter(fx => drawSpellFlash(fx, ts));
+
+  // ---- Fog, over the lot ----
+  drawFog(ts);
+
   arrows = arrows.filter(a => drawFlyingArrow(a));
 }
 
@@ -1412,6 +1479,115 @@ function drawArmyBadge(a, ts) {
   ctx.restore();
 }
 
+// Everything of ours that is looking, and how far. Mirrors Match.eyesOf — the
+// server decides what is *explored*, this only decides what is lit right now.
+function myEyes() {
+  const me = myPlayer();
+  const out = [];
+  if (!me || !visionCfg || !latestState) return out;
+  for (const b of me.buildings) {
+    if (b.underConstruction) continue;
+    const r = b.type === 'castle' ? visionCfg.castle
+      : b.type === 'tower' ? visionCfg.tower
+      : b.type === 'wall' ? 0
+      : visionCfg.building;
+    if (r > 0) out.push({ x: b.x, y: b.y, r });
+  }
+  for (const a of latestState.armies) {
+    if (a.ownerId === myId) out.push({ x: a.x, y: a.y, r: visionCfg.army });
+  }
+  for (const o of me.outposts || []) out.push({ x: o.x, y: o.y, r: visionCfg.building });
+  return out;
+}
+
+// The fog is two different problems and gets two different tools.
+//
+// What you *remember* is per-tile and changes rarely: one pixel per tile,
+// upscaled with smoothing on, rebuilt only when the server lights new ground.
+// A tile mask is exactly the right shape for it and costs nothing to keep.
+//
+// What you can see *right now* moves every frame and is a circle. Drawing that
+// from the same one-pixel-per-tile mask was the first attempt and it looked
+// wrong: blown up thirty-two times, the rim of an eleven-tile circle turns into
+// four soft blobs sticking out at the compass points, because that is what a
+// rasterised circle's extremes are at that resolution. So live vision is punched
+// out with real radial gradients instead — genuinely round, genuinely smooth,
+// and cheaper than rebuilding a mask every time a group takes a step.
+// Near enough to opaque that the shape of a coastline does not read through
+// it — at 236 you could make out where the lakes were before going to look,
+// which rather defeats sending anyone to look. Not a flat void either: the few
+// remaining percent keep a hint of texture so the dark has depth to it.
+const FOG_DARK = 251;       // how black ground you have never seen sits
+const FOG_REMEMBERED = 122; // how heavily seen-but-unwatched ground is veiled
+
+function rebuildFogMask() {
+  if (!explored || !mapCfg) return;
+  const w = mapCfg.width, h = mapCfg.height;
+  if (!fogCanvas) {
+    fogCanvas = document.createElement('canvas');
+    fogCanvas.width = w; fogCanvas.height = h;
+    fogCtx = fogCanvas.getContext('2d');
+    fogData = fogCtx.createImageData(w, h);
+    // One colour throughout; only how opaque it is ever changes.
+    for (let i = 0; i < w * h; i++) {
+      fogData.data[i * 4] = 6; fogData.data[i * 4 + 1] = 5; fogData.data[i * 4 + 2] = 9;
+    }
+  }
+  const px = fogData.data;
+  for (let i = 0; i < w * h; i++) px[i * 4 + 3] = explored[i] ? FOG_REMEMBERED : FOG_DARK;
+  fogCtx.putImageData(fogData, 0, 0);
+  fogDirty = false;
+}
+
+// Built on its own viewport-sized layer, because punching holes in the veil has
+// to erase the veil and not the map underneath it.
+function drawFog(ts) {
+  if (!explored || !mapCfg) return;
+  if (fogDirty) rebuildFogMask();
+  if (!fogCanvas) return;
+
+  if (!fogLayer || fogLayer.width !== canvas.width || fogLayer.height !== canvas.height) {
+    fogLayer = document.createElement('canvas');
+    fogLayer.width = canvas.width; fogLayer.height = canvas.height;
+    fogLayerCtx = fogLayer.getContext('2d');
+  }
+  const f = fogLayerCtx;
+  f.setTransform(1, 0, 0, 1, 0, 0);
+  f.clearRect(0, 0, fogLayer.width, fogLayer.height);
+
+  // The remembered veil, stretched over the world in world coordinates.
+  f.save();
+  f.imageSmoothingEnabled = true;
+  f.setTransform(zoom, 0, 0, zoom, -Math.round(camera.x * zoom), -Math.round(camera.y * zoom));
+  f.drawImage(fogCanvas, 0, 0, mapCfg.width, mapCfg.height,
+    -ts / 2, -ts / 2, mapCfg.width * ts, mapCfg.height * ts);
+  f.restore();
+
+  // Then lift it wherever something of ours is standing. destination-out with a
+  // gradient that is solid to about half way and fades to nothing at the rim,
+  // which is what gives the edge its softness.
+  f.globalCompositeOperation = 'destination-out';
+  for (const eye of myEyes()) {
+    const sx = (eye.x * ts - camera.x) * zoom;
+    const sy = (eye.y * ts - camera.y) * zoom;
+    const r = eye.r * ts * zoom;
+    if (sx + r < 0 || sy + r < 0 || sx - r > fogLayer.width || sy - r > fogLayer.height) continue;
+    const g = f.createRadialGradient(sx, sy, r * 0.5, sx, sy, r);
+    g.addColorStop(0, 'rgba(0,0,0,1)');
+    g.addColorStop(0.65, 'rgba(0,0,0,0.72)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    f.fillStyle = g;
+    f.beginPath(); f.arc(sx, sy, r, 0, Math.PI * 2); f.fill();
+  }
+  f.globalCompositeOperation = 'source-over';
+
+  // And lay the whole veil over the map in screen space.
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(fogLayer, 0, 0);
+  ctx.restore();
+}
+
 // A ring that expands and fades where a spell landed. Returns false once it
 // has finished, so the caller can drop it.
 // Keyed by card id for a spell and by ability id for an ability; an ability
@@ -1532,6 +1708,7 @@ function cancelDrag() {
   if (wallDrag) { wallDrag = null; wallLast = null; had = true; }
   if (armedBuild) { armBuild(null); had = true; }
   if (armedDeploy) { armDeploy(false); had = true; }
+  if (armedClear) { armClear(false); had = true; }
   if (had) { log('Cancelled.'); render(); }
   return had;
 }
@@ -1604,6 +1781,15 @@ function onCanvasClick(e) {
   // interpret it as a selection.
   if (armedBuild) {
     if (dropBuild(ix, iy)) armBuild(null);
+    return;
+  }
+
+  // Buying a tile of ground back takes the click first: it is aimed at terrain,
+  // which nothing else on the map cares about.
+  if (armedClear) {
+    if (!isMyTerritory(ix, iy)) log('You can only clear ground inside your own territory.');
+    else if (isMarchable(ix, iy)) log('That ground is already clear.');
+    else send({ type: 'clearTerrain', x: ix, y: iy });
     return;
   }
 
@@ -1725,6 +1911,7 @@ function onKeyDown(e) {
     if (armedSpell) { armSpell(null); return; }
     if (armedAbility) { armAbility(false); return; }
     if (armedDeploy) { armDeploy(false); return; }
+    if (armedClear) { armClear(false); return; }
   }
   if (k === 'q') { useAbility(); return; }
   if (k === 'r' && selectedArmy) {
@@ -2021,6 +2208,10 @@ function renderPanel() {
   const wallText = `${wallCost}g per tile`;
   if (wallNote.textContent !== wallText) wallNote.textContent = wallText;
 
+  const clearNote = document.getElementById('clear-cost');
+  const clearText = `${priceFor(terrainClearCost)}g per tile`;
+  if (clearNote.textContent !== clearText) clearNote.textContent = clearText;
+
   const atLimit = me.buildingsUsed >= me.buildLimit;
   const buildMenu = document.getElementById('build-menu');
   document.querySelectorAll('[data-price]').forEach(el => {
@@ -2043,8 +2234,9 @@ function renderPanel() {
   if (costNote.textContent !== costText) costNote.textContent = costText;
   costNote.classList.toggle('hidden', !costText);
 
-  syncSection(buildMenu, wallMode ? 'wall' : (armedBuild || (atLimit ? 'full' : 'idle')),
-    wallMode ? '<div class="sub">Click-drag across your border to lay a wall. Click the button again to exit.</div>'
+  syncSection(buildMenu, armedClear ? 'clear' : wallMode ? 'wall' : (armedBuild || (atLimit ? 'full' : 'idle')),
+    armedClear ? '<div class="sub">Click a tile of rock or water inside your border to buy it as open ground.</div>'
+      : wallMode ? '<div class="sub">Click-drag across your border to lay a wall. Click the button again to exit.</div>'
       : armedBuild ? `<div class="sub">Carrying a ${buildingTypes[armedBuild].name} — drop it inside your border, or press Escape.</div>`
         : atLimit ? '<div class="sub">No room for another building — upgrade the town center. Walls do not count against the limit.</div>'
           : '<div class="sub">Drag a building onto your ground, or use the Wall Tool to drag a wall.</div>');
@@ -2343,6 +2535,13 @@ function onState(msg) {
   trackArmies(msg);
   trackBuildings(msg);
   if (msg.events) for (const e of msg.events) if (e.playerId === myId) log(e.text);
+  // Ground just uncovered. Only ever new tiles, so this is a handful even while
+  // an army is crossing open country.
+  if (msg.explored && msg.explored.length && explored) {
+    for (const i of msg.explored) explored[i] = 1;
+    fogDirty = true;
+  }
+
   // A spell reshaped the ground: patch the copy of the map this client was
   // handed at init, then repaint the prerendered layer.
   if (msg.terrainEdits && msg.terrainEdits.length && terrain) {
