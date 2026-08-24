@@ -81,6 +81,11 @@
          work in, so it sits in the corner of the map instead of taking a
          fifth of the side panel and pushing the rest below the fold. -->
     <div id="log" class="frame frame-panel"></div>
+    <!-- One pixel a tile, so the canvas is the map's own dimensions and
+         nothing is resampled. Click or drag it to move the camera. -->
+    <div id="minimap-wrap" class="frame frame-panel">
+      <canvas id="minimap" width="240" height="160"></canvas>
+    </div>
     <!-- The troop roster lives over the map rather than in the panel: it is
          what you look at while deciding where to click, so it belongs where
          you are already looking. -->
@@ -135,6 +140,18 @@
     <h1>GAME LOBBY</h1>
     <p class="lobby-sub">Share this code with your friends.</p>
     <div id="lobby-code">————</div>
+    <div class="frame frame-panel lobby-box">
+      <h2>Map <span id="lobby-map-name" class="sub"></span></h2>
+      <canvas id="lobby-map-preview" width="192" height="128"></canvas>
+      <div id="lobby-map-blurb" class="sub"></div>
+      <div class="sub map-sample-note">A map this one makes &mdash; every match generates a fresh one.</div>
+      <div id="lobby-maps"></div>
+    </div>
+    <div class="frame frame-panel lobby-box">
+      <h2>Sides</h2>
+      <div id="lobby-teams"></div>
+      <div id="lobby-team-mine"></div>
+    </div>
     <div class="frame frame-panel lobby-box">
       <h2>Players <span id="lobby-count" class="sub"></span></h2>
       <div id="lobby-players"></div>

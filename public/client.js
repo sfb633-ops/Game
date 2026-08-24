@@ -28,6 +28,13 @@ let armedSpell = null;     // card id waiting for a map click to aim it
 let abilityDefs = null;    // race -> ability definition, straight from init
 let inLobby = false;       // held on the lobby screen, waiting for the host
 let lobbyHostId = null;    // who may press Start — the server decides, not us
+let mapDefs = null;        // the catalogue, straight from init
+let lobbyMapId = null;     // which one this room is on
+let mapArt = null;         // one sampled thumbnail per map, straight from init
+let teamSeatArt = null;    // where each side sits, per team count
+let lobbyTeams = 0;        // 0 is a free-for-all; otherwise how many sides
+let lobbySeatsPerTeam = 0; // how many empires one side holds
+let maxTeams = 4;
 let armedAbility = false;  // an aimed race ability waiting for its map click
 let mapCfg = null, terrain = null, buildCfg = null;
 let buildingTypes = null, unitTypes = null, castleCfg = null;
@@ -62,10 +69,18 @@ const keysDown = {};         // held keys for continuous WASD/arrow panning
 let lastFrame = 0;           // timestamp of previous animation frame
 let clock = 0;               // seconds since load; drives sprite animation
 const PAN_SPEED = 700;       // camera pan speed in world px/sec
-// Whole-number zoom steps only: pixel art scaled by a fraction gets uneven
-// pixel sizes, which is exactly the thing this art pass is trying to avoid.
-const ZOOM_STEPS = [1, 2, 3];
-let zoomStep = 0;
+// Whole ratios only, in both directions. A fraction like 0.6 gives pixel art
+// uneven pixel sizes, which is the thing the art pass exists to avoid — but an
+// exact half or quarter does not: every 2x2 or 4x4 block of source pixels
+// becomes one, uniformly, which is as even as magnifying by three.
+//
+// The two steps below 1 are why this list grew. At 1:1 a full-screen window
+// shows about 49 tiles of a 240-wide map, which is a fifth of it; a half shows
+// 99 and a quarter shows nearly all of it. The minimap answers "where is
+// everything", and these answer "let me actually look at it".
+const ZOOM_STEPS = [0.25, 0.5, 1, 2, 3];
+const DEFAULT_ZOOM_STEP = ZOOM_STEPS.indexOf(1);
+let zoomStep = DEFAULT_ZOOM_STEP;
 let zoom = ZOOM_STEPS[zoomStep];
 let wallLast = null;       // { x, y } last tile visited during the drag
 let hoverTile = null;      // tile under the cursor, when it's one I could build on
@@ -107,6 +122,10 @@ const STORE = {
   // What it takes to walk back into the same empire after a dropped
   // connection: which server, which room, and the token that proves it.
   session: 'empire.session',
+  // The map the host picked last time, so a rematch does not always start on
+  // whichever one happens to be the default.
+  map: 'empire.map',
+  teams: 'empire.teams',
 };
 const remembered = (key, fallback) => {
   try { const v = localStorage.getItem(key); return v === null ? fallback : v; } catch { return fallback; }
@@ -315,6 +334,12 @@ function abandonSession(reason) {
   myId = null;
   myRoom = null;
   selectedArmy = null; armedSpell = null; armedAbility = false; armedBuild = null; armedDeploy = false;
+  // The tools too, or the next match opens with the wall tool still on and a
+  // half-drawn drag from the last one still in memory.
+  armedClear = false;
+  if (wallMode) toggleWallMode(false);
+  wallDrag = null; wallLast = null;
+  releaseHeldKeys();
   showLobby(false);
   lobbyHostId = null;
   document.getElementById('game-ui').classList.add('hidden');
@@ -366,7 +391,9 @@ const playerName = () => nameInput.value.trim().slice(0, 16);
 
 document.getElementById('host-btn').addEventListener('click', () => {
   if (!myRace || !playerName()) return;
-  withSocket(() => send({ type: 'create', playerName: playerName(), race: myRace, roomName: playerName() + "'s game" }));
+  withSocket(() => send({ type: 'create', playerName: playerName(), race: myRace,
+    roomName: playerName() + "'s game", map: remembered(STORE.map, '') || undefined,
+    teams: Number(remembered(STORE.teams, '0')) || 0 }));
 });
 
 document.getElementById('join-btn').addEventListener('click', () => joinRoom(codeInput.value));
@@ -397,6 +424,7 @@ function renderRoomList(list) {
       // late into a map somebody else has had ten minutes in.
       (room.started ? '<span class="room-live">IN PLAY</span>'
                     : '<span class="room-open">LOBBY</span>') +
+      (room.map ? '<span class="room-map">' + escapeText(room.map) + '</span>' : '') +
       '<span class="sub">' + room.players + 'p</span>';
     const btn = document.createElement('button');
     btn.className = 'btn btn-sm';
@@ -446,11 +474,21 @@ function onInit(msg) {
   abilityDefs = msg.raceAbilities || null;
   terrainClearCost = msg.terrainClearCost || 0;
   visionCfg = msg.vision || null;
+  mapDefs = msg.maps || null;
+  lobbyMapId = msg.mapId || null;
+  // Only sent with a lobby init; a client resuming into a running match keeps
+  // whatever it already had rather than being handed null.
+  if (msg.mapPreviews) mapArt = msg.mapPreviews;
+  if (msg.teamSeats) teamSeatArt = msg.teamSeats;
+  if (msg.maxTeams) maxTeams = msg.maxTeams;
+  if (msg.teams !== undefined) lobbyTeams = msg.teams || 0;
+  if (msg.seatsPerTeam) lobbySeatsPerTeam = msg.seatsPerTeam;
   // The whole of what this empire had already uncovered. A reconnecting client
   // missed every delta while it was away, so init carries the lot.
   explored = new Uint8Array(msg.map.width * msg.map.height);
   if (msg.explored) for (const i of msg.explored) explored[i] = 1;
   fogCanvas = null; fogLayer = null; fogDirty = true;
+  miniBase = null; miniBuiltAt = -1e9;      // new world, new minimap
   draftCfg = msg.cardDraft;
   outpostCfg = msg.outpost;
   myRoom = msg.room || null;
@@ -504,6 +542,7 @@ function onInit(msg) {
   window.addEventListener('mouseup', onCanvasMouseUp);
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
+  bindMinimap();
   requestAnimationFrame(frame); // continuous render + camera pan loop
   document.getElementById('wall-tool-btn').addEventListener('click', () => toggleWallMode(!wallMode));
   document.getElementById('clear-tool-btn').addEventListener('click', () => armClear(!armedClear));
@@ -526,6 +565,17 @@ function showLobby(on) {
 function onLobbyState(msg) {
   if (msg.room) myRoom = msg.room;
   lobbyHostId = msg.hostId || null;
+  if (msg.mapId) {
+    lobbyMapId = msg.mapId;
+    if (lobbyHostId === myId) remember(STORE.map, lobbyMapId);
+  }
+  if (msg.teams !== undefined) {
+    lobbyTeams = msg.teams || 0;
+    lobbySeatsPerTeam = msg.seatsPerTeam || 0;
+    if (lobbyHostId === myId) remember(STORE.teams, String(lobbyTeams));
+  }
+  renderTeamPicker(msg.players);
+  renderMapPicker();     // seats move when the sides do, so this comes second
   document.getElementById('lobby-code').textContent = myRoom ? myRoom.code : '————';
   document.getElementById('lobby-count').textContent =
     `${msg.players.length}/${mapCfg ? mapCfg.maxPlayers : '?'}`;
@@ -538,6 +588,9 @@ function onLobbyState(msg) {
     row.className = 'lobby-player' + (p.away ? ' is-away' : '');
     row.innerHTML =
       `<span class="lobby-name">${escapeText(p.name)}${p.id === myId ? ' (you)' : ''}</span>` +
+      (p.team != null
+        ? `<span class="lobby-team" style="color:${teamColour(p.team)}">${escapeText(teamName(p.team))}</span>`
+        : '') +
       `<span class="lobby-race" style="color:${info ? info.color : '#fff'}">${info ? info.name : p.race}</span>` +
       (p.id === lobbyHostId ? '<span class="lobby-host">HOST</span>' : '') +
       (p.away ? '<span class="lobby-away">AWAY</span>' : '');
@@ -556,6 +609,169 @@ function onLobbyState(msg) {
   document.getElementById('lobby-hint').textContent = amHost
     ? 'Everyone drafts the moment you start, so nobody gets a head start.'
     : `Waiting for ${escapeText(hostName || 'the host')} to start the match…`;
+}
+
+// Which map the room is on, and — for the host — the choice of them. Changing it
+// regenerates the world for everybody, which is why only the host may, and why
+// it is only offered before the match starts.
+// Paint one map thumbnail: ground first, then the starting positions over it.
+// Flat colour rather than the real tilesets — this is a map at 48 cells across,
+// and building six terrain canvases to shrink them into a lobby would cost more
+// than the whole rest of the screen.
+// Rock has to be a different lightness from grass, not merely a different
+// colour: the first pair tried came out at a contrast ratio of 1.07, which put
+// The Divide's whole spine — the one feature that map exists for — within a
+// rounding error of the grass behind it. Pale stone against mid grass and deep
+// water reads at a glance and survives being shrunk to a 96px thumbnail.
+const PREVIEW_COLOUR = { '.': '#6b8a3a', '^': '#c4bdb0', '~': '#27547f' };
+
+function drawMapPreview(canvas, preview) {
+  if (!canvas || !preview) return;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  const cw = canvas.width / preview.cols, ch = canvas.height / preview.rows;
+  for (let y = 0; y < preview.rows; y++) {
+    const row = preview.tiles[y] || '';
+    for (let x = 0; x < preview.cols; x++) {
+      ctx.fillStyle = PREVIEW_COLOUR[row[x]] || PREVIEW_COLOUR['.'];
+      // Ceil the size and floor the corner: at two pixels a cell, rounding both
+      // the same way leaves seams of background between the cells.
+      ctx.fillRect(Math.floor(x * cw), Math.floor(y * ch), Math.ceil(cw), Math.ceil(ch));
+    }
+  }
+  // Where empires start. A ring rather than a dot, so it reads against grass
+  // and water alike, and because the layout is the thing worth looking at —
+  // two facing columns and a ring around the edge are the same terrain numbers
+  // and completely different games.
+  // With sides on, the seats drawn are the team layout, not the map's own —
+  // the team layout overrides it, so showing the map's would be showing
+  // somewhere nobody is going to start. Each ring takes its side's colour, so
+  // "two teams, left and right" is visible before anyone commits to it.
+  const teamed = lobbyTeams && teamSeatArt && teamSeatArt[lobbyTeams];
+  const seats = teamed || preview.seats || [];
+  const r = Math.max(1.5, canvas.width / 48);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = '#2b1f12';
+  for (const seat of seats) {
+    ctx.fillStyle = teamed ? teamColour(seat.group) : '#ffd76a';
+    ctx.beginPath();
+    ctx.arc(seat.x * canvas.width, seat.y * canvas.height, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+// Two controls in one box: how many sides there are, which only the host sets
+// because it rebuilds the world, and which one you are on, which anybody may
+// change because it moves only their own keep.
+function renderTeamPicker(players) {
+  const holder = document.getElementById('lobby-teams');
+  const mine = document.getElementById('lobby-team-mine');
+  if (!holder || !mine) return;
+  const amHost = lobbyHostId === myId;
+
+  const counts = [];
+  for (let t = 0; t < lobbyTeams; t++) {
+    counts.push((players || []).filter(pl => pl.team === t).length);
+  }
+
+  const meRow = (players || []).find(pl => pl.id === myId) || {};
+  const sig = [amHost, lobbyTeams, counts.join(','), meRow.team].join('|');
+  if (holder.dataset.sig === sig) return;
+  holder.dataset.sig = sig;
+
+  const options = [0, 2, 3, 4].filter(n => n <= maxTeams || n === 0);
+  holder.innerHTML = amHost
+    ? options.map(n =>
+        `<button class="btn btn-sm team-choice${n === lobbyTeams ? ' active' : ''}" data-teams="${n}">` +
+        `${n === 0 ? 'Free-for-all' : n + ' teams'}</button>`).join('')
+    : `<div class="sub">${lobbyTeams ? lobbyTeams + ' teams — the host sets this.' : 'Free-for-all.'}</div>`;
+  if (amHost) {
+    holder.querySelectorAll('[data-teams]').forEach(btn =>
+      btn.addEventListener('click', () => send({ type: 'setTeams', teams: Number(btn.dataset.teams) })));
+  }
+
+  if (!lobbyTeams) { mine.innerHTML = ''; return; }
+  mine.innerHTML = '<div class="sub">Your side — teammates start next to you.</div>' +
+    counts.map((n, t) => {
+      const full = n >= lobbySeatsPerTeam && meRow.team !== t;
+      return `<button class="btn btn-sm team-pick${meRow.team === t ? ' active' : ''}" data-team="${t}"` +
+        `${full ? ' disabled' : ''} style="border-color:${teamColour(t)}">` +
+        `<span style="color:${teamColour(t)}">${escapeText(teamName(t))}</span>` +
+        `<span class="sub"> ${n}/${lobbySeatsPerTeam}</span></button>`;
+    }).join('');
+  mine.querySelectorAll('[data-team]').forEach(btn =>
+    btn.addEventListener('click', () => send({ type: 'setTeam', team: Number(btn.dataset.team) })));
+}
+
+function renderMapPicker() {
+  const holder = document.getElementById('lobby-maps');
+  const nameEl = document.getElementById('lobby-map-name');
+  const blurbEl = document.getElementById('lobby-map-blurb');
+  const bigEl = document.getElementById('lobby-map-preview');
+  // Clearing the holder has to clear its signature too, or the picker that
+  // follows matches a signature describing markup that is no longer there.
+  if (!mapDefs || !lobbyMapId) { holder.innerHTML = ''; holder.dataset.sig = ''; return; }
+  const current = mapDefs[lobbyMapId] || {};
+  nameEl.textContent = current.name || lobbyMapId;
+  blurbEl.textContent = current.blurb || '';
+  // Redrawn only when the choice actually moves: this is 1536 cells and the
+  // roster it rides along with is broadcast on every arrival and departure.
+  const previewSig = lobbyMapId + '|' + lobbyTeams;
+  if (bigEl.dataset.map !== previewSig) {
+    bigEl.dataset.map = previewSig;
+    drawMapPreview(bigEl, mapArt && mapArt[lobbyMapId]);
+  }
+
+  // The signature covers who is looking as well as what is selected. Writing
+  // the guest markup without recording it left a stale 'host|<map>' behind, so
+  // a host who lost the chair and won it back on the same map matched it and
+  // returned early — leaving the guests' line of text where the picker goes.
+  const amHost = lobbyHostId === myId;
+  const sig = (amHost ? 'host|' : 'guest|') + lobbyMapId + '|' + lobbyTeams;
+  if (holder.dataset.sig === sig) return;      // only the selection moved
+  holder.dataset.sig = sig;
+  if (!amHost) {
+    // Everyone else just reads what was chosen; the name and blurb above say it.
+    holder.innerHTML = '<div class="sub">The host chooses the map.</div>';
+    return;
+  }
+  holder.innerHTML = Object.entries(mapDefs).map(([id, def]) =>
+    `<button class="btn btn-sm map-choice${id === lobbyMapId ? ' active' : ''}" data-map="${id}"` +
+    ` title="${escapeText(def.blurb || '')}">` +
+    `<canvas class="map-thumb" width="96" height="64"></canvas>` +
+    `<span class="map-choice-name">${escapeText(def.name || id)}</span></button>`).join('');
+  holder.querySelectorAll('[data-map]').forEach(btn => {
+    drawMapPreview(btn.querySelector('canvas'), mapArt && mapArt[btn.dataset.map]);
+    btn.addEventListener('click', () => send({ type: 'setMap', map: btn.dataset.map }));
+  });
+}
+
+// Sides are named by colour because that is how people will refer to them out
+// loud. The colours are deliberately not the per-player palette: a player keeps
+// their own colour on the map, and the team is a second, coarser thing shown
+// beside it, so the two must not be confusable.
+const TEAM_INFO = [
+  { name: 'Crimson', colour: '#e0564a' },
+  { name: 'Azure',   colour: '#4a9ae0' },
+  { name: 'Verdant', colour: '#5fbf6a' },
+  { name: 'Amber',   colour: '#e0b04a' },
+];
+const teamName = (t) => (TEAM_INFO[t] || {}).name || `Team ${(t | 0) + 1}`;
+const teamColour = (t) => (TEAM_INFO[t] || {}).colour || '#b8a687';
+
+// Whose side am I on? Used to keep an order from going out at a friend, and to
+// mark them on the roster. In a free-for-all everybody is on their own.
+function myTeam() {
+  const me = myPlayer();
+  return me && me.team != null ? me.team : null;
+}
+function isAlly(playerId) {
+  if (!latestState || !latestState.teamCount || playerId === myId) return playerId === myId;
+  const mine = myTeam();
+  if (mine == null) return false;
+  const them = latestState.players.find(pl => pl.id === playerId);
+  return !!them && them.team === mine;
 }
 
 // Names come from other players, so they are escaped before they go anywhere
@@ -637,10 +853,49 @@ function markTakenCards(me) {
 // enemy. Arm the staged troops, click the ground, and they march out and hold
 // it — inside your own border, at an outpost you have taken, or out in the open
 // where you want a group standing.
+// Only one thing may be armed at a time, and this is the only place that says
+// so. It used to be wired up pairwise — armSpell put down the ability and the
+// carried building, armDeploy put down the spell, the wall tool put down only
+// the clear tool — and every hole in that matrix was a click that went
+// somewhere the player was not looking, because onCanvasClick reads the armed
+// tools in a fixed order and the first one set wins.
+//
+// The wall tool was the bad one. It owns the canvas outright (onCanvasClick
+// returns immediately while it is on), so a spell or an ability armed
+// underneath it could not be cast at all: the cursor changed, the card lit up,
+// and clicking the map drew a wall.
+//
+// `keep` is the tool being picked up; everything else is put down.
+function disarmTools(keep) {
+  if (keep !== 'build' && armedBuild) {
+    armedBuild = null;
+    document.querySelectorAll('.build-item').forEach(el => el.classList.remove('armed'));
+  }
+  if (keep !== 'wall' && wallMode) {
+    wallMode = false;
+    wallDrag = null; wallLast = null;
+    document.getElementById('wall-tool-btn').classList.remove('active');
+  }
+  if (keep !== 'clear' && armedClear) {
+    armedClear = false;
+    document.getElementById('clear-tool-btn').classList.remove('active');
+  }
+  if (keep !== 'deploy') armedDeploy = false;
+  if (keep !== 'spell') armedSpell = null;
+  if (keep !== 'ability') armedAbility = false;
+}
+
+// The pointer says which tool is in hand. Derived rather than assigned at each
+// call site, so putting a tool down can never leave the previous one's cursor
+// behind.
+function updateCursor() {
+  canvas.style.cursor = armedBuild ? 'copy' : (wallMode ? 'cell' : 'crosshair');
+}
+
 function armDeploy(on) {
   armedDeploy = !!on && !!stagedUnits();
-  if (armedDeploy) { armedSpell = null; armedAbility = false; armBuild(null); }
-  canvas.style.cursor = armedDeploy ? 'crosshair' : (wallMode ? 'cell' : 'crosshair');
+  if (armedDeploy) disarmTools('deploy');
+  updateCursor();
   render(); renderPanel();
 }
 
@@ -714,8 +969,8 @@ function useAbility() {
 
 function armAbility(on) {
   armedAbility = !!on;
-  if (armedAbility) { armedSpell = null; armBuild(null); }
-  canvas.style.cursor = armedAbility ? 'crosshair' : (wallMode ? 'cell' : 'crosshair');
+  if (armedAbility) disarmTools('ability');
+  updateCursor();
   renderPanel();
 }
 
@@ -723,8 +978,8 @@ function armAbility(on) {
 
 function armSpell(id) {
   armedSpell = (id && armedSpell !== id) ? id : null;
-  if (armedSpell) { armedAbility = false; armBuild(null); }
-  canvas.style.cursor = armedSpell ? 'crosshair' : (wallMode ? 'cell' : 'crosshair');
+  if (armedSpell) disarmTools('spell');
+  updateCursor();
   renderPanel();
 }
 
@@ -792,24 +1047,18 @@ function renderCards(me) {
 // what it is aimed at is terrain and not a thing you are carrying.
 function armClear(on) {
   armedClear = !!on;
-  if (armedClear) {
-    armedSpell = null; armedAbility = false; armedDeploy = false;
-    armBuild(null);
-    if (wallMode) toggleWallMode(false);
-  }
+  if (armedClear) disarmTools('clear');
   document.getElementById('clear-tool-btn').classList.toggle('active', armedClear);
-  canvas.style.cursor = armedClear ? 'crosshair' : (wallMode ? 'cell' : 'crosshair');
+  updateCursor();
   render(); renderPanel();
 }
 
 function toggleWallMode(on) {
-  wallMode = on;
-  if (wallMode && armedClear) armClear(false);
+  wallMode = !!on;
+  if (wallMode) disarmTools('wall');
   document.getElementById('wall-tool-btn').classList.toggle('active', wallMode);
   wallDrag = null; wallLast = null;
-  if (wallMode) armedBuild = null;
-  document.querySelectorAll('.build-item').forEach(el => el.classList.remove('armed'));
-  canvas.style.cursor = wallMode ? 'cell' : 'crosshair';
+  updateCursor();
   render(); renderPanel();
 }
 
@@ -850,7 +1099,7 @@ function centerCameraOn(tileX, tileY) {
 }
 
 // Mouse-wheel zoom, anchored on the tile under the cursor. Steps between whole
-// magnifications so every sprite pixel stays a clean square.
+// ratios so every sprite pixel stays a clean square, magnified or reduced.
 function onWheel(e) {
   e.preventDefault();
   const next = Math.max(0, Math.min(ZOOM_STEPS.length - 1, zoomStep + (e.deltaY < 0 ? 1 : -1)));
@@ -1319,6 +1568,8 @@ function render() {
   drawFog(ts);
 
   arrows = arrows.filter(a => drawFlyingArrow(a));
+
+  drawMinimap();
 }
 
 // A shot in flight, in world pixels — it starts up in the gallery and ends on
@@ -1717,9 +1968,7 @@ function onCanvasMouseUp() {
   if (!wallMode || !wallDrag) return;
   const tiles = [...wallDrag].map(k => { const [a, b] = k.split(','); return { x: +a, y: +b }; });
   wallDrag = null; wallLast = null;
-  if (tiles.length && ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'buildWall', tiles }));
-  }
+  if (tiles.length) send({ type: 'buildWall', tiles });
   render();
 }
 
@@ -1733,14 +1982,14 @@ function nearestTarget(fx, fy, maxDist = 1.6) {
     if (d < bestDist) { bestDist = d; best = { type: 'camp', id: camp.id }; }
   }
   for (const p of latestState.players) {
-    if (p.id === myId || !p.alive) continue;
+    if (!p.alive || isAlly(p.id)) continue;      // never aim an order at a friend
     const d = Math.hypot(p.baseX - fx, p.baseY - fy);
     if (d < bestDist) { bestDist = d; best = { type: 'player', id: p.id }; }
   }
   // Somebody else's troops in the field. Checked last so a keep or a camp with
   // an army parked on it is still the thing you meant to attack.
   for (const a of latestState.armies) {
-    if (a.ownerId === myId) continue;
+    if (isAlly(a.ownerId)) continue;             // and not at their troops either
     const d = Math.hypot(a.x - fx, a.y - fy);
     if (d < bestDist) { bestDist = d; best = { type: 'army', id: a.id }; }
   }
@@ -1873,16 +2122,16 @@ function onCanvasRightClick(e) {
   if (selectedArmy && latestState.armies.some(a => a.id === selectedArmy && a.ownerId === myId)) {
     const friend = nearestMyArmy(fx, fy, 0.9, selectedArmy);
     if (friend) {
-      ws.send(JSON.stringify({ type: 'mergeArmy', armyId: selectedArmy, targetId: friend }));
+      send({ type: 'mergeArmy', armyId: selectedArmy, targetId: friend });
       // Follow the survivor: the group being commanded is the one that ceases
       // to exist, and a selection pointing at nothing is a dead panel.
       selectedArmy = friend;
       render(); renderPanel();
       return;
     }
-    if (tgt) ws.send(JSON.stringify({ type: 'attackArmy', armyId: selectedArmy, targetType: tgt.type, targetId: tgt.id }));
+    if (tgt) send({ type: 'attackArmy', armyId: selectedArmy, targetType: tgt.type, targetId: tgt.id });
     else if (!isMarchable(ix, iy)) log('Troops cannot march onto water or rock.');
-    else ws.send(JSON.stringify({ type: 'moveArmy', armyId: selectedArmy, x: ix, y: iy }));
+    else send({ type: 'moveArmy', armyId: selectedArmy, x: ix, y: iy });
     return;
   }
 
@@ -1898,6 +2147,10 @@ function onCanvasRightClick(e) {
 
 function onKeyDown(e) {
   if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+  // Every shortcut here is a bare key, so a chord belongs to the browser: Ctrl+R
+  // used to recall the selected group on its way to reloading the page, and
+  // Ctrl/Cmd+A, +S and +D were eaten by the pan keys' preventDefault.
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key.toLowerCase();
   if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
     keysDown[k] = true;
@@ -1914,13 +2167,167 @@ function onKeyDown(e) {
     if (armedClear) { armClear(false); return; }
   }
   if (k === 'q') { useAbility(); return; }
-  if (k === 'r' && selectedArmy) {
-    ws.send(JSON.stringify({ type: 'recallArmy', armyId: selectedArmy }));
-  }
+  if (k === 'r' && selectedArmy) send({ type: 'recallArmy', armyId: selectedArmy });
 }
 
 function onKeyUp(e) {
   keysDown[e.key.toLowerCase()] = false;
+}
+
+// Focus can leave mid-pan — alt-tab, a click on another window — and the keyup
+// then lands somewhere else entirely, leaving the camera sliding until the key
+// is pressed and released again. Losing the window means losing every held key.
+function releaseHeldKeys() {
+  for (const k in keysDown) keysDown[k] = false;
+}
+window.addEventListener('blur', releaseHeldKeys);
+document.addEventListener('visibilitychange', () => { if (document.hidden) releaseHeldKeys(); });
+
+// ---------- Minimap ----------
+//
+// One canvas pixel per tile, which is the map's own 240x160, so nothing is
+// resampled and the whole world fits in the corner at 1:1.
+//
+// It shows what this empire knows and not one tile more. That needs saying,
+// because the client is *sent* every player's buildings whether or not it can
+// see them — the main map hides them by drawing the fog veil on top, which is a
+// covering and not a filter. So anything drawn here has to be checked against
+// `explored` itself, or the minimap quietly becomes a maphack. Groups are the
+// one exception: they are already filtered server-side by visibleArmiesFor.
+let miniBase = null, miniBaseCtx = null, miniBaseData = null;
+let miniBuiltAt = -1e9;        // clock reading at the last base rebuild
+
+const MINI_UNSEEN = [6, 5, 9];
+const MINI_TERRAIN = [[107, 138, 58], [196, 189, 176], [39, 84, 127]];  // land, rock, water
+// Ground and stonework barely move; groups move constantly. Splitting the two
+// apart at four rebuilds a second keeps the expensive half off the frame budget.
+const MINI_REBUILD_SEC = 0.25;
+
+function hexToRgb(hex) {
+  return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+}
+
+// Terrain, borders and buildings — everything worth redrawing only now and
+// then — baked into an offscreen canvas at one pixel a tile.
+function rebuildMinimapBase() {
+  if (!terrain || !mapCfg || !explored || !latestState) return;
+  const w = mapCfg.width, h = mapCfg.height;
+  if (!miniBase) {
+    miniBase = document.createElement('canvas');
+    miniBase.width = w; miniBase.height = h;
+    miniBaseCtx = miniBase.getContext('2d');
+    miniBaseData = miniBaseCtx.createImageData(w, h);
+    for (let i = 0; i < w * h; i++) miniBaseData.data[i * 4 + 3] = 255;
+  }
+  const px = miniBaseData.data;
+  for (let y = 0; y < h; y++) {
+    const row = terrain[y];
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x, o = i * 4;
+      const c = explored[i] ? (MINI_TERRAIN[row[x]] || MINI_TERRAIN[0]) : MINI_UNSEEN;
+      px[o] = c[0]; px[o + 1] = c[1]; px[o + 2] = c[2];
+    }
+  }
+  // Borders, as a wash of the owner's colour over ground you have actually
+  // seen. Walked per tile over the discs rather than stroked as a circle,
+  // because the explored test is per tile and an arc drawn by the canvas cannot
+  // be told to stop at the edge of the fog.
+  for (const pl of latestState.players) {
+    if (!pl.alive) continue;
+    const [r, g, b] = hexToRgb(colorForPlayer(pl.id));
+    const discs = [{ x: pl.baseX, y: pl.baseY, r: borderRadius(pl) }];
+    for (const o of pl.outposts || []) discs.push({ x: o.x, y: o.y, r: outpostRadius() });
+    for (const disc of discs) {
+      const y0 = Math.max(0, Math.floor(disc.y - disc.r)), y1 = Math.min(h - 1, Math.ceil(disc.y + disc.r));
+      const x0 = Math.max(0, Math.floor(disc.x - disc.r)), x1 = Math.min(w - 1, Math.ceil(disc.x + disc.r));
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          const i = y * w + x;
+          if (!explored[i]) continue;
+          if (Math.hypot(x - disc.x, y - disc.y) > disc.r) continue;
+          const o = i * 4;
+          px[o] = (px[o] + r) >> 1; px[o + 1] = (px[o + 1] + g) >> 1; px[o + 2] = (px[o + 2] + b) >> 1;
+        }
+      }
+    }
+  }
+  miniBaseCtx.putImageData(miniBaseData, 0, 0);
+
+  // Buildings over the wash, in solid colour, so a keep reads against its own
+  // border. Every one is checked against explored — see the note at the top.
+  for (const pl of latestState.players) {
+    if (!pl.alive || !pl.buildings) continue;
+    miniBaseCtx.fillStyle = colorForPlayer(pl.id);
+    for (const bd of pl.buildings) {
+      if (!isExplored(bd.x, bd.y)) continue;
+      const big = bd.type === 'castle';
+      miniBaseCtx.fillRect(bd.x - (big ? 1 : 0), bd.y - (big ? 1 : 0), big ? 3 : 1, big ? 3 : 1);
+    }
+  }
+  miniBaseCtx.fillStyle = '#d8c08a';
+  for (const camp of latestState.aiCamps || []) {
+    if (camp.defeated || !isExplored(camp.x, camp.y)) continue;
+    miniBaseCtx.fillRect(camp.x - 1, camp.y - 1, 2, 2);
+  }
+  miniBuiltAt = clock;
+}
+
+function drawMinimap() {
+  const cv = document.getElementById('minimap');
+  if (!cv || !latestState || !mapCfg || !terrain || !explored) return;
+  if (clock - miniBuiltAt > MINI_REBUILD_SEC) rebuildMinimapBase();
+  if (!miniBase) return;
+  const g = cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.drawImage(miniBase, 0, 0);
+
+  // Groups every frame, because they are the thing you are watching for.
+  for (const army of latestState.armies) {
+    g.fillStyle = colorForPlayer(army.ownerId);
+    g.fillRect(Math.round(army.x) - 1, Math.round(army.y) - 1, 2, 2);
+  }
+  // The selected group gets a ring, so "where did I leave them" has an answer
+  // that does not involve hunting across the map.
+  const sel = selectedArmy && latestState.armies.find(a => a.id === selectedArmy);
+  if (sel) {
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 1;
+    g.strokeRect(Math.round(sel.x) - 2.5, Math.round(sel.y) - 2.5, 5, 5);
+  }
+
+  // Where the camera is looking, drawn last and left open so it frames the map
+  // rather than covering it.
+  const ts = mapCfg.tileSize;
+  const view = viewWorld();
+  g.strokeStyle = 'rgba(255, 215, 106, 0.9)';
+  g.lineWidth = 1;
+  g.strokeRect(Math.round(camera.x / ts) + 0.5, Math.round(camera.y / ts) + 0.5,
+    Math.max(2, Math.round(view.vw / ts) - 1), Math.max(2, Math.round(view.vh / ts) - 1));
+}
+
+// Clicking or dragging it moves the camera. Pointer capture, so a drag that
+// runs off the edge keeps steering instead of stopping dead at the border.
+function bindMinimap() {
+  const cv = document.getElementById('minimap');
+  if (!cv) return;
+  const jump = (e) => {
+    const rect = cv.getBoundingClientRect();
+    centerCameraOn((e.clientX - rect.left) / rect.width * mapCfg.width,
+                   (e.clientY - rect.top) / rect.height * mapCfg.height);
+  };
+  cv.addEventListener('pointerdown', (e) => {
+    if (!mapCfg) return;
+    e.preventDefault();
+    cv.setPointerCapture(e.pointerId);
+    jump(e);
+  });
+  cv.addEventListener('pointermove', (e) => {
+    if (mapCfg && cv.hasPointerCapture(e.pointerId)) jump(e);
+  });
+  cv.addEventListener('pointerup', (e) => {
+    if (cv.hasPointerCapture(e.pointerId)) cv.releasePointerCapture(e.pointerId);
+  });
 }
 
 // ---------- Side panel ----------
@@ -2000,16 +2407,11 @@ function buildPalette() {
 }
 
 function armBuild(type) {
-  if (armedBuild === type) { armedBuild = null; }
-  else {
-    armedBuild = type;
-    if (wallMode) toggleWallMode(false);
-    armedSpell = null;
-    armedAbility = false;
-  }
+  armedBuild = armedBuild === type ? null : type;
+  if (armedBuild) disarmTools('build');
   document.querySelectorAll('.build-item').forEach(el =>
     el.classList.toggle('armed', el.dataset.build === armedBuild));
-  canvas.style.cursor = armedBuild ? 'copy' : (wallMode ? 'cell' : 'crosshair');
+  updateCursor();
   renderPanel();
 }
 
@@ -2145,8 +2547,8 @@ function updateDeployButton() {
   const btn = document.getElementById('deploy-btn');
   const staged = !!stagedUnits();
   btn.disabled = !staged;
+  if (armedDeploy && !staged) { armedDeploy = false; updateCursor(); }  // emptied under it
   btn.classList.toggle('armed', armedDeploy);
-  if (armedDeploy && !staged) armedDeploy = false;   // the row was emptied under it
   document.getElementById('deploy-hint').textContent = armedDeploy
     ? 'Click inside your own territory to put them there.'
     : staged ? 'Press Deploy, then click where they should go.'
@@ -2313,8 +2715,12 @@ function renderPanel() {
     // Another player's name, going into innerHTML: escaped, like every other
     // piece of text somebody else chose. cleanText on the server strips control
     // characters but has no reason to care about angle brackets.
-    return `<div class="row"><span class="label" style="color:${colorForPlayer(pl.id)}">${escapeText(pl.name)}${pl.id === myId ? ' (you)' : ''}</span>` +
-      `<span class="sub">${state}</span></div>`;
+    const side = pl.team != null
+      ? `<span class="empire-team" style="color:${teamColour(pl.team)}">${escapeText(teamName(pl.team))}</span>`
+      : '';
+    const tag = pl.id === myId ? ' (you)' : (isAlly(pl.id) ? ' (ally)' : '');
+    return `<div class="row"><span class="label" style="color:${colorForPlayer(pl.id)}">${escapeText(pl.name)}${tag}</span>` +
+      side + `<span class="sub">${state}</span></div>`;
   }).join('');
   syncSection(playerList, playerHtml, playerHtml);
 
@@ -2382,11 +2788,19 @@ function renderPanel() {
 
   if (latestState.gameOver) {
     const banner = document.getElementById('game-over-banner');
-    const won = latestState.winnerId === myId;
+    // In a team game the side wins, not the player: an empire that was knocked
+    // out early still won if its partners finished the job, and saying
+    // "DEFEATED" to them would be a lie.
+    const side = latestState.winnerTeam;
+    const won = latestState.teamCount && side != null
+      ? side === myTeam()
+      : latestState.winnerId === myId;
     document.getElementById('game-over-text').textContent = won ? 'VICTORY' : 'DEFEATED';
-    document.getElementById('game-over-sub').textContent = won
-      ? 'The map is yours.'
-      : `${playerNameOf(latestState.winnerId)} holds the map.`;
+    document.getElementById('game-over-sub').textContent =
+      latestState.teamCount && side != null
+        ? (won ? `${teamName(side)} holds the map.` : `${teamName(side)} holds the map.`)
+        : won ? 'The map is yours.'
+              : `${playerNameOf(latestState.winnerId)} holds the map.`;
     banner.classList.add('show');
   }
 }
@@ -2490,11 +2904,19 @@ function trackArmies(msg) {
     // exact and doesn't jitter the way sampling two broadcasts apart can; the
     // observed step is only the fallback for an army with no orders left.
     const prev = armyPrev[a.id];
-    const enRoute = a.destX != null && a.order !== 'hold' && a.order !== 'fight';
+    // 'fight' used to be excluded, because a group in a fight was standing on
+    // its target and the vector to it was zero. Groups now square up at arm's
+    // length with destX/destY still pointing at what they are hitting, so a
+    // fighting group has a real direction to face — and a group on 'hold' that
+    // is being attacked is turned to face its attacker by the server for the
+    // same reason.
+    const enRoute = a.destX != null && a.order !== 'hold';
+    const brawling = a.order === 'fight' || (a.destX != null &&
+      Math.hypot(a.destX - a.x, a.destY - a.y) > 0.2);
     let dx = 0, dy = 0;
     // An army held up at a wall faces the wall, not the keep behind it.
     if (a.breach) { dx = a.breach.x - a.x; dy = a.breach.y - a.y; }
-    else if (enRoute) { dx = a.destX - a.x; dy = a.destY - a.y; }
+    else if (enRoute || brawling) { dx = a.destX - a.x; dy = a.destY - a.y; }
     else if (prev) { dx = a.x - prev.x; dy = a.y - prev.y; }
     if (Math.abs(dx) > 0.02 || Math.abs(dy) > 0.02) {
       armyFacing[a.id] = ArtDefs.facingFrom(dx, dy, armyFacing[a.id] || 'down');

@@ -56,6 +56,24 @@ what an ability must *not* cost: a cast that raises nobody is not put on
 cooldown, and garbage coordinates never reach the distance tests — the same
 NaN hole the spells had.
 
+The maps get a block that is mostly about the thing that breaks first: every one
+of them has to seat a full twelve with opening borders clear. Beyond that the
+checks are about the seat *groups*, which exist for teams that do not exist yet —
+The Divide splits evenly into two sides, Four Corners into four, a scattered map
+gives every seat its own — and about The Divide keeping its promise: a
+two-player game starts one empire either side, the ridge crosses most of the map,
+and there are passes through it. An unknown map id has to fall back rather than
+throw, because it arrives in a client message.
+
+Squaring up is pinned from the case that went wrong: two groups dropped on the
+same tile must part to arm's length, face each other, and *stay there*. The
+stability check exists because the first working version juddered — the stance
+was wider than the distance at which a group decides its enemy has fled — so it
+measures the spread of the gap over sixty ticks rather than just its final value.
+A companion check storms a camp on three different maps, because a camp on a
+shoreline was the case where the original all-or-nothing version silently did
+nothing at all.
+
 Fog gets its own block, because most of it is about what is *not* sent: an
 empire starts able to see its own doorstep and almost nothing else, marching
 uncovers ground and the deltas add up exactly to what was learned, standing still

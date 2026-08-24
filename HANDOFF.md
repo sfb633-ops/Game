@@ -258,6 +258,86 @@ tower's tile to where the target stood at that moment. The client flies it
 across that gap; it does not chase, because chasing would mean streaming the
 shot every frame and the flight is a third of a second.
 
+### Maps
+
+Six of them in `MAPS`, each a handful of generation numbers plus a `seats`
+layout. Dimensions stay fixed across all of them: the terrain layer is handed to
+every client at init, and a map that changed size would mean rebuilding the
+prerendered ground and the fog mask for no gameplay gain.
+
+`seats` is the field that matters, because **every layout tags its seats with a
+`group`**:
+
+    scatter   anywhere they fit, each seat its own group        (The Wilds)
+    ring      evenly around the edge, each its own group        (Lakelands, Highlands, Open Field)
+    sides     two facing columns, group 0 west and 1 east       (The Divide)
+    corners   four clusters, one group per corner               (Four Corners)
+
+**Nothing reads `group` yet.** It is there because teams are coming, and the
+question a team game asks of a map is "which of these seats are neighbours" — a
+question that has to be answered when the seats are laid out, not reverse-engineered
+from coordinates afterwards. Seating teammates will mean preferring seats that
+share a group; The Divide already gives two blocks of six and Four Corners four
+blocks of three.
+
+Two details that are easy to undo by accident:
+
+- **A laid-out map is not re-sorted.** Scattered seats are sorted by distance
+  from the centre so a two-player game happens in the middle of the map. Doing
+  that to `sides` would hand out the two innermost seats first and put both
+  empires on the same side of the ridge, which is the one thing that map exists
+  to prevent — so `sides` interleaves west/east instead, and the others are left
+  in layout order.
+- **A laid-out map cannot honour `spawnSpacing`.** Six seats down one side of
+  The Divide have 111 tiles of column to share; demanding forty between them
+  would throw half of them off the map. `LAID_OUT_SPACING` is the floor instead,
+  and it only guarantees that two opening borders cannot overlap. Neighbours
+  being close together is the point of those maps.
+
+`carveSpine` is the only deliberate terrain in any of them: a wandering ridge of
+rock down the middle of The Divide with three passes cut through it. Grown
+terrain can produce a barrier like that by luck; this one is there every time.
+
+#### Choosing one
+
+The host picks in the lobby. Changing the map regenerates the world, so it goes
+through `reseat` — the same helper that reopens a finished room — which builds a
+fresh Match, carries everyone still sitting there across, gives them new session
+tokens and re-sends the whole of `init`, because the terrain under them has
+changed. Only the host, only before the match starts, and only to a map that
+exists: the id arrives in a client message.
+
+The choice is remembered in `localStorage` and passed on `create`, so hosting
+again does not always land on the default.
+
+### Troops square up instead of standing inside each other
+
+A group used to be snapped onto whatever it was attacking, which drew a raiding
+party standing inside the camp and turned two groups fighting each other into one
+pile of sprites. `COMBAT.faceOff` is the distance they keep instead:
+
+- `faceOff(army, tx, ty, gap)` settles a group at arm's length from a fixed
+  target and leaves `destX/destY` pointing at it — which is what the client reads
+  to work out which way the sprites face, so "do not overlap" and "face each
+  other" are the same piece of code.
+- `squareUp(a, b)` does it for two groups: both pushed to opposite sides of the
+  ground between them, each turned to look at the other. Called every tick of a
+  fight rather than once on engagement, because either side can be given a new
+  order and come back, and because **the group being attacked may never enter
+  `'fight'` at all** — it is standing on `'hold'` being cut down, and it should
+  still turn to face what is hitting it.
+
+Both back off progressively rather than all-or-nothing. The first version simply
+gave up when the tile at arm's length was impassable, which next to a camp on a
+shoreline is most of the time, so the whole thing quietly did nothing.
+
+**The bug worth remembering:** the first working version juddered. Squaring up
+puts two lines `faceOff * 2` apart, which was wider than the distance at which
+`stepArmyBattle` decides its target has run away — so they squared up, each read
+the other's retreat as flight, charged back in, squared up again, and never
+settled. The leash now includes the width of the stance. If `COMBAT.faceOff` ever
+grows, that calculation is the thing that breaks.
+
 ### A bigger map, and fog over it
 
 240x160, four times the ground. Everything measured in tiles scaled with it —
@@ -1224,6 +1304,268 @@ The flat-rectangle placeholder rendering is gone. What replaced it:
   by shrinking the slice, which resamples the pixels. The pack's browns are
   darkened in the build script rather than with a CSS filter, since a filter
   would dim the text along with the frame.
+
+### The bug-fix and interaction pass
+
+Everything below was found by reading the two features above against the code
+that already existed, and every one of them is pinned in `tools/tests/` now.
+Three themes, and the third is the one worth remembering.
+
+**A field that means two things.** `destX/destY` is where a group is walking
+*and* which way its sprites face — the client reads the same pair for both.
+`squareUp` wrote to it unconditionally, so squaring up with a group that was
+merely marching past overwrote its orders: it turned round, walked into
+whatever had attacked it, and — arriving at a destination — snapped onto it and
+held, which is precisely the pile of sprites the face-off exists to prevent.
+`lookAt` is the guard: only a group on `'hold'` or `'fight'` has a facing to
+give away, because those are the two orders that are not going anywhere. A
+group that is walking already faces where it is going.
+
+The same field left the survivor of a fight it never asked for staring at the
+patch of ground where its attacker died, so `stepArmyBattle` now stands a
+`'hold'` defender back down as well as a pursuing one.
+
+**A map that was chosen and then forgotten.** `restart` built its replacement
+Match without passing `map`, so the constructor's default took over and every
+rematch quietly dropped the room back onto The Wilds — on the one screen where
+nobody is looking at a map picker to notice. It also left `sentBuildings`
+populated from the previous match, which every other match-swap path clears.
+`reseat` had the matching hole at the other end: a socket it could not re-seat
+was left in `room.sockets` with no seat in `match.players`, which is the exact
+orphaning that function was written to prevent.
+
+**One tool at a time, said in one place.** This is the interesting one. Arming
+a map tool was wired up pairwise — `armSpell` put down the ability and the
+carried building, `armDeploy` put down the spell, the wall tool put down only
+the clear tool — and `onCanvasClick` reads the armed tools in a fixed order, so
+every hole in that matrix was a click that went somewhere the player was not
+looking. Arming the clear tool and then Deploy cleared ground instead of
+deploying.
+
+The wall tool was the bad one, because it owns the canvas outright:
+`onCanvasClick` returns immediately while it is on. A spell armed underneath it
+could not be cast **at all** — the cursor changed, the card lit up saying
+"Aiming…", and clicking the map drew a wall. Six arm functions each holding a
+partial list of the other five is a matrix that cannot be kept right by hand,
+so `disarmTools(keep)` is now the single place that says it, and `updateCursor`
+derives the pointer from the state rather than each call site assigning it —
+putting a tool down can no longer leave the previous one's cursor behind.
+
+While in there: modified key chords now belong to the browser (Ctrl+R used to
+recall the selected group on its way to reloading the page, and Ctrl/Cmd+A, +S
+and +D were eaten by the pan keys' `preventDefault`), held keys are released
+when the window loses focus (alt-tabbing mid-pan left the camera sliding for
+good, because the keyup landed in whatever window took the focus), and the four
+army orders that still went out through a raw `ws.send` go through `send()` —
+they threw on a dead socket, which is the exact state the game is in while
+"Connection lost" is showing, and `r` is reachable the whole time.
+
+**Two server-authority holes.** `cmdBuild` never checked `wouldThickenWall`, so
+four plain `build` messages aimed at a 2x2 square raised the slab the wall rule
+exists to refuse. Nothing playing the game reaches it — the palette skips
+`isWall` and walls have their own command — which is exactly why it survived:
+the only way to find it is to stop using the client. `cast_bulwark` was checked
+for the same thing and is clean; a sweep of every offset against a standing wall
+line produced no 2x2 block, so it was left alone.
+
+Verified in a browser as well as in the tests, because none of the interaction
+half can be: hosting on The Divide, arming the wall tool, clicking Meteor, and
+casting it on the map — the sequence that was dead before — and confirming the
+camera stops dead the moment the window loses focus with a key still held.
+
+### Troops walk round water and rock
+
+Armies swam. `cmdMoveArmy` refused a destination on a lake, but a march *across*
+one went straight over it, because the only question `planRoute` ever asked was
+"is there a wall in the way" — `findRoute` has always refused to path across
+impassable ground, and was simply never invited to. On Lakelands a group could
+spend forty ticks marching over open water.
+
+Three things had to change together.
+
+**The question.** `wallInTheWay` is now `pathBlocked`, and it asks about ground
+as well as stonework. That alone puts the pathfinder to work on lakes and
+ridges, which it already knew how to route around.
+
+**How the line is measured.** `pathBlocked` traverses the line rather than
+sampling it, and this is the part worth remembering. The first version sampled
+four times a tile, which is subtly wrong at a diagonal crossing: a group walking
+from (47.07, 75.66) towards (37, 73) sampled the tile it stood on and then
+(46, 75), stepping over (46, 76) entirely — the window in which the line is far
+enough left to round to 46 and still high enough to round to 76 is about a
+hundredth of the segment wide. The walker, whose step size is its own, landed
+squarely in it. So the sampler called the march clear, the walker found rock,
+and with no route to fall back on the group halted on open ground a few tiles
+short of a camp it could plainly reach. Finer sampling shrinks that window and
+never closes it, so `forEachTileOnLine` walks the grid properly: tile (i, j)
+covers half a tile either side of its centre, so shifting by a half turns the
+whole thing into an ordinary DDA.
+
+**What "no route" means.** A null route used to mean one thing — go straight and
+breach whatever you hit — and now means two, because water cannot be breached.
+The walk tells them apart by bumping into them: a wall starts a breach, ground
+stops the march (`strand`). A step that only clips a corner is retried one axis
+at a time first, so a group hugs a shoreline rather than stopping dead, and only
+a slide that reaches a new tile counts — otherwise a group boxed in by water
+would shuffle on the spot for ever instead of giving up.
+
+**The trap.** `findRoute` treats an enemy wall as solid, so a keep ringed by
+wall has no route to it at all — which is fine, and is what breaching is for.
+But reading that failure as "there is no way round anything" threw away the
+terrain routing too, and sent besieging armies into the nearest lake. When
+stonework is what defeated the search it is run again with stonework ignored:
+the route then leads over walkable ground up to the wall, and the walk starts
+battering when it arrives. The smoke run caught this — no tower fired in six
+minutes, because neither assault ever arrived.
+
+`wallVersion` now also ticks when terrain changes, so draining a lake with
+Reshape the Land releases a group that halted at it. The pathfinder's three
+scratch arrays are allocated once per match and stamped rather than cleared,
+since it went from running only against walls to running against every lake:
+twelve empires and thirty-six groups all crossing Lakelands costs 0.19ms a tick
+against a 200ms budget.
+
+### Map previews
+
+The lobby draws each map now, which reverses the earlier call that a picture of
+a procedural map is a picture of a map nobody will play. That objection is real
+and the answer is to be honest about it rather than to show nothing: the preview
+is labelled as a sample, and every match still generates fresh.
+
+`mapPreviews()` builds them from the **real generator** on a fixed seed, not
+from something drawn to look about right — change `lakeCount` and the thumbnail
+changes with it, so it cannot quietly stop describing the map it names. The seed
+is fixed because a preview that differed on every server boot would be worse
+than none, with two players comparing pictures that were never the same map.
+Built once and cached; six full map generations is 80ms and none of it changes.
+
+The **starting positions matter more than the terrain** and are drawn as gold
+rings over it. Lakelands and Open Field are the same layout with different
+water; The Divide and Four Corners are the same generator numbers arranged into
+completely different games. Terrain alone would not tell you that, and the seat
+layout is the half of a map that is chosen rather than rolled.
+
+Downsampled 5:1 by majority, not by "any water at all", which at five tiles
+square would paint every shoreline solid. One character a cell, so the whole
+catalogue is 13KB, and it rides only on a lobby `init` — a client resuming into
+a running match has no picker to draw and is not sent them.
+
+Worth keeping: the palette is chosen for **lightness separation, not hue**. The
+first pair put rock at a contrast ratio of 1.07 against grass, which left The
+Divide's spine — the single feature that map exists for — within a rounding
+error of the field behind it. Pale stone, mid grass, deep water: 1.46 and 1.53,
+and it survives being shrunk to a 96px thumbnail.
+
+### Teams
+
+Sides are set in the lobby: free-for-all, or two, three or four. Twelve seats
+divide evenly by all three, which is why four is the ceiling — a side with fewer
+seats than another is not a team game.
+
+**Where they sit is the feature.** Everything else follows from it. `group` had
+been sitting on every seat since the maps went in, waiting for this, and the
+answer turned out to be that a team layout has to *override* the map's own: a
+map's `seats` describes the shape of a free-for-all and has no opinion about who
+is allied with whom. `teamSeatTargets` replaces it when sides are on. Two teams
+is west and east, because the map is half again as wide as it is tall and
+splitting the long axis puts the most ground between them; three is thirds; four
+is corners, because four columns would leave the middle two fighting on both
+flanks and the outer two on one.
+
+**The bug that layout nearly shipped with** is worth keeping. The first version
+spread each side's seats down the full height of its column, which looks tidier
+and is wrong: three columns puts 96 tiles between neighbouring sides, while four
+seats spread over 111 tiles of column puts 111 between the top and bottom of the
+*same* side. Half the map was therefore closer to an enemy than to its own
+partner — the one thing the layout exists to prevent. Seats are clustered
+instead, only as tall as `LAID_OUT_SPACING` needs them to be to keep two
+borders apart, centred in the band. The test states this as "every empire sits
+nearer its own side than the enemy", which is "same side of the map" written so
+a machine can check it, and it holds for columns and corners alike.
+
+`allied(a, b)` is the whole of the rest. In a free-for-all it is true only of an
+empire and itself, so every rule that consults it — orders, walls, routing,
+towers, meteors, vision, the win condition — reduces exactly to what it was
+before teams existed, which is why nothing else needed a free-for-all branch.
+
+Two of those are easy to miss. **An ally's wall is your wall**: `blockingWall`,
+`pathBlocked` and `findRoute` all had to learn it, or a team that walled its own
+ground would wall its partners out of it. And **towers hold their fire**, which
+is `nearestHostileArmy`.
+
+**Shared vision** is what makes a team feel like a team on a map this dark, and
+it has two halves. `stepVision` writes each newly-lit tile to every ally rather
+than only to the empire that owns the eye — that covers everything found after
+both were seated. `syncTeamVision` is the other half: an ally who joins late, or
+switches sides, would otherwise start blind beside a partner who has been
+looking at the place for a minute. It runs on join and on a side change, and
+trades both ways.
+
+**Changing sides moves your keep** and does not rebuild the world — the
+alternative is regenerating the map under everybody else every time somebody
+clicks a different colour. The one thing it must not become is a way to tour the
+map, so what the old seat had seen is dropped rather than kept, and the new
+side's map is inherited instead.
+
+The lobby preview draws the team seating rather than the map's own the moment
+sides are turned on, each ring in its side's colour, because otherwise the most
+informative thing on the picker would be showing somewhere nobody is going to
+start. Those layouts are pure geometry and identical on every map, so one set
+covers the whole catalogue.
+
+### Ballistae could not fight back
+
+Two separate bugs, both of which a playtester noticed as "they get focused and
+die instantly", and both of which were real.
+
+**They died first at home.** Garrison losses were taken weakest-first by hit
+points, which sounds like a reasonable rule and is not: a ballista is the
+frailest thing an empire owns *and* the most expensive, so a garrison of ten
+swordsmen, ten knights and ten ballistae lost all ten ballistae before a single
+swordsman was scratched. Cheapest first now. Nobody puts the siege engines in
+the front rank.
+
+**Range did nothing.** Both sides of a fight traded at whatever distance they
+happened to be standing, so a ballista would settle four tiles out — exactly as
+designed, the stance code was working — and then be cut down by swordsmen who
+could not have touched it. Four ballistae lost to their own gold in swordsmen
+with twelve of the twenty still on their feet; they lost every matchup at equal
+cost, which made a 70g unit a pure gold sink.
+
+A blow now lands only if the target is inside the swing (`reachOf`). The result
+is the rock-paper-scissors the design was clearly reaching for and never quite
+had: artillery that is not being closed on wins for nothing, and loses to the
+same gold in swordsmen the moment they charge, because `stanceBetween` already
+hands the stance to whoever has the shorter reach. Cramped ground does the same,
+since squaring up narrows the stance to fit.
+
+The same rule extends to sieges, which was a deliberate call rather than a
+consequence: a garrison cannot answer a ballista shelling it from four tiles,
+and neither can a camp's bandits. **Towers are the counter and are untouched** —
+they shoot on their own account out to five tiles. Measured: four ballistae take
+a keep holding 300g of swordsmen in 56 seconds without a loss; four towers wipe
+the same four ballistae and hold. Placement matters, because a single tower on
+the wrong side of the keep is out of range.
+
+### A minimap, and two steps further out
+
+The minimap is one canvas pixel per tile, which is the map's own 240x160, so
+nothing is resampled. Terrain, borders and buildings are baked four times a
+second; groups and the viewport box are drawn every frame, because they are what
+you are watching for.
+
+The thing to know before touching it: **the client is sent every player's
+buildings whether or not it can see them.** The main map hides them by drawing
+the fog veil on top, which is a covering and not a filter. Anything drawn on the
+minimap has to be checked against `explored` itself or it quietly becomes a
+maphack. Groups are the one exception — `visibleArmiesFor` already filtered
+those server-side.
+
+Zoom gained 1/2 and 1/4. The existing note said whole-number steps only, because
+a fraction like 0.6 gives pixel art uneven pixel sizes — but an exact half or
+quarter does not: every 2x2 or 4x4 block of source pixels becomes one,
+uniformly, which is as even as magnifying by three. At 1:1 a full-screen window
+shows about a fifth of the map's width; a quarter shows nearly all of it.
 
 ### Verifying rules changes
 

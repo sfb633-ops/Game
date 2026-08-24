@@ -209,6 +209,36 @@ sprite anchors and layering can be eyeballed as a PNG.
   and siege factories do the same for knights and catapults, each on its own
   queue. Diminishing on purpose — with a cap on buildings, a second barracks
   should earn its slot and a fifth shouldn't.
+- **Six maps, and the host picks one in the lobby.** The Wilds is open country;
+  Lakelands is mostly water to march around; Highlands is rock and chokepoints;
+  The Divide has a mountain ridge down the middle with three passes through it;
+  Four Corners bunches everyone into the corners; Open Field has almost nothing
+  in the way. Changing the map in the lobby regenerates the world for everybody.
+- **Teams.** The host splits the lobby into two, three or four sides and
+  everyone picks one. Teammates start next to each other — west and east for
+  two, thirds for three, corners for four — share what they have scouted, are
+  spared by each other's spells and towers, may walk through each other's
+  walls, and win together.
+- **A minimap**, in the corner of the map. It shows only what you have actually
+  seen, and clicking or dragging it moves the camera.
+- **Two more zoom steps out**, to a half and a quarter, so you can look at most
+  of the map at once rather than a fifth of it.
+- **Ballistae outrange what cannot reach them.** Left alone they shell troops,
+  keeps and camps for nothing; charged by anything with a sword they die for
+  it. Archer towers reach further still and are the answer to them.
+- **Troops walk round water and rock, not over it.** A march whose straight
+  line crosses a lake goes the long way instead, the same as it does around a
+  wall; somewhere there is genuinely no path to, they stop and say so rather
+  than swimming. Sealing a keep in still only buys you the time it takes to
+  batter the wall down.
+- **Every map is drawn in the lobby**, with the starting positions marked. The
+  picture is a sample of what that map makes rather than the one you are about
+  to play — those are generated fresh for every match — but it is built by the
+  real generator, so the shape of it is honest.
+- **Troops square up rather than piling onto each other.** A group closes to
+  arm's length from whatever it is attacking and turns to face it, so a raiding
+  party stands outside the camp instead of inside it and two armies fighting are
+  two lines rather than one heap.
 - **The map is 240x160 and most of it is dark.** You start seeing your own
   doorstep and nothing else; sending troops out is how the map gets discovered.
   Ground you have seen stays on your map but dims once nobody is watching it —

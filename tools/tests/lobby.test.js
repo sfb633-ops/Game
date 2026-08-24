@@ -225,6 +225,118 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   a.send({ type: 'leave' }); a.ws.close();
 }
 
+// The map the room chose has to survive a rematch. `restart` built its
+// replacement Match without passing one, so `map` fell back to its default and
+// every rematch quietly dropped the room back onto The Wilds — the one screen
+// where nobody is looking at a map picker to notice.
+{
+  const a = client('map-host'), b = client('map-guest');
+  await Promise.all([a.open, b.open]);
+  a.send({ type: 'create', playerName: 'MH', race: 'human', roomName: 'maps', map: 'divide' });
+  const ai = await a.wait(m => m.type === 'init');
+  check('a room can be hosted on a named map', ai.mapId === 'divide', ai.mapId);
+
+  b.send({ type: 'join', code: ai.room.code, playerName: 'MG', race: 'orc' });
+  await b.wait(m => m.type === 'init');
+
+  // The host swaps it in the lobby; everybody is re-seated onto the new world.
+  a.msgs.length = 0; b.msgs.length = 0;
+  a.send({ type: 'setMap', map: 'fourcorners' });
+  const bi = await b.wait(m => m.type === 'init');
+  check('the host can change the map and everyone is re-seated',
+    bi.mapId === 'fourcorners', bi.mapId);
+  check('and the new terrain comes with it', Array.isArray(bi.terrain) && bi.terrain.length > 0);
+
+  // A guest may not.
+  a.msgs.length = 0;
+  b.send({ type: 'setMap', map: 'wilds' });
+  await sleep(300);
+  const snuck = a.msgs.find(m => m.type === 'init' && m.mapId === 'wilds');
+  check('but a guest cannot', !snuck);
+
+  a.send({ type: 'startMatch' });
+  await a.wait(m => m.type === 'state');
+
+  // Win it by leaving the guest with nowhere to be, then rematch.
+  b.send({ type: 'leave' });
+  const over = await a.wait(m => m.type === 'state' && m.gameOver, 8000).catch(() => null);
+  check('the match ends when the other empire walks out', !!over);
+  a.msgs.length = 0;
+  a.send({ type: 'restart' });
+  const again = await a.wait(m => m.type === 'init', 4000).catch(() => null);
+  check('a rematch stays on the map the room chose',
+    !!again && again.mapId === 'fourcorners', again ? again.mapId : 'no init');
+
+  for (const x of [a, b]) { x.send({ type: 'leave' }); x.ws.close(); }
+}
+
+// Teams over real sockets: the host splits the lobby, players pick a side, and
+// everything that has to survive a rebuild of the world does.
+{
+  const a = client('t-host'), b = client('t-guest');
+  await Promise.all([a.open, b.open]);
+  a.send({ type: 'create', playerName: 'TA', race: 'human', roomName: 'teams', map: 'openfield' });
+  const ai = await a.wait(m => m.type === 'init');
+  check('a room starts as a free-for-all', !ai.teams, String(ai.teams));
+  check('and says how many sides it will allow', ai.maxTeams >= 2, String(ai.maxTeams));
+
+  b.send({ type: 'join', code: ai.room.code, playerName: 'TB', race: 'orc' });
+  await b.wait(m => m.type === 'init');
+
+  // Splitting the lobby rebuilds the world, so everybody gets a fresh init.
+  a.msgs.length = 0; b.msgs.length = 0;
+  a.send({ type: 'setTeams', teams: 2 });
+  const bi = await b.wait(m => m.type === 'init');
+  check('the host can split the lobby into sides', bi.teams === 2, String(bi.teams));
+  check('and everyone is re-seated onto the new world',
+    Array.isArray(bi.terrain) && bi.terrain.length > 0);
+  check('with the seats per side reported', bi.seatsPerTeam === 6, String(bi.seatsPerTeam));
+
+  const roster = await b.wait(m => m.type === 'lobbyState' && m.players.every(p => p.team != null));
+  const teams = roster.players.map(p => p.team).sort();
+  check('two players are split one to a side rather than stacked',
+    teams.length === 2 && teams[0] === 0 && teams[1] === 1, JSON.stringify(teams));
+
+  // A guest may not change the count, only their own side.
+  b.msgs.length = 0;
+  b.send({ type: 'setTeams', teams: 4 });
+  await sleep(300);
+  check('a guest cannot change how many sides there are',
+    !b.msgs.some(m => m.type === 'init' && m.teams === 4));
+
+  // Moving sides moves only the mover: one init, to them.
+  a.msgs.length = 0; b.msgs.length = 0;
+  b.send({ type: 'setTeam', team: 0 });
+  const moved = await b.wait(m => m.type === 'init', 3000);
+  check('a player can move to their friend\'s side', !!moved);
+  const together = await a.wait(m => m.type === 'lobbyState' &&
+    m.players.length === 2 && m.players.every(p => p.team === 0), 3000).catch(() => null);
+  check('and the roster shows them both on it', !!together);
+  check('while nobody else had their world rebuilt',
+    !a.msgs.some(m => m.type === 'init'));
+
+  // Teammates start together — the whole point.
+  const seats = together.players.length;
+  const st = await b.wait(m => m.type === 'init');
+  check('the mover keeps a working seat', !!st.session && seats === 2);
+
+  a.send({ type: 'startMatch' });
+  const live = await a.wait(m => m.type === 'state');
+  const mine = live.players.find(p => p.id === ai.playerId);
+  const ally = live.players.find(p => p.id !== ai.playerId);
+  check('the match reports the side each empire is on',
+    mine.team === 0 && ally.team === 0, `${mine.team}/${ally.team}`);
+  check('and how many sides are being played', live.teamCount === 2, String(live.teamCount));
+  const apart = Math.hypot(mine.baseX - ally.baseX, mine.baseY - ally.baseY);
+  check('allies start beside each other, not across the map', apart < 120, `${apart.toFixed(0)} tiles apart`);
+
+  // Shared vision reaches the wire: an ally's keep is on your map from the off.
+  const seesAlly = live.players.some(p => p.id === ally.id);
+  check('and an ally is on your roster from the first tick', seesAlly);
+
+  for (const x of [a, b]) { x.send({ type: 'leave' }); x.ws.close(); }
+}
+
   for (const c of [host, guest, late, h2, g2]) { c.send({ type: 'leave' }); c.ws.close(); }
   await sleep(200);
   console.log(failures ? `\n${failures} FAILURES` : '\nall lobby checks pass');

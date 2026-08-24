@@ -1088,9 +1088,17 @@ function farTile(m, p, want) {
   sendAt(m, 'p', { swordsman: 20 }, 'camp', camp.id);
   const a = [...m.armies.values()][0];
   for (let t = 0; t < 12000 && m.armies.has(a.id) && a.order !== 'fight'; t++) m.tick(0.2);
-  check('militia still close all the way onto their target',
-    a.order === 'fight' && Math.hypot(a.x - camp.x, a.y - camp.y) < 0.01,
-    `${Math.hypot(a.x - camp.x, a.y - camp.y).toFixed(2)} tiles`);
+  // Melee closes to arm's length and squares up. It used to be snapped onto the
+  // target's own tile, which drew a raiding party standing inside the camp.
+  const stand = Math.hypot(a.x - camp.x, a.y - camp.y);
+  check('militia close to arm\'s length and no further',
+    a.order === 'fight' && Math.abs(stand - cfg.COMBAT.faceOff) < 0.25,
+    `${stand.toFixed(2)} tiles, stance ${cfg.COMBAT.faceOff}`);
+  check('and they face what they are fighting',
+    a.destX === camp.x && a.destY === camp.y);
+  check('while still standing well inside a ballista\'s reach',
+    stand < cfg.UNIT_TYPES.catapult.range,
+    `${stand.toFixed(2)} vs ${cfg.UNIT_TYPES.catapult.range}`);
   check('and a ballista outranges a wall only if it is built almost on the keep',
     cfg.UNIT_TYPES.catapult.range < cfg.CASTLE.buildRadius[0],
     `range ${cfg.UNIT_TYPES.catapult.range} vs border ${cfg.CASTLE.buildRadius[0]}`);
@@ -1523,6 +1531,541 @@ function facingOff(aCount, bCount) {
   check('and keeps them the required distance apart',
     closest >= cfg.MAP.spawnSpacing, `${closest.toFixed(1)} vs ${cfg.MAP.spawnSpacing}`);
   check('camps scaled with the ground', m.aiCamps.length === cfg.AI_CAMP.count);
+}
+
+
+// --- maps -----------------------------------------------------------------
+
+// Every map in the catalogue has to seat a full game with borders clear, or it
+// is a map that breaks the moment a twelfth player joins.
+{
+  const minSep = cfg.CASTLE.buildRadius[0] * 2 + 8;
+  let bad = [];
+  for (const id of Object.keys(cfg.MAPS)) {
+    const m = new Match({ started: false, map: id });
+    const seated = [];
+    for (let i = 0; i < cfg.MAP.maxPlayers; i++) {
+      const p = m.addPlayer('p' + i, 'human', 'P' + i);
+      if (p) seated.push(p);
+    }
+    let closest = Infinity;
+    for (let i = 0; i < seated.length; i++) {
+      for (let j = i + 1; j < seated.length; j++) {
+        closest = Math.min(closest, Math.hypot(seated[i].baseX - seated[j].baseX,
+          seated[i].baseY - seated[j].baseY));
+      }
+    }
+    if (seated.length !== cfg.MAP.maxPlayers || closest < minSep) bad.push(`${id}(${seated.length}/${closest.toFixed(0)})`);
+  }
+  check('every map seats a full game with borders clear', bad.length === 0, bad.join(' '));
+}
+
+// Seats carry a group, which is the question a team game will ask of a map. The
+// two laid-out maps are the ones that have to answer it usefully.
+{
+  const groupsOf = (id) => {
+    const m = new Match({ started: false, map: id });
+    const counts = {};
+    for (const s of m.spawns) counts[s.group] = (counts[s.group] || 0) + 1;
+    return counts;
+  };
+  const divide = groupsOf('divide');
+  check('The Divide splits its seats into two sides',
+    Object.keys(divide).length === 2, JSON.stringify(divide));
+  check('and evenly', Object.values(divide).every(n => n === cfg.MAP.maxPlayers / 2),
+    JSON.stringify(divide));
+  const corners = groupsOf('fourcorners');
+  check('Four Corners splits into four', Object.keys(corners).length === 4,
+    JSON.stringify(corners));
+  const wilds = groupsOf('wilds');
+  check('and a scattered map gives every seat its own group',
+    Object.keys(wilds).length === cfg.MAP.maxPlayers, Object.keys(wilds).length + ' groups');
+}
+
+// The Divide's whole point is that two empires do not start on the same side of
+// the ridge, so the seats are handed out alternating.
+{
+  const m = new Match({ started: false, map: 'divide' });
+  const a = m.addPlayer('a', 'human', 'A');
+  const b = m.addPlayer('b', 'orc', 'B');
+  const seatOf = (p) => m.spawns.find(s => s.x === p.baseX && s.y === p.baseY);
+  check('a two-player game on The Divide starts one either side',
+    seatOf(a).group !== seatOf(b).group,
+    `groups ${seatOf(a).group} and ${seatOf(b).group}`);
+  check('and they are a long way apart',
+    Math.hypot(a.baseX - b.baseX, a.baseY - b.baseY) > cfg.MAP.width / 3,
+    `${Math.hypot(a.baseX - b.baseX, a.baseY - b.baseY).toFixed(0)} tiles`);
+  // The ridge is there every time, and it has ways through it.
+  const mid = Math.floor(cfg.MAP.width / 2);
+  let rockRows = 0, openRows = 0;
+  for (let y = 0; y < cfg.MAP.height; y++) {
+    let rock = false;
+    for (let dx = -8; dx <= 8; dx++) if (m.terrain[y][mid + dx] === 1) rock = true;
+    if (rock) rockRows++; else openRows++;
+  }
+  check('the ridge crosses most of the map', rockRows > cfg.MAP.height * 0.6, `${rockRows} rows`);
+  check('but there are passes through it', openRows > 6, `${openRows} rows open`);
+}
+
+// An unknown map id falls back rather than throwing, because it arrives from a
+// client message.
+{
+  const m = new Match({ started: false, map: 'no-such-map' });
+  check('an unknown map falls back to the default', m.mapId === cfg.DEFAULT_MAP, m.mapId);
+  const d = new Match({ started: false });
+  check('and so does asking for none', d.mapId === cfg.DEFAULT_MAP);
+}
+
+// --- troops square up rather than standing inside each other ---------------
+
+// Two groups dropped on the same tile must part and turn to face each other,
+// and stay that way — the first attempt oscillated, because the stance was
+// wider than the distance at which a group decides its enemy has run away.
+{
+  const m = new Match({ started: false, map: 'openfield' });
+  const a = m.addPlayer('a', 'human', 'A'), b = m.addPlayer('b', 'human', 'B');
+  m.start(); a.draft = b.draft = null;
+  a.idleUnits.swordsman = 20; b.idleUnits.swordsman = 20;
+  m.cmdDeployUnits('a', { swordsman: 20 }, a.baseX, a.baseY);
+  m.cmdDeployUnits('b', { swordsman: 20 }, b.baseX, b.baseY);
+  const A = [...m.armies.values()].find(x => x.ownerId === 'a');
+  const B = [...m.armies.values()].find(x => x.ownerId === 'b');
+  // Somewhere with room on every side, so the stance is not cramped by terrain.
+  let spot = null;
+  for (let y = 40; y < 120 && !spot; y += 9) {
+    for (let x = 40; x < 200 && !spot; x += 9) {
+      let ok = true;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        if (!m.validMoveTile(x + dx, y + dy)) ok = false;
+      }
+      if (ok) spot = { x, y };
+    }
+  }
+  A.x = spot.x; A.y = spot.y; A.order = 'hold';
+  B.x = spot.x; B.y = spot.y; B.order = 'hold';
+  m.cmdAttackArmy('a', A.id, 'army', B.id);
+  for (let t = 0; t < 10; t++) m.tick(0.2);
+  const want = cfg.COMBAT.faceOff * 2;
+  check('two groups on one tile part to arm\'s length',
+    Math.abs(Math.hypot(A.x - B.x, A.y - B.y) - want) < 0.05,
+    `${Math.hypot(A.x - B.x, A.y - B.y).toFixed(2)} vs ${want.toFixed(2)}`);
+  check('and each is turned to face the other',
+    A.destX === B.x && A.destY === B.y && B.destX === A.x && B.destY === A.y);
+  check('including the one that was never given an order', B.order === 'hold');
+
+  // And it holds — no juddering between squaring up and charging back in.
+  const distances = [];
+  for (let t = 0; t < 60; t++) { m.tick(0.2); distances.push(Math.hypot(A.x - B.x, A.y - B.y)); }
+  const spread = Math.max(...distances) - Math.min(...distances);
+  check('the stance is stable rather than oscillating', spread < 0.05,
+    `varied by ${spread.toFixed(3)} tiles`);
+  check('and the fight is actually happening',
+    armyCount(A) < 20 || armyCount(B) < 20,
+    `${armyCount(A)} v ${armyCount(B)}`);
+}
+
+// Storming a camp puts the raiders outside it, not on it, on every map — a camp
+// on a shoreline used to be the case that quietly did nothing.
+{
+  let bad = [];
+  for (const id of ['openfield', 'lakelands', 'highlands']) {
+    const m = new Match({ started: false, map: id });
+    const p = m.addPlayer('p', 'human', 'P');
+    m.start(); p.draft = null;
+    p.idleUnits.swordsman = 20;
+    const camp = m.aiCamps.find(c => !c.defeated);
+    m.cmdDeployUnits('p', { swordsman: 20 }, p.baseX, p.baseY);
+    const army = [...m.armies.values()][0];
+    m.cmdAttackArmy('p', army.id, 'camp', camp.id);
+    for (let t = 0; t < 14000 && army.order !== 'fight'; t++) m.tick(0.2);
+    const d = Math.hypot(army.x - camp.x, army.y - camp.y);
+    if (army.order !== 'fight' || d < 0.3) bad.push(`${id}:${d.toFixed(2)}`);
+  }
+  check('raiders stand outside the camp on every map, not inside it',
+    bad.length === 0, bad.join(' '));
+}
+
+// Squaring up must not steal the orders of a group that is only walking past.
+// destX/destY is both "where this group is going" and "which way it faces", and
+// squareUp wrote to it unconditionally: a group marching somewhere else was
+// turned round, walked into whatever had attacked it, and — arriving at a
+// destination — snapped onto it and held, which is the pile of sprites the
+// whole face-off exists to prevent.
+{
+  const m = new Match({ started: false, map: 'openfield' });
+  const a = m.addPlayer('a', 'human', 'A');
+  const b = m.addPlayer('b', 'human', 'B');
+  m.start(); a.draft = null; b.draft = null;
+  a.idleUnits.swordsman = 10; b.idleUnits.swordsman = 10;
+  m.cmdDeployUnits('a', { swordsman: 10 }, a.baseX, a.baseY);
+  m.cmdDeployUnits('b', { swordsman: 10 }, b.baseX, b.baseY);
+  const [A, B] = [...m.armies.values()];
+  A.x = 60; A.y = 60; B.x = 60.4; B.y = 60;
+  m.cmdMoveArmy('b', B.id, 100, 60);        // B is marching east, minding its own business
+  m.cmdAttackArmy('a', A.id, 'army', B.id); // A jumps it on the way
+  for (let t = 0; t < 5; t++) m.tick(0.2);
+  check('a group attacked mid-march keeps its own destination',
+    B.order === 'move' && B.destX === 100 && B.destY === 60,
+    `${B.order} -> (${B.destX},${B.destY})`);
+  check('and it is still walking towards it', B.x > 60.4, `x=${B.x.toFixed(2)}`);
+
+  // The group that is standing still is still turned to face its attacker —
+  // that is the half of squareUp worth keeping.
+  const m2 = new Match({ started: false, map: 'openfield' });
+  const c = m2.addPlayer('c', 'human', 'C');
+  const d = m2.addPlayer('d', 'human', 'D');
+  m2.start(); c.draft = null; d.draft = null;
+  c.idleUnits.swordsman = 10; d.idleUnits.swordsman = 10;
+  m2.cmdDeployUnits('c', { swordsman: 10 }, c.baseX, c.baseY);
+  m2.cmdDeployUnits('d', { swordsman: 10 }, d.baseX, d.baseY);
+  const [C, D] = [...m2.armies.values()];
+  C.x = 60; C.y = 60; D.x = 60.4; D.y = 60;
+  m2.holdPosition(D);
+  m2.cmdAttackArmy('c', C.id, 'army', D.id);
+  for (let t = 0; t < 3; t++) m2.tick(0.2);
+  check('a group standing still is still turned to face its attacker',
+    D.order === 'hold' && Math.abs(D.destX - C.x) < 1e-6 && Math.abs(D.destY - C.y) < 1e-6);
+}
+
+// Walls are one tile thick wherever the order comes from. cmdBuildWall checked
+// it; cmdBuild did not, so four plain `build` messages aimed at a 2x2 square
+// raised the slab the rule exists to refuse. The palette never offers a wall,
+// which is exactly why nothing playing the game found this.
+{
+  const m = new Match();
+  const p = m.addPlayer('p', 'human', 'P');
+  p.draft = null; p.gold = 100000;
+  const bx = p.baseX + 3, by = p.baseY;
+  for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) m.cmdBuild('p', bx + dx, by + dy, 'wall');
+  const walls = new Set(Object.values(p.buildings).filter(b => b.type === 'wall').map(b => `${b.x},${b.y}`));
+  let slabs = 0;
+  for (const k of walls) {
+    const [x, y] = k.split(',').map(Number);
+    if (walls.has(`${x + 1},${y}`) && walls.has(`${x},${y + 1}`) && walls.has(`${x + 1},${y + 1}`)) slabs++;
+  }
+  check('cmdBuild cannot paint a solid 2x2 block of wall', slabs === 0 && walls.size === 3,
+    `${walls.size} tiles, ${slabs} slabs`);
+}
+
+// A group that outlives the attacker it never asked to fight goes back to
+// facing nothing in particular, rather than staring at the ground where the
+// attacker died for the rest of the match.
+{
+  const m = new Match({ started: false, map: 'openfield' });
+  const a = m.addPlayer('a', 'human', 'A');
+  const b = m.addPlayer('b', 'human', 'B');
+  m.start(); a.draft = null; b.draft = null;
+  a.idleUnits.swordsman = 1; b.idleUnits.swordsman = 30;
+  m.cmdDeployUnits('a', { swordsman: 1 }, a.baseX, a.baseY);
+  m.cmdDeployUnits('b', { swordsman: 30 }, b.baseX, b.baseY);
+  const [A, B] = [...m.armies.values()];
+  A.x = 60; A.y = 60; B.x = 60.4; B.y = 60;
+  m.holdPosition(B);
+  m.cmdAttackArmy('a', A.id, 'army', B.id);
+  for (let t = 0; t < 400 && m.armies.has(A.id); t++) m.tick(0.2);
+  check('the defender that outlived its attacker stops facing a ghost',
+    !m.armies.has(A.id) && B.destX === B.x && B.destY === B.y,
+    `dest=(${B.destX.toFixed(2)},${B.destY.toFixed(2)}) pos=(${B.x.toFixed(2)},${B.y.toFixed(2)})`);
+}
+
+// Queueing a unit goes to whichever building will actually get to it first.
+// The comment said so; the code took the first of the equally-short queues,
+// which is the busy one as often as not.
+{
+  const m = new Match();
+  const p = m.addPlayer('p', 'human', 'P');
+  p.draft = null; p.gold = 100000;
+  m.cmdBuild('p', p.baseX + 2, p.baseY, 'barracks');
+  m.cmdBuild('p', p.baseX + 3, p.baseY, 'barracks');
+  for (const b of Object.values(p.buildings)) b.underConstruction = false;
+  const [b1, b2] = m.trainersFor(p, 'swordsman');
+  // Both hold one unit, but the first is only just starting its.
+  b1.trainQueue = [{ unitType: 'swordsman', remainingSec: 30 }];
+  b2.trainQueue = [{ unitType: 'swordsman', remainingSec: 1 }];
+  m.cmdTrainUnit('p', 'swordsman');
+  check('a queued unit goes to the building closest to being free',
+    b2.trainQueue.length === 2 && b1.trainQueue.length === 1,
+    `${b1.trainQueue.length} vs ${b2.trainQueue.length}`);
+}
+
+// Troops walk round water and rock, not over it. findRoute has always refused
+// to path across impassable ground — it was simply never asked to, because the
+// only question planRoute put to it was "is there a wall in the way". A march
+// whose straight line crossed a lake was therefore declared clear and swum.
+// This is the worst case a sweep of three maps could find: 47 tiles of open
+// water on the straight line, which the old code walked across for 41 ticks.
+{
+  const m = new Match({ started: false, map: 'lakelands' });
+  const p = m.addPlayer('p', 'human', 'P');
+  m.start(); p.draft = null;
+  p.idleUnits.swordsman = 10;
+  m.cmdDeployUnits('p', { swordsman: 10 }, p.baseX, p.baseY);
+  const army = [...m.armies.values()][0];
+  const T = m.terrain, W = T[0].length, H = T.length;
+  const dest = { x: 167, y: 7 };
+  const sx = army.x, sy = army.y;
+
+  // The straight line really does cross deep water — if map generation ever
+  // drifts this stops being the test it was written to be, so it is checked.
+  let crossed = 0;
+  const n = Math.ceil(Math.hypot(dest.x - sx, dest.y - sy) * 4);
+  for (let i = 1; i <= n; i++) {
+    const t = i / n;
+    const cx = Math.round(sx + (dest.x - sx) * t), cy = Math.round(sy + (dest.y - sy) * t);
+    if (cx >= 0 && cy >= 0 && cx < W && cy < H && T[cy][cx] === 2) crossed++;
+  }
+  check('the straight line to the target crosses open water', crossed > 20, `${crossed} samples`);
+
+  m.cmdMoveArmy('p', army.id, dest.x, dest.y);
+  let wet = 0, ticks = 0;
+  for (; ticks < 2000 && m.armies.has(army.id) && army.order !== 'hold'; ticks++) {
+    m.tick(0.2);
+    const tx = Math.round(army.x), ty = Math.round(army.y);
+    if (T[ty] && T[ty][tx] === 2) wet++;
+  }
+  check('but the group never sets foot on it', wet === 0, `${wet} ticks in the water`);
+  check('and it still gets there', Math.round(army.x) === dest.x && Math.round(army.y) === dest.y,
+    `(${Math.round(army.x)},${Math.round(army.y)}) vs (${dest.x},${dest.y})`);
+  check('having gone the long way round', ticks > Math.hypot(dest.x - sx, dest.y - sy),
+    `${ticks} ticks for ${Math.hypot(dest.x - sx, dest.y - sy).toFixed(0)} tiles as the crow flies`);
+}
+
+// Somewhere it genuinely cannot walk to is refused rather than swum to. A wall
+// in this position gets battered down; water has nothing to break, so the march
+// ends and the owner is told once.
+{
+  const m = new Match({ started: false, map: 'openfield' });
+  const p = m.addPlayer('p', 'human', 'P');
+  m.start(); p.draft = null;
+  p.idleUnits.swordsman = 10;
+  m.cmdDeployUnits('p', { swordsman: 10 }, p.baseX, p.baseY);
+  const army = [...m.armies.values()][0];
+  // Moat the group in: a ring of water with no gap, well clear of its own tile.
+  const cx = Math.round(army.x), cy = Math.round(army.y);
+  for (let y = cy - 4; y <= cy + 4; y++) {
+    for (let x = cx - 4; x <= cx + 4; x++) {
+      const ring = Math.max(Math.abs(x - cx), Math.abs(y - cy)) === 4;
+      if (ring && m.terrain[y]) m.terrain[y][x] = 2;
+    }
+  }
+  const dest = { x: cx + 12, y: cy };
+  m.cmdMoveArmy('p', army.id, dest.x, dest.y);
+  m.events.length = 0;
+  let wet = 0;
+  for (let t = 0; t < 300 && army.order !== 'hold'; t++) {
+    m.tick(0.2);
+    const tx = Math.round(army.x), ty = Math.round(army.y);
+    if (m.terrain[ty] && m.terrain[ty][tx] === 2) wet++;
+  }
+  const told = m.events.some(e => e.playerId === 'p' && /no way through/i.test(e.text));
+  check('a group walled in by water halts instead of swimming out',
+    army.order === 'hold' && wet === 0 && Math.abs(army.x - cx) < 4,
+    `order=${army.order} wet=${wet} x=${army.x.toFixed(1)} (from ${cx})`);
+  check('and its owner is told why, once', told,
+    m.events.filter(e => /no way through/i.test(e.text)).length + ' messages');
+}
+
+// A keep ringed by wall defeats the pathfinder — that is what breaching is for.
+// But the search returning nothing must not be read as "there is no way round
+// anything at all": the group still has to reach the wall over ground it can
+// walk, and conflating the two sent besieging armies into the nearest lake.
+{
+  const m = new Match({ started: false, map: 'lakelands' });
+  const a = m.addPlayer('a', 'human', 'A');
+  const b = m.addPlayer('b', 'orc', 'B');
+  m.start(); a.draft = null; b.draft = null;
+  a.gold = b.gold = 999999;
+  // Seal B in completely, the way the smoke run does.
+  const ring = [];
+  for (let dy = -5; dy <= 5; dy++) {
+    for (let dx = -5; dx <= 5; dx++) {
+      if (Math.abs(dx) !== 5 && Math.abs(dy) !== 5) continue;
+      ring.push({ x: b.baseX + dx, y: b.baseY + dy });
+    }
+  }
+  m.cmdBuildWall('b', ring);
+  const walled = Object.values(b.buildings).filter(x => x.type === 'wall').length;
+  check('the defender is sealed in', walled > 30, `${walled} segments`);
+
+  a.idleUnits.swordsman = 40;
+  m.cmdDeployUnits('a', { swordsman: 40 }, a.baseX, a.baseY);
+  const army = [...m.armies.values()][0];
+  m.cmdAttackArmy('a', army.id, 'player', 'b');
+
+  let wet = 0, breached = false, halted = false;
+  for (let t = 0; t < 4000 && m.armies.has(army.id); t++) {
+    m.tick(0.2);
+    const tx = Math.round(army.x), ty = Math.round(army.y);
+    if (m.terrain[ty] && m.terrain[ty][tx] === 2) wet++;
+    if (army.breach) breached = true;
+    if (army.order === 'hold') { halted = true; break; }
+  }
+  check('the besiegers never wade into the water', wet === 0, `${wet} ticks in the water`);
+  check('and they reach the wall and start breaking it',
+    breached || !halted || Math.hypot(army.x - b.baseX, army.y - b.baseY) < 8,
+    `breach=${breached} halted=${halted} dist=${Math.hypot(army.x - b.baseX, army.y - b.baseY).toFixed(1)}`);
+}
+
+// --- reach: you have to be able to touch a thing to hurt it ---------------
+// Both sides used to trade at whatever distance they were standing, which made
+// `range` decoration. A ballista would settle four tiles out, exactly as
+// designed, and then be cut down by swordsmen who could not have reached it:
+// four ballistae lost to their own gold in swordsmen with twelve of the twenty
+// still on their feet. Range now means what it says, and melee earns its living
+// by closing.
+{
+  const setup = (typeA, nA, typeB, nB, bothAttack) => {
+    const m = new Match({ started: false, map: 'openfield' });
+    const p1 = m.addPlayer('p1', 'human', 'P1'), p2 = m.addPlayer('p2', 'human', 'P2');
+    m.start(); p1.draft = null; p2.draft = null;
+    p1.idleUnits[typeA] = nA; p2.idleUnits[typeB] = nB;
+    m.cmdDeployUnits('p1', { [typeA]: nA }, p1.baseX, p1.baseY);
+    m.cmdDeployUnits('p2', { [typeB]: nB }, p2.baseX, p2.baseY);
+    const [A, B] = [...m.armies.values()];
+    A.x = 60; A.y = 60; B.x = 62; B.y = 60;
+    m.cmdAttackArmy('p1', A.id, 'army', B.id);
+    if (bothAttack) m.cmdAttackArmy('p2', B.id, 'army', A.id);
+    for (let t = 0; t < 900 && m.armies.has(A.id) && m.armies.has(B.id); t++) m.tick(0.2);
+    return { a: m.armies.has(A.id) ? A.roster.length : 0, b: m.armies.has(B.id) ? B.roster.length : 0 };
+  };
+  const parked = setup('catapult', 4, 'swordsman', 14, false);
+  check('artillery that is not closed on wins for free',
+    parked.a === 4 && parked.b === 0, `${parked.a} ballistae vs ${parked.b} swordsmen`);
+  const charged = setup('catapult', 4, 'swordsman', 14, true);
+  check('and loses to the same gold once it charges',
+    charged.a === 0 && charged.b > 0, `${charged.a} ballistae vs ${charged.b} swordsmen`);
+
+  // The garrison used to feed its siege engines in first, because losses were
+  // taken weakest-first by hit points and a ballista is the frailest thing an
+  // empire owns as well as the dearest. Nobody puts the artillery in the front
+  // rank.
+  const m2 = new Match();
+  const d = m2.addPlayer('d', 'human', 'D');
+  d.draft = null;
+  d.idleUnits = { swordsman: 10, knight: 10, catapult: 10 };
+  m2.applyDefenderLosses(d, m2.homeDefense(d), 120);
+  check('a garrison loses its cheapest troops first, not its ballistae',
+    d.idleUnits.catapult === 10 && d.idleUnits.swordsman < 10,
+    JSON.stringify(d.idleUnits));
+}
+
+// --- teams ----------------------------------------------------------------
+// Teammates start together. That is the whole promise of the feature, and it is
+// the seat layout that keeps it rather than anything downstream.
+{
+  for (const teams of [2, 3, 4]) {
+    const m = new Match({ started: false, map: 'wilds', teams });
+    const seated = [];
+    for (let i = 0; i < 12; i++) if (m.addPlayer('p' + i, 'human', 'P' + i)) seated.push('p' + i);
+    check(`${teams} teams seat every empire`, seated.length === 12, `${seated.length} of 12`);
+
+    const bySide = {};
+    for (const id of seated) {
+      const pl = m.players.get(id);
+      (bySide[pl.team] = bySide[pl.team] || []).push(pl);
+    }
+    const sizes = Object.values(bySide).map(v => v.length);
+    check(`  and split them evenly`, new Set(sizes).size === 1 && sizes.length === teams,
+      sizes.join('/'));
+
+    // Every empire is closer to its furthest teammate than to its nearest
+    // enemy. That is "same side of the map" stated in a way a test can check,
+    // and it holds for columns and for corners alike.
+    let bad = 0;
+    for (const id of seated) {
+      const me = m.players.get(id);
+      let farAlly = 0, nearFoe = Infinity;
+      for (const id2 of seated) {
+        if (id2 === id) continue;
+        const other = m.players.get(id2);
+        const d = Math.hypot(other.baseX - me.baseX, other.baseY - me.baseY);
+        if (other.team === me.team) farAlly = Math.max(farAlly, d);
+        else nearFoe = Math.min(nearFoe, d);
+      }
+      if (farAlly >= nearFoe) bad++;
+    }
+    check(`  and every empire sits nearer its own side than the enemy`, bad === 0,
+      `${bad} misplaced`);
+  }
+}
+
+// Allies cannot be attacked, are always visible, share what they uncover, and
+// win together.
+{
+  const m = new Match({ started: false, map: 'openfield', teams: 2 });
+  const a = m.addPlayer('a', 'human', 'A', 0);
+  const b = m.addPlayer('b', 'human', 'B', 0);
+  const e = m.addPlayer('e', 'orc', 'E', 1);
+  m.start(); a.draft = b.draft = e.draft = null;
+  check('the requested sides are honoured', a.team === 0 && b.team === 0 && e.team === 1,
+    `${a.team}/${b.team}/${e.team}`);
+  check('and allied is symmetric and excludes the enemy',
+    m.allied('a', 'b') && m.allied('b', 'a') && !m.allied('a', 'e'));
+
+  a.idleUnits.swordsman = 5;
+  m.cmdDeployUnits('a', { swordsman: 5 }, a.baseX, a.baseY);
+  const army = [...m.armies.values()][0];
+  m.cmdAttackArmy('a', army.id, 'player', 'b');
+  check('an order aimed at an ally is refused', army.order !== 'attack', army.order);
+  m.cmdAttackArmy('a', army.id, 'player', 'e');
+  check('and the same order at an enemy is not', army.order === 'attack', army.order);
+
+  // Shared vision: what one ally uncovers, the other has.
+  const mine = a.explored, theirs = b.explored;
+  let onlyMine = 0;
+  for (let i = 0; i < mine.length; i++) if (mine[i] && !theirs[i]) onlyMine++;
+  check('a team shares everything it has uncovered', onlyMine === 0,
+    `${onlyMine} tiles seen by one ally and not the other`);
+  check('and an ally can see ground near the other ally',
+    m.canSee(b, a.baseX, a.baseY), 'B sees A\'s keep');
+  check('while the enemy cannot', !m.canSee(e, a.baseX, a.baseY));
+
+  // Allied groups are on your map wherever they are.
+  const far = m.visibleArmiesFor('b', m.serialize().armies);
+  check('an ally\'s group is always on your map', far.some(x => x.ownerId === 'a'));
+
+  // One side left standing ends it, even with two empires still alive.
+  m.eliminate(e, 'test');
+  m.checkWinCondition();
+  check('the match ends when one side is left', m.gameOver === true);
+  check('and the side is named rather than a single empire',
+    m.winnerTeam === 0 && m.winnerId === null, `team ${m.winnerTeam}, winnerId ${m.winnerId}`);
+}
+
+// Switching sides in the lobby moves your keep, and cannot be used to tour the
+// map: what you had seen from the old seat is given up with it.
+{
+  const m = new Match({ started: false, map: 'openfield', teams: 2 });
+  const a = m.addPlayer('a', 'human', 'A', 0);
+  m.addPlayer('b', 'human', 'B', 1);
+  const wasX = a.baseX, wasY = a.baseY;
+  const sawBefore = a.explored.reduce((n, v) => n + v, 0);
+  check('switching to the other side is accepted', m.setTeam('a', 1) === true);
+  check('  and the keep moves with it', a.baseX !== wasX || a.baseY !== wasY,
+    `(${wasX},${wasY}) -> (${a.baseX},${a.baseY})`);
+  check('  onto the side that was asked for', a.team === 1);
+  check('  leaving no castle behind', !m.getCastle({ baseX: wasX, baseY: wasY, buildings: a.buildings }));
+  // They inherit their new side's map, which is right — but the ground they
+  // used to be standing on is gone, so switching cannot be used to tour.
+  check('  and the ground it used to hold is forgotten',
+    a.explored[wasY * 240 + wasX] === 0, 'old seat still lit');
+  check('  while the seat just vacated is free again',
+    m.spawns.some(sp => sp.x === wasX && sp.y === wasY && !sp.taken));
+}
+
+// A free-for-all behaves exactly as it did before teams existed.
+{
+  const m = new Match({ started: false, map: 'openfield' });
+  const a = m.addPlayer('a', 'human', 'A');
+  const b = m.addPlayer('b', 'orc', 'B');
+  m.start(); a.draft = b.draft = null;
+  check('with no teams nobody is allied', !m.allied('a', 'b') && m.allied('a', 'a'));
+  check('and no player carries a side', a.team === null && b.team === null);
+  a.idleUnits.swordsman = 5;
+  m.cmdDeployUnits('a', { swordsman: 5 }, a.baseX, a.baseY);
+  const army = [...m.armies.values()][0];
+  m.cmdAttackArmy('a', army.id, 'player', 'b');
+  check('and anyone may be attacked', army.order === 'attack');
 }
 
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');

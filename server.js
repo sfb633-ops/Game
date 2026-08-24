@@ -12,7 +12,7 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
-const { Match } = require('./game');
+const { Match, mapPreviews, teamSeatPreviews } = require('./game');
 const config = require('./config');
 
 const PORT = process.env.PORT || 3000;
@@ -101,16 +101,17 @@ function newRoomCode() {
 
 const rooms = new Map(); // code -> room
 
-function createRoom(name) {
+function createRoom(name, mapId, teams) {
   if (rooms.size >= MAX_ROOMS) return null;
   const code = newRoomCode();
   if (!code) return null;
+  const map = config.MAPS[mapId] ? mapId : config.DEFAULT_MAP;
   const room = {
     code,
     name: cleanText(name, 24) || `${code} — open game`,
     // Held, not running: a new room is a lobby until its host starts it, so
     // everyone who is waiting gets their opening hand in the same instant.
-    match: new Match({ started: false }),
+    match: new Match({ started: false, map, teams }),
     sockets: new Map(),   // playerId -> ws
     sessions: new Map(),  // resume token -> playerId
     dropped: new Map(),   // playerId -> when their socket went away
@@ -150,6 +151,8 @@ function lobbyList() {
     // A room still in its lobby is one you can get an equal start in; a running
     // one you would be joining late. Worth saying before someone clicks.
     started: room.match.started,
+    map: (config.MAPS[room.match.mapId] || {}).name || room.match.mapId,
+    teams: room.match.teamCount,
     gameOver: room.match.gameOver,
   }));
 }
@@ -172,6 +175,53 @@ function hostOf(room) {
 // The roster everyone waiting in the lobby is looking at. Sent on every change
 // rather than every tick: it changes when somebody arrives or leaves, and that
 // is all, so there is nothing for a 5Hz broadcast to say.
+// Swap in a fresh Match and bring everyone still sitting in the room across.
+// Used when a finished game is reopened and when the host picks a different map:
+// both replace the world under people who are already seated, and both have to
+// re-seat them and tell them, or they are left in a match they are not in.
+function reseat(room, mapId, teams) {
+  const carried = Array.from(room.match.players.values())
+    .filter(p => room.sockets.has(p.id))
+    // The side each player had chosen comes with them. Rebuilding the world
+    // without it — for a map change, say — would silently reshuffle the teams
+    // everybody had just finished agreeing on.
+    .map(p => ({ id: p.id, race: p.race, name: p.name, team: p.team }));
+  const map = config.MAPS[mapId] ? mapId : room.match.mapId;
+  const side = teams === undefined ? room.match.teamCount : teams;
+  room.match = new Match({ started: false, map, teams: side });
+  room.hostId = null;
+  room.sessions.clear();
+  room.dropped.clear();
+  room.sentBuildings.clear();
+  for (const p of carried) {
+    const sock = room.sockets.get(p.id);
+    if (!room.match.addPlayer(p.id, p.race, p.name, p.team)) {
+      // The new map seats fewer empires than the old one did. Being left in
+      // room.sockets with no seat in match.players is the orphaning this
+      // function exists to prevent, so say so and put them back on the menu
+      // rather than leaving them watching a match they are not in.
+      if (sock) {
+        room.sockets.delete(p.id);
+        sock.roomCode = null;
+        sock.sessionToken = null;
+        if (sock.readyState === sock.OPEN) {
+          sock.send(JSON.stringify({ type: 'joinError', reason: 'That map has no room for you.' }));
+          sock.send(JSON.stringify({ type: 'left' }));
+        }
+      }
+      continue;
+    }
+    if (!sock) continue;
+    // A fresh seat needs a fresh token, and the terrain under them has changed,
+    // so they need the whole of init again.
+    sock.sessionToken = randomToken();
+    room.sessions.set(sock.sessionToken, p.id);
+    if (sock.readyState === sock.OPEN) sendInit(sock, room, p.id);
+  }
+  hostOf(room);
+  return carried.length;
+}
+
 function broadcastLobby(room) {
   if (room.match.started) return;
   const hostId = hostOf(room);
@@ -179,8 +229,11 @@ function broadcastLobby(room) {
     type: 'lobbyState',
     room: { code: room.code, name: room.name },
     hostId,
+    mapId: room.match.mapId,
+    teams: room.match.teamCount,
+    seatsPerTeam: room.match.seatsPerTeam(),
     players: Array.from(room.match.players.values()).map(p => ({
-      id: p.id, name: p.name, race: p.race,
+      id: p.id, name: p.name, race: p.race, team: p.team,
       // Seated but not connected: their seat is being held, and the host can
       // see that before deciding whether to wait for them.
       away: !room.sockets.has(p.id),
@@ -242,6 +295,16 @@ function sendInit(ws, room, playerId) {
     // if the match is already running and they are a late arrival.
     started: room.match.started,
     hostId: hostOf(room),
+    maps: config.MAPS,
+    mapId: room.match.mapId,
+    teams: room.match.teamCount,
+    maxTeams: config.MAX_TEAMS,
+    seatsPerTeam: room.match.seatsPerTeam(),
+    // Only while there is a picker to draw them in. They are the same 13KB for
+    // everybody and never change, so there is no reason to put them on the wire
+    // again for a client resuming into a match that is already being played.
+    mapPreviews: room.match.started ? undefined : mapPreviews(),
+    teamSeats: room.match.started ? undefined : teamSeatPreviews(),
     map: config.MAP,
     terrain: room.match.terrain,
     build: config.BUILD,
@@ -262,37 +325,18 @@ function sendInit(ws, room, playerId) {
 function seatPlayer(ws, room, msg) {
   if (room.match.gameOver) {
     // The last game is over: this arrival opens a fresh lobby rather than
-    // dropping straight into a match nobody else has agreed to start.
-    //
-    // Everyone still sitting in the room comes with it. Replacing the Match
-    // without re-seating them left them in room.sockets but *not* in
-    // match.players — their client would go on receiving state that had no
-    // entry for them, freezing the panel with no way out but Exit, and their
-    // resume tokens were thrown away underneath them while they were still
-    // connected.
-    const carried = Array.from(room.match.players.values())
-      .filter(p => room.sockets.has(p.id))
-      .map(p => ({ id: p.id, race: p.race, name: p.name }));
-    room.match = new Match({ started: false });
-    room.hostId = null;
-    room.sessions.clear();
-    room.dropped.clear();
-    for (const p of carried) {
-      if (!room.match.addPlayer(p.id, p.race, p.name)) continue;
-      const sock = room.sockets.get(p.id);
-      if (!sock) continue;
-      // A fresh seat needs a fresh token, and they need telling that the map
-      // under them has been replaced.
-      sock.sessionToken = randomToken();
-      room.sessions.set(sock.sessionToken, p.id);
-      if (sock.readyState === sock.OPEN) sendInit(sock, room, p.id);
-    }
-    console.log(`[room] ${room.code} reset for a new game (${carried.length} carried over)`);
+    // dropping straight into a match nobody else has agreed to start. Everyone
+    // still sitting in the room comes with it — see reseat.
+    const carried = reseat(room, room.match.mapId);
+    console.log(`[room] ${room.code} reset for a new game (${carried} carried over)`);
   }
   const name = cleanText(msg.playerName, 16) || `Player ${room.match.players.size + 1}`;
   // A map only has as many prepared starting positions as it has room for, and
   // seats held open for a dropped player are not free either.
-  if (!room.match.addPlayer(ws.playerId, msg.race, name)) {
+  // A requested side is honoured when it has room; otherwise the emptiest one,
+  // so a lobby nobody organises still comes out even.
+  const wantTeam = Number.isInteger(msg.team) ? msg.team : null;
+  if (!room.match.addPlayer(ws.playerId, msg.race, name, wantTeam)) {
     ws.send(JSON.stringify({ type: 'joinError', reason: 'That game is full.' }));
     return;
   }
@@ -432,7 +476,7 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'create') {
       if (ws.roomCode) return;
-      const room = createRoom(msg.roomName);
+      const room = createRoom(msg.roomName, msg.map, msg.teams);
       if (!room) { ws.send(JSON.stringify({ type: 'joinError', reason: 'This server is full — try joining a game instead.' })); return; }
       seatPlayer(ws, room, msg);
       return;
@@ -457,6 +501,41 @@ wss.on('connection', (ws) => {
     // other command is a command about a game that is not being played yet.
     if (!match.started) {
       if (msg.type === 'leave') { quitRoom(ws); return; }
+      // Only in the lobby, only by the host, and only to a map that exists.
+      // Changing it regenerates the world, so everybody is re-seated and given
+      // a fresh init rather than being left looking at terrain that is gone.
+      if (msg.type === 'setMap') {
+        if (playerId !== hostOf(room)) return;
+        if (!config.MAPS[msg.map] || msg.map === match.mapId) return;
+        reseat(room, msg.map);
+        broadcastLobby(room);
+        console.log(`[room] ${room.code} map -> ${msg.map}`);
+        return;
+      }
+      // Splitting the lobby into sides rebuilds the world, because where the
+      // seats are is what "same team" means — so it goes through reseat, the
+      // same as changing the map does.
+      if (msg.type === 'setTeams') {
+        if (playerId !== hostOf(room)) return;
+        const want = Number.isInteger(msg.teams) ? msg.teams : 0;
+        if (want !== 0 && (want < 2 || want > config.MAX_TEAMS)) return;
+        if (want === match.teamCount) return;
+        reseat(room, room.match.mapId, want);
+        broadcastLobby(room);
+        console.log(`[room] ${room.code} teams -> ${want || 'free-for-all'}`);
+        return;
+      }
+      // Changing your own side moves your keep and nobody else's, so it does
+      // not rebuild the world — only the player who moved needs telling, and
+      // they need a full init because what they can see has moved with them.
+      if (msg.type === 'setTeam') {
+        if (!match.teamCount) return;
+        if (!match.setTeam(playerId, msg.team)) return;
+        room.sentBuildings.delete(playerId);
+        sendInit(ws, room, playerId);
+        broadcastLobby(room);
+        return;
+      }
       if (msg.type === 'startMatch') {
         if (playerId !== hostOf(room)) return;      // only the chair starts it
         if (!match.start()) return;                 // already running
@@ -526,13 +605,18 @@ wss.on('connection', (ws) => {
         // Everyone still in the room is re-seated into the fresh match, so a
         // rematch doesn't scatter the group back to the menu.
         const seated = Array.from(room.match.players.values())
-          .map(p => ({ id: p.id, race: p.race, name: p.name }));
+          .map(p => ({ id: p.id, race: p.race, name: p.name, team: p.team }));
         // The button says "Start New Match", so it does — this is not a return
         // to the lobby. Everyone re-seated is dealt a fresh hand at once, which
         // is the equal start the lobby exists to give.
-        room.match = new Match({ started: false });
-        for (const p of seated) room.match.addPlayer(p.id, p.race, p.name);
+        // On the same map: the room chose one and a rematch is a rematch, not
+        // a silent trip back to the default.
+        room.match = new Match({ started: false, map: room.match.mapId, teams: room.match.teamCount });
+        for (const p of seated) room.match.addPlayer(p.id, p.race, p.name, p.team);
         room.match.start();
+        // Every building in the room is new, so nothing carried over from the
+        // last match may be allowed to suppress the first broadcast of this one.
+        room.sentBuildings.clear();
         for (const [id, sock] of room.sockets) {
           if (sock.readyState === sock.OPEN) sendInit(sock, room, id);
         }
@@ -589,6 +673,7 @@ setInterval(() => {
         ...snapshot,
         events: reports.filter(e => e.playerId === id),
         armies: room.match.visibleArmiesFor(id, allArmies),
+        rubble: room.match.visibleRubbleFor(id, snapshot.rubble),
         // Tiles this empire has just laid eyes on, and nothing it already knew.
         explored: room.match.drainExplored(id),
       }));

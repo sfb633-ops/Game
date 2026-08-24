@@ -21,9 +21,82 @@ const MAP = {
   // edge — so it sits in a corner of the view with half its border off-map.
   // Relaxed automatically if the map runs out of room; see prepareSpawns.
   spawnMargin: 24,
+  // Defaults for a map that does not say. Every entry in MAPS overrides these.
   lakeCount: 34,      // bodies of water grown into the map
   lakeSize: [60, 200],// tiles each one covers, before the shoreline is drawn
 };
+
+// ---------------------------------------------------------------------------
+// Maps
+// ---------------------------------------------------------------------------
+//
+// A map is a handful of numbers and a way of laying out starting positions. The
+// dimensions stay fixed across all of them — the terrain layer is handed to
+// every client at init, and a map that changed size would mean rebuilding the
+// prerendered ground as well as the fog mask, for no gameplay gain.
+//
+// `seats` is the interesting field. It says how the starting positions are
+// arranged, and every layout returns them tagged with a `group`:
+//
+//   scatter  anywhere they fit, each seat its own group
+//   ring     evenly around the edge, each seat its own group
+//   sides    two facing columns, group 0 west and group 1 east
+//   corners  four clusters, one group per corner
+//
+// Nothing reads `group` yet. It is here because teams are coming, and the
+// question a team game asks of a map is "which of these seats are neighbours" —
+// a question that has to be answered when the seats are laid out, not guessed at
+// afterwards from coordinates. Seating teammates then means preferring seats
+// that share a group.
+const MAPS = {
+  wilds: {
+    name: 'The Wilds',
+    blurb: 'Open country. Lakes and ridges wherever they fell, empires wherever they fit.',
+    seats: 'scatter',
+    lakeCount: 34, lakeSize: [60, 200],
+    mountainFill: 0.42,
+  },
+  lakelands: {
+    name: 'Lakelands',
+    blurb: 'Water everywhere. Long marches around it, and walls that anchor to a shore.',
+    seats: 'ring',
+    lakeCount: 60, lakeSize: [80, 260],
+    mountainFill: 0.34,
+  },
+  highlands: {
+    name: 'Highlands',
+    blurb: 'Rock, and the gaps between it. Ground worth clearing and chokepoints worth holding.',
+    seats: 'ring',
+    lakeCount: 14, lakeSize: [40, 120],
+    mountainFill: 0.52,
+  },
+  divide: {
+    name: 'The Divide',
+    blurb: 'A mountain spine down the middle. Two sides, and not many ways through.',
+    seats: 'sides',
+    lakeCount: 20, lakeSize: [50, 150],
+    mountainFill: 0.40,
+    // A wall of rock down the centre with a few passes cut through it. The one
+    // map whose shape is deliberate rather than grown.
+    spine: { thickness: 5, passes: 3 },
+  },
+  fourcorners: {
+    name: 'Four Corners',
+    blurb: 'Empires bunched into the corners and the whole middle to argue over.',
+    seats: 'corners',
+    lakeCount: 26, lakeSize: [60, 190],
+    mountainFill: 0.44,
+  },
+  openfield: {
+    name: 'Open Field',
+    blurb: 'Almost nothing in the way. Armies meet in the middle and that is that.',
+    seats: 'ring',
+    lakeCount: 6, lakeSize: [30, 80],
+    mountainFill: 0.18,
+  },
+};
+
+const DEFAULT_MAP = 'wilds';
 
 // Free-form building placement. A player may place a building on any land tile
 // within their border (and that isn't already occupied by a building or camp);
@@ -238,6 +311,11 @@ const COMBAT = {
   woundHealPerSec: 2,
   // How close an army has to get before it stops marching and starts swinging.
   engageRange: 0.6,
+  // How far apart two things stay while they fight. Troops used to be snapped
+  // onto whatever they were attacking, so a group storming a camp was drawn
+  // standing inside it and two groups fighting each other were one pile of
+  // sprites. They now settle at this distance and face each other across it.
+  faceOff: 0.95,
 };
 
 // ---------------------------------------------------------------------------
@@ -359,11 +437,17 @@ const DEMOLISH_REFUND = 1 / 3;
 
 const TRAIN_QUEUE_MAX = 5;
 const TRAIN_QUEUE_PER_EXTRA = 2;
+// Most sides a match can be split into. Twelve seats divide evenly by two,
+// three and four, so every team gets the same number of them; five would not,
+// and a side with fewer seats than another is not a team game.
+const MAX_TEAMS = 4;
+
 const TICK_MS = 200;
 
 module.exports = {
-  MAP, VISION, BUILD, OUTPOST, RACES, RACE_ABILITIES, CASTLE, BUILDING_TYPES, UNIT_TYPES,
+  MAP, MAPS, DEFAULT_MAP, VISION, BUILD, OUTPOST, RACES, RACE_ABILITIES, CASTLE,
+  BUILDING_TYPES, UNIT_TYPES,
   AI_CAMP, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
   TOWER_REDUCTION_CAP, TERRAIN_CLEAR_COST,
-  TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA, TICK_MS,
+  TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA, TICK_MS, MAX_TEAMS,
 };

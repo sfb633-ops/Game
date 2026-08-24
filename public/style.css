@@ -651,3 +651,73 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 /* Pulling your own building down. Deliberately plain rather than a warning
    colour — it refunds gold, it is not a mistake. */
 .raze-btn { width: 100%; font-size: 0.64rem; }
+
+/* ---- Map picker in the lobby ---- */
+#lobby-map-name { color: var(--gold); letter-spacing: 1px; }
+#lobby-map-blurb { font-size: 0.68rem; line-height: 1.4; margin-bottom: 0.5rem; min-height: 2.4em; }
+#lobby-maps { display: flex; flex-wrap: wrap; gap: 4px; }
+/* Thumbnails, and the caveat that goes with them: the maps are procedural, so
+   what is drawn is a map this generator made rather than the one about to be
+   played. Both are built from the real generator on a fixed seed, so they
+   cannot drift from the maps they describe. The gold rings are the starting
+   positions, which is the half of a map that is chosen rather than rolled. */
+#lobby-map-preview {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+  border: 2px solid var(--ink-dark);
+  margin-bottom: 0.4rem;
+}
+.map-sample-note { font-size: 0.6rem; opacity: 0.72; margin-bottom: 0.5rem; }
+.map-choice {
+  flex: 1 1 30%;
+  font-size: 0.6rem;
+  padding: 3px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  line-height: 1.2;
+}
+.map-thumb {
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+  display: block;
+}
+.map-choice-name { display: block; }
+.room-row .room-map { color: var(--ink); font-size: 0.62rem; }
+
+/* ---- Minimap ---- */
+/* Opposite corner from the log, which owns the bottom left. Sized at 1:1
+   with its own canvas — one pixel a tile — so the pixels stay square and
+   the whole 240x160 world is legible without any scaling at all. */
+#minimap-wrap {
+  position: absolute; right: 12px; bottom: 12px; z-index: 6;
+  border-width: 14px; line-height: 0;
+  opacity: 0.88; transition: opacity 120ms;
+}
+#minimap-wrap:hover { opacity: 1; }
+#minimap {
+  display: block; width: 240px; height: 160px;
+  image-rendering: pixelated; cursor: pointer;
+  touch-action: none;          /* a drag steers the camera, not the page */
+}
+/* The troop bar is centred over the map and the minimap is not, so on a
+   narrow window they meet. The minimap is the one that gets out of the way. */
+@media (max-width: 1100px) {
+  #minimap { width: 168px; height: 112px; }
+}
+
+/* ---- Teams ---- */
+#lobby-teams { display: flex; flex-wrap: wrap; gap: 4px; }
+#lobby-team-mine { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 0.45rem; }
+#lobby-team-mine .sub { flex: 1 1 100%; margin-bottom: 0.15rem; }
+.team-choice { flex: 1 1 44%; font-size: 0.62rem; min-height: 26px; padding: 0 0.3rem; }
+/* The side you are on is bordered in its own colour, so the roster above
+   and the button below are obviously the same thing. */
+.team-pick { flex: 1 1 44%; font-size: 0.62rem; min-height: 26px; padding: 0 0.3rem; border-style: solid; border-width: 2px; }
+.team-pick[disabled] { opacity: 0.45; }
+.lobby-team { font-size: 0.62rem; letter-spacing: 1px; margin-right: 0.4rem; }
+.empire-team { font-size: 0.58rem; letter-spacing: 1px; margin-right: 0.3rem; }
