@@ -217,6 +217,12 @@ sprite anchors and layering can be eyeballed as a PNG.
 - **Knights are the fast option, not the strong one.** A stable and a barracks
   now come out level in a straight fight for the same minutes of training; what
   a knight buys is crossing the map in 48 seconds instead of 80.
+- **Drag a box across your troops** to select several at once; shift-click
+  adds one. Every order — march, attack, join, recall — goes to all of them.
+- **Archer towers shoot, they do not shield.** A tower cuts down what gets
+  through and harasses what walks past, but its health is not a wall in front
+  of your keep, so building ten of them is not a defence. Walls are the thing
+  an attacker has to break, and they are twice as tough as they were.
 - **Teams.** The host splits the lobby into two, three or four sides and
   everyone picks one. Teammates start next to each other — west and east for
   two, thirds for three, corners for four — share what they have scouted, are

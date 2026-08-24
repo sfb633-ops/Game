@@ -721,3 +721,21 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 .team-pick[disabled] { opacity: 0.45; }
 .lobby-team { font-size: 0.62rem; letter-spacing: 1px; margin-right: 0.4rem; }
 .empire-team { font-size: 0.58rem; letter-spacing: 1px; margin-right: 0.3rem; }
+
+/* ---- No text selection over the map ---- */
+/* Dragging across the map to pick troops used to sweep up whatever text it
+   passed over — the counts on the troop bar, lines in the log — and once a
+   number is highlighted, right-clicking it opens the browser menu for the
+   selection instead of issuing an order. None of this text is meant to be
+   copied; the room code on the menu screen is, and is left alone. */
+#game-ui, #map-wrap, #hud, #log, #troop-bar, #minimap-wrap, #exit-wrap, #panel {
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* ...except the boxes you type numbers into, where selecting the value to
+   overwrite it is the whole interaction. Right-clicking one still stages all
+   of that unit rather than offering paste; that is deliberate. */
+#game-ui input, #game-ui textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}

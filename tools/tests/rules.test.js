@@ -2151,5 +2151,91 @@ function facingOff(aCount, bCount) {
     k.attack > s.attack && k.hp > s.hp, `${k.attack}atk/${k.hp}hp vs ${s.attack}atk/${s.hp}hp`);
 }
 
+// --- towers shoot, they are not a wall of hitpoints -----------------------
+// Every tower used to add 220 health to the pile an attacker had to grind
+// through before reaching the town center, on top of its defence and its slice
+// of damage reduction. Nothing capped how many you could build, so the answer
+// to being attacked was always one more tower: six of them — 720 gold, with no
+// garrison at all — wiped 800 gold of swordsmen.
+{
+  const siege = (nTowers) => {
+    const m = new Match({ started: false, map: 'openfield' });
+    const a = m.addPlayer('a', 'human', 'A'), d = m.addPlayer('d', 'human', 'D');
+    m.start(); a.draft = null; d.draft = null; a.gold = d.gold = 999999;
+    d.idleUnits = { swordsman: 0, knight: 0, catapult: 0 };
+    let placed = 0;
+    for (let r = 2; r <= 6 && placed < nTowers; r++) {
+      for (let ang = 0; ang < 360 && placed < nTowers; ang += 25) {
+        const x = Math.round(d.baseX + Math.cos(ang * Math.PI / 180) * r);
+        const y = Math.round(d.baseY + Math.sin(ang * Math.PI / 180) * r);
+        const before = Object.keys(d.buildings).length;
+        m.cmdBuild('d', x, y, 'tower');
+        if (Object.keys(d.buildings).length > before) placed++;
+      }
+    }
+    for (const b of Object.values(d.buildings)) b.underConstruction = false;
+    a.idleUnits.swordsman = 40;
+    m.cmdDeployUnits('a', { swordsman: 40 }, a.baseX, a.baseY);
+    const army = [...m.armies.values()][0];
+    m.cmdAttackArmy('a', army.id, 'player', 'd');
+    let t = 0;
+    for (; t < 9000 && m.armies.has(army.id) && d.alive; t++) m.tick(0.2);
+    return { towers: placed, held: d.alive, secs: t * 0.2 };
+  };
+  const bare = siege(0), six = siege(6), ten = siege(10);
+  check('a keep with no garrison falls to 40 swordsmen', !bare.held);
+  check('and six towers no longer save it on their own', !six.held,
+    `${six.towers} towers, ${six.secs.toFixed(0)}s`);
+  check('nor do ten', !ten.held, `${ten.towers} towers, ${ten.secs.toFixed(0)}s`);
+  // They are still worth building — they buy time and cost the attacker bodies.
+  check('but towers still buy real time', six.secs > bare.secs,
+    `${bare.secs.toFixed(0)}s bare vs ${six.secs.toFixed(0)}s with six`);
+  // And the thing that made stacking pay is gone: the defence pool no longer
+  // hands the attacker a pile of building health to chew through.
+  const m = new Match({ started: false, map: 'openfield' });
+  const d = m.addPlayer('d', 'human', 'D');
+  m.start(); d.draft = null; d.gold = 999999;
+  m.cmdBuild('d', d.baseX + 3, d.baseY, 'tower');
+  for (const b of Object.values(d.buildings)) b.underConstruction = false;
+  const tower = Object.values(d.buildings).find(b => b.type === 'tower');
+  const hpBefore = tower.hp;
+  const left = m.applyDefenderLosses(d, m.homeDefense(d), 500);
+  check('damage aimed at the keep does not come off the towers',
+    tower.hp === hpBefore && left === 500,
+    `tower ${tower.hp}/${hpBefore}, ${left} passed through`);
+}
+
+// --- walls are the hitpoints instead ---------------------------------------
+// Which is only worth saying because they were 120 and are now 260: a wall an
+// attacker was through in a few seconds is what pushed everybody towards
+// stacking towers in the first place.
+{
+  const m = new Match({ started: false, map: 'openfield' });
+  const a = m.addPlayer('a', 'human', 'A'), d = m.addPlayer('d', 'human', 'D');
+  m.start(); a.draft = null; d.draft = null; d.gold = 999999;
+  const ring = [];
+  for (let dy = -5; dy <= 5; dy++) {
+    for (let dx = -5; dx <= 5; dx++) {
+      if (Math.abs(dx) !== 5 && Math.abs(dy) !== 5) continue;
+      ring.push({ x: d.baseX + dx, y: d.baseY + dy });
+    }
+  }
+  m.cmdBuildWall('d', ring);
+  const standing = Object.values(d.buildings).filter(b => b.type === 'wall').length;
+  check('the wall goes up', standing > 30, `${standing} segments`);
+  a.idleUnits.swordsman = 20;
+  m.cmdDeployUnits('a', { swordsman: 20 }, a.baseX, a.baseY);
+  const army = [...m.armies.values()][0];
+  m.cmdAttackArmy('a', army.id, 'player', 'd');
+  let firstDown = -1, t = 0;
+  for (; t < 9000 && m.armies.has(army.id) && d.alive; t++) {
+    m.tick(0.2);
+    if (firstDown < 0 && Object.values(d.buildings).filter(b => b.type === 'wall').length < standing) firstDown = t;
+  }
+  check('and twenty swordsmen take real time to break a segment',
+    firstDown > 50, `${(firstDown * 0.2).toFixed(0)}s`);
+  check('though a sealed keep still falls in the end', !d.alive, `${(t * 0.2).toFixed(0)}s`);
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');
 process.exit(failures ? 1 : 0);

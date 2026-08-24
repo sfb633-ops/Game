@@ -1113,6 +1113,20 @@ class Match {
   // the keep behind it. Returning it rather than dropping it on the floor is
   // the point: a blow that finished the last defender used to do nothing else,
   // however big it was.
+  // The garrison, and then whatever is left over goes back to the caller for
+  // the keep behind them.
+  //
+  // Towers used to stand in this chain and no longer do. Their health was a
+  // wall of hitpoints in front of the town center that an attacker had to grind
+  // off, and because nothing stopped you building more, six of them — 720 gold,
+  // with no garrison at all — wiped 800 gold of swordsmen. Every extra tower
+  // added 220 more health, 15 more defence and another slice of reduction all
+  // at once, so the answer to being attacked was always one more tower.
+  //
+  // A tower is a weapon now, not a wall: it shoots on its own account, it cuts
+  // down what gets through, and it adds its defence to the garrison's punch —
+  // but it is not hitpoints the keep hides behind. Walls are the hitpoints, and
+  // they were given the health to be worth it.
   applyDefenderLosses(player, pool, damage) {
     if (damage <= 0) return 0;
     const garrison = standingHp(player, player.idleUnits, player.mods);
@@ -1120,13 +1134,6 @@ class Match {
     if (onGarrison > 0) {
       damageUnits(player, player.idleUnits, player.mods, onGarrison);
       damage -= onGarrison;
-    }
-    for (const b of pool.structures) {
-      if (damage <= 0) return 0;
-      const take = Math.min(b.hp, damage);
-      b.hp -= take;
-      damage -= take;
-      if (b.hp <= 0.5) this.razeBuilding(player, b);
     }
     return damage;
   }
@@ -2729,9 +2736,10 @@ class Match {
     let outgoing = this.mitigate(defender.id, this.attackOutput(army, dt), army.race, true)
       * (1 - pool.reduction);
 
-    // Defenders first, towers after them, the keep last. The old order put the
-    // buildings in front and turned a tower line into a health bar.
-    if (pool.hp > 0 || pool.structures.length) {
+    // The garrison, then the keep. Towers are not in this chain — see
+    // applyDefenderLosses for why — so a tower line no longer reads as a health
+    // bar the attacker has to chew through before reaching anybody.
+    if (pool.hp > 0) {
       const incoming = this.defendersCanReach(army, defender.baseX, defender.baseY)
         ? this.mitigate(army.ownerId, pool.power * COMBAT.tempo * dt, defender.race, false)
         : 0;

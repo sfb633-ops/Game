@@ -42,7 +42,12 @@ let terrainClearCost = 0;  // gold per tile of rock or water bought back
 let latestState = null;
 let armedDeploy = false;   // staged troops waiting for a map click to land on
 let armedClear = false;    // buying a tile of rock or water back as open ground
-let selectedArmy = null;   // id of one of my armies, selected for orders
+// The groups under orders. A set rather than one id, because a drag across the
+// map selects everything inside it and every order below goes to all of them.
+let selectedArmies = new Set();
+let selectStart = null;    // world tile the drag began on, while the box is open
+let selectBox = null;      // { x0, y0, x1, y1 } in world tiles
+let suppressNextClick = false;   // a drag ends in a click; don't re-read it
 let terrainCanvas = null;
 // ---- Fog of war -----------------------------------------------------------
 // Three states per tile, and the whole look hangs off keeping them separate:
@@ -333,7 +338,8 @@ function abandonSession(reason) {
   latestState = null;
   myId = null;
   myRoom = null;
-  selectedArmy = null; armedSpell = null; armedAbility = false; armedBuild = null; armedDeploy = false;
+  selectedArmies.clear(); selectStart = null; selectBox = null;
+  armedSpell = null; armedAbility = false; armedBuild = null; armedDeploy = false;
   // The tools too, or the next match opens with the wall tool still on and a
   // half-drawn drag from the last one still in memory.
   armedClear = false;
@@ -501,7 +507,7 @@ function onInit(msg) {
   // A fresh match means a fresh map and no leftover selections from the last one.
   latestState = null;
   terrainCanvas = null;
-  selectedArmy = null; armedDeploy = false;
+  selectedArmies.clear(); armedDeploy = false;
   armedSpell = null; armedAbility = false; armedClear = false; draftShown = null;
   // Held in the lobby, or straight into a match already in progress. Either
   // way everything below is built now, so pressing Start costs nothing.
@@ -543,6 +549,22 @@ function onInit(msg) {
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
   bindMinimap();
+
+  // Right-click is a game verb here, and the map is covered in panels — the
+  // log, the minimap, the troop bar, the HUD. Only the canvas and the troop
+  // slots ever suppressed the browser's own menu, so a right-click that landed
+  // on any of the others opened it over the game. Aiming at a group near the
+  // bottom of the screen puts about half your clicks on the troop bar, which is
+  // exactly the "window that pops up every other click".
+  //
+  // Suppressed across the whole game screen rather than panel by panel, because
+  // the next panel added would arrive with the same bug. The menu screen is
+  // left alone, where a right-click on the room-code box should still offer
+  // paste.
+  document.addEventListener('contextmenu', (e) => {
+    if (!menuEl.classList.contains('hidden')) return;
+    e.preventDefault();
+  });
   requestAnimationFrame(frame); // continuous render + camera pan loop
   document.getElementById('wall-tool-btn').addEventListener('click', () => toggleWallMode(!wallMode));
   document.getElementById('clear-tool-btn').addEventListener('click', () => armClear(!armedClear));
@@ -1569,7 +1591,28 @@ function render() {
 
   arrows = arrows.filter(a => drawFlyingArrow(a));
 
+  drawSelectBox();
   drawMinimap();
+}
+
+// The selection box, over the fog rather than under it — you are dragging it
+// right now, so it is the one thing on screen that should never be dimmed.
+function drawSelectBox() {
+  if (!selectBox || !mapCfg) return;
+  const ts = mapCfg.tileSize;
+  ctx.setTransform(zoom, 0, 0, zoom, -Math.round(camera.x * zoom), -Math.round(camera.y * zoom));
+  ctx.save();
+  // Scaled by the zoom so the line is a hairline at every step rather than a
+  // slab at 3x and invisible at a quarter.
+  ctx.lineWidth = 1 / zoom;
+  ctx.setLineDash([4 / zoom, 3 / zoom]);
+  ctx.strokeStyle = 'rgba(255,215,106,0.95)';
+  ctx.fillStyle = 'rgba(255,215,106,0.10)';
+  const x = selectBox.x0 * ts, y = selectBox.y0 * ts;
+  const w = (selectBox.x1 - selectBox.x0) * ts, h = (selectBox.y1 - selectBox.y0) * ts;
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeRect(x, y, w, h);
+  ctx.restore();
 }
 
 // A shot in flight, in world pixels — it starts up in the gallery and ends on
@@ -1650,7 +1693,7 @@ function drawPlayerBuilding(b, p, ts, hasWall) {
 function drawArmy(a, ts) {
   const color = colorForPlayer(a.ownerId);
   const px = a.x * ts, py = a.y * ts;
-  const isSelected = a.ownerId === myId && a.id === selectedArmy;
+  const isSelected = a.ownerId === myId && selectedArmies.has(a.id);
 
   if (isSelected && a.order !== 'hold' && a.destX != null) {
     ctx.strokeStyle = 'rgba(255,215,106,0.7)'; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5;
@@ -1899,12 +1942,22 @@ function tilesBetween(x0, y0, x1, y1) {
 }
 
 function onCanvasMouseDown(e) {
-  if (!wallMode || e.button !== 0 || !latestState) return;
-  const { ix, iy } = tileFromEvent(e);
-  wallDrag = new Set();
-  wallLast = { x: ix, y: iy };
-  if (isMyBuildable(ix, iy) && !wouldThicken(ix, iy)) wallDrag.add(`${ix},${iy}`);
-  render();
+  if (e.button !== 0 || !latestState) return;
+  if (wallMode) {
+    const { ix, iy } = tileFromEvent(e);
+    wallDrag = new Set();
+    wallLast = { x: ix, y: iy };
+    if (isMyBuildable(ix, iy) && !wouldThicken(ix, iy)) wallDrag.add(`${ix},${iy}`);
+    render();
+    return;
+  }
+  // Nothing is being carried, so the press starts a selection box. Anything
+  // armed owns the click instead — dragging a box while holding a building
+  // would be two gestures fighting over one drag.
+  if (armedBuild || armedClear || armedDeploy || armedAbility || armedSpell) return;
+  const { fx, fy } = tileFromEvent(e);
+  selectStart = { x: fx, y: fy };
+  selectBox = null;
 }
 
 function onCanvasMouseMove(e) {
@@ -1912,6 +1965,14 @@ function onCanvasMouseMove(e) {
   const hover = tileFromEvent(e);
   hoverPoint = { x: hover.ix, y: hover.iy };
   hoverTile = isMyBuildable(hover.ix, hover.iy) ? { x: hover.ix, y: hover.iy } : null;
+  if (selectStart) {
+    selectBox = {
+      x0: Math.min(selectStart.x, hover.fx), y0: Math.min(selectStart.y, hover.fy),
+      x1: Math.max(selectStart.x, hover.fx), y1: Math.max(selectStart.y, hover.fy),
+    };
+    render();
+    return;
+  }
   if (!wallMode || !wallDrag || !wallLast) return;
   const { ix, iy } = tileFromEvent(e);
   if (ix === wallLast.x && iy === wallLast.y) return;
@@ -1964,12 +2025,40 @@ function cancelDrag() {
   return had;
 }
 
-function onCanvasMouseUp() {
-  if (!wallMode || !wallDrag) return;
-  const tiles = [...wallDrag].map(k => { const [a, b] = k.split(','); return { x: +a, y: +b }; });
-  wallDrag = null; wallLast = null;
-  if (tiles.length) send({ type: 'buildWall', tiles });
-  render();
+function onCanvasMouseUp(e) {
+  if (wallMode) {
+    if (!wallDrag) return;
+    const tiles = [...wallDrag].map(k => { const [a, b] = k.split(','); return { x: +a, y: +b }; });
+    wallDrag = null; wallLast = null;
+    if (tiles.length) send({ type: 'buildWall', tiles });
+    render();
+    return;
+  }
+  if (!selectStart) return;
+  // Normally the box was sized by the moves on the way here. Falling back to
+  // where the button came up covers a drag that produced no mousemove at all,
+  // which is otherwise silently read as a click on the starting tile.
+  let box = selectBox;
+  if (!box && e && mapCfg) {
+    const up = tileFromEvent(e);
+    box = {
+      x0: Math.min(selectStart.x, up.fx), y0: Math.min(selectStart.y, up.fy),
+      x1: Math.max(selectStart.x, up.fx), y1: Math.max(selectStart.y, up.fy),
+    };
+  }
+  selectStart = null; selectBox = null;
+  // A press that never moved is a click, and onCanvasClick handles those — a
+  // third of a tile of wobble between pressing and releasing is not a drag.
+  if (!box || (box.x1 - box.x0 < 0.35 && box.y1 - box.y0 < 0.35)) { render(); return; }
+  const inside = latestState.armies.filter(a => a.ownerId === myId &&
+    a.x >= box.x0 && a.x <= box.x1 && a.y >= box.y0 && a.y <= box.y1);
+  selectedArmies = new Set(inside.map(a => a.id));
+  suppressNextClick = true;      // the mouseup fires a click straight after this
+  const troops = inside.reduce((n, a) => n + a.count, 0);
+  log(inside.length
+    ? `${inside.length} group${inside.length === 1 ? '' : 's'} selected — ${troops} troops.`
+    : 'No groups of yours in that box.');
+  render(); renderPanel();
 }
 
 // Nearest enemy castle or AI camp to a point, within a click radius, or null.
@@ -2023,6 +2112,7 @@ function stagedUnits() {
 
 function onCanvasClick(e) {
   if (wallMode) return; // drag handlers own the canvas while the wall tool is on
+  if (suppressNextClick) { suppressNextClick = false; return; }   // that was a drag
   const { fx: tileX, fy: tileY, ix, iy } = tileFromEvent(e);
   if (!latestState) return;
 
@@ -2068,15 +2158,31 @@ function onCanvasClick(e) {
   //    on a base/target are still clickable.
   const armyHit = nearestMyArmy(tileX, tileY);
   if (armyHit) {
-    selectedArmy = armyHit;
+    // Shift adds to the selection and removes from it, which is what everything
+    // else with a selection box does.
+    if (e.shiftKey) {
+      if (selectedArmies.has(armyHit)) selectedArmies.delete(armyHit);
+      else selectedArmies.add(armyHit);
+    } else {
+      selectedArmies = new Set([armyHit]);
+    }
     render();
     renderPanel();
     return;
   }
 
-  selectedArmy = null;
+  if (!e.shiftKey) selectedArmies.clear();
   render();
   renderPanel();
+}
+
+// The groups currently under orders, as live state objects, with anything that
+// has since been wiped out or merged away dropped.
+function selectedList() {
+  if (!latestState) return [];
+  const live = latestState.armies.filter(a => a.ownerId === myId && selectedArmies.has(a.id));
+  if (live.length !== selectedArmies.size) selectedArmies = new Set(live.map(a => a.id));
+  return live;
 }
 
 // Releasing a dragged building over the map places it there. The pointer is
@@ -2119,19 +2225,23 @@ function onCanvasRightClick(e) {
   // hold. Your own troops are checked first — a group of yours standing on a
   // camp you have taken is far more likely to be something you want to
   // reinforce than something you want to attack.
-  if (selectedArmy && latestState.armies.some(a => a.id === selectedArmy && a.ownerId === myId)) {
-    const friend = nearestMyArmy(fx, fy, 0.9, selectedArmy);
-    if (friend) {
-      send({ type: 'mergeArmy', armyId: selectedArmy, targetId: friend });
-      // Follow the survivor: the group being commanded is the one that ceases
+  const commanding = selectedList();
+  if (commanding.length) {
+    const ids = commanding.map(a => a.id);
+    // One of my own groups, and not one that is itself being commanded: join
+    // the whole selection into it.
+    const friend = nearestMyArmy(fx, fy, 0.9);
+    if (friend && !(ids.length === 1 && ids[0] === friend)) {
+      for (const id of ids) if (id !== friend) send({ type: 'mergeArmy', armyId: id, targetId: friend });
+      // Follow the survivor: the groups being commanded are the ones that cease
       // to exist, and a selection pointing at nothing is a dead panel.
-      selectedArmy = friend;
+      selectedArmies = new Set([friend]);
       render(); renderPanel();
       return;
     }
-    if (tgt) send({ type: 'attackArmy', armyId: selectedArmy, targetType: tgt.type, targetId: tgt.id });
+    if (tgt) { for (const id of ids) send({ type: 'attackArmy', armyId: id, targetType: tgt.type, targetId: tgt.id }); }
     else if (!isMarchable(ix, iy)) log('Troops cannot march onto water or rock.');
-    else send({ type: 'moveArmy', armyId: selectedArmy, x: ix, y: iy });
+    else { for (const id of ids) send({ type: 'moveArmy', armyId: id, x: ix, y: iy }); }
     return;
   }
 
@@ -2167,7 +2277,7 @@ function onKeyDown(e) {
     if (armedClear) { armClear(false); return; }
   }
   if (k === 'q') { useAbility(); return; }
-  if (k === 'r' && selectedArmy) send({ type: 'recallArmy', armyId: selectedArmy });
+  if (k === 'r') for (const a of selectedList()) send({ type: 'recallArmy', armyId: a.id });
 }
 
 function onKeyUp(e) {
@@ -2289,10 +2399,9 @@ function drawMinimap() {
   }
   // The selected group gets a ring, so "where did I leave them" has an answer
   // that does not involve hunting across the map.
-  const sel = selectedArmy && latestState.armies.find(a => a.id === selectedArmy);
-  if (sel) {
-    g.strokeStyle = '#ffffff';
-    g.lineWidth = 1;
+  g.strokeStyle = '#ffffff';
+  g.lineWidth = 1;
+  for (const sel of selectedList()) {
     g.strokeRect(Math.round(sel.x) - 2.5, Math.round(sel.y) - 2.5, 5, 5);
   }
 
@@ -2726,9 +2835,23 @@ function renderPanel() {
 
   // Selected army command panel.
   const armyCmd = document.getElementById('army-cmd');
-  if (selectedArmy && !latestState.armies.some(a => a.id === selectedArmy && a.ownerId === myId)) selectedArmy = null;
-  if (selectedArmy) {
-    const a = latestState.armies.find(a => a.id === selectedArmy);
+  const chosen = selectedList();
+  if (chosen.length > 1) {
+    // More than one group: a summary and the orders that make sense for all of
+    // them. The per-group detail below only means anything for a single group.
+    const troops = chosen.reduce((n, a) => n + a.count, 0);
+    const kinds = [...new Set(chosen.map(a => a.type))]
+      .map(t => (unitTypes[t] && unitTypes[t].plural) || t).join(', ');
+    if (syncSection(armyCmd, 'multi|' + chosen.map(a => a.id + ':' + a.count).join(','),
+      `<div class="row"><span class="label">${chosen.length} groups</span><span class="sub">${troops} troops</span></div>
+      <div class="sub">${escapeText(kinds)}</div>
+      <div class="sub">Right-click: ground to march them all there, an enemy or camp to send them all at it.</div>
+      <div class="btn-row"><button class="btn btn-sm" id="recall-btn">Recall all (R)</button></div>`)) {
+      document.getElementById('recall-btn').addEventListener('click',
+        () => { for (const a of selectedList()) send({ type: 'recallArmy', armyId: a.id }); });
+    }
+  } else if (chosen.length === 1) {
+    const a = chosen[0];
     // One kind of soldier per group, so the roster line is a count and a name —
     // plus how many of them are carrying a wound, which is the whole reason
     // soldiers have their own health.
@@ -2745,10 +2868,10 @@ function renderPanel() {
       <div class="sub">${parts.join(', ')}</div>
       <div class="sub">Right-click: ground to march and hold, one of your groups to join it, an enemy/camp to attack.</div>
       <div class="btn-row"><button class="btn btn-sm" id="recall-btn">Recall (R)</button></div>`)) {
-      document.getElementById('recall-btn').addEventListener('click', () => send({ type: 'recallArmy', armyId: selectedArmy }));
+      document.getElementById('recall-btn').addEventListener('click', () => send({ type: 'recallArmy', armyId: a.id }));
     }
   } else {
-    syncSection(armyCmd, 'none', `<div class="sub">Left-click one of your groups to select it, then right-click: ground to march there and hold, another of your groups to join it, an enemy or camp to attack. R marches them home.</div>`);
+    syncSection(armyCmd, 'none', `<div class="sub">Left-click one of your groups to select it, or drag a box across several. Shift-click adds one. Then right-click: ground to march there and hold, another of your groups to join it, an enemy or camp to attack. R marches them home.</div>`);
   }
 
   for (const icon of troopIcons) {

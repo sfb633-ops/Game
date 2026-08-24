@@ -1612,6 +1612,60 @@ them. What they keep is the thing worth paying for — 5.0 crosses this map in 4
 seconds against a swordsman's 80, which is what makes them the unit for raiding
 camps, reinforcing a side under pressure, and leaving before the answer arrives.
 
+### Towers stopped being a wall, walls started being one
+
+Archer towers used to stand in the assault chain: garrison, then towers, then
+the keep. Each one therefore added 220 health to the pile an attacker had to
+grind through *as well as* 15 defence and another 8% off incoming damage, and
+nothing capped how many you could build. Three effects stacking at once meant
+the answer to being attacked was always one more tower — six of them, 720 gold
+with no garrison at all, wiped 800 gold of swordsmen.
+
+A tower is a weapon now, not a wall. It still shoots on its own account, still
+cuts down what gets through, still adds its defence to the garrison's punch —
+it is simply not hitpoints the keep hides behind. `applyDefenderLosses` is
+garrison-and-overflow, and `stepPlayerBattle` gates on `pool.hp` rather than on
+`pool.hp || pool.structures.length`.
+
+Walls took over the job they were always closer to, 120 → 260. At 120 a segment
+was a speed bump, which is a large part of why stacking towers was the better
+buy in the first place; twenty swordsmen now spend about 24 seconds on one.
+Measured after: six towers take a bare keep from 22 seconds to 30 and cost the
+attacker a dozen bodies, and ten towers still lose. They buy time, which is what
+a tower should do.
+
+### Drag to select
+
+`selectedArmy` became `selectedArmies`, a set. Press on open ground and drag to
+box-select every group of yours inside it; shift-click adds and removes one; the
+right-click orders — march, attack, join — all go to the whole selection, as
+does R. The panel switches to a summary once more than one group is chosen,
+because the per-group detail below it only means anything for one.
+
+Two details worth keeping. A drag ends in a click, so the click handler has to
+be told to ignore that one or it immediately re-selects whatever is under the
+cursor. And a press that never moved is a click, not an empty box — a third of a
+tile of wobble between pressing and releasing should not clear your selection.
+
+### The window that popped up every other click
+
+Right-click is a game verb here and the map is covered in panels: the log, the
+minimap, the troop bar, the HUD. Only the canvas and the troop slots ever
+suppressed the browser's own context menu, so a right-click landing on any of
+the others opened it over the game — and aiming at a group near the bottom of
+the screen puts about half your clicks on the troop bar.
+
+The other half of it was text selection. Dragging across the map swept up
+whatever text it passed over, and once a number on the troop bar is highlighted,
+right-clicking it offers the browser's menu for the selection rather than
+issuing an order — which is exactly "highlighted numbers, then a weird window".
+
+Both are suppressed across the whole game screen rather than panel by panel,
+because the next panel added would arrive with the same bug. The menu screen is
+left alone, where a right-click on the room-code box should still offer paste,
+and so are the boxes you type troop counts into, where selecting the value to
+overwrite it is the whole interaction.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

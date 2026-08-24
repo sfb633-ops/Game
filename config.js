@@ -257,7 +257,13 @@ const BUILDING_TYPES = {
   //
   // isWall flags the client to place it via the drag tool instead of the
   // single-tile build menu.
-  wall:     { name: 'Wall',          cost: 15,  buildTimeSec: 0, hp: 120, defensePower: 4, isWall: true },
+  // 260, up from 120. Walls are the hitpoints of a defence now that towers are
+  // not: a tower shoots and cuts damage down but no longer stands in front of
+  // the town center, so the thing an attacker grinds through is the stonework
+  // they have to break to get in at all. At 120 a wall was a speed bump — one
+  // group of knights was through a segment in seconds — which is what pushed
+  // everybody towards stacking towers instead.
+  wall:     { name: 'Wall',          cost: 15,  buildTimeSec: 0, hp: 260, defensePower: 4, isWall: true },
 };
 
 // attack is damage per second of a fight, and hp is what each individual
