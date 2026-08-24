@@ -1,0 +1,2278 @@
+// Client: renders authoritative server state on a canvas and sends player
+// commands. Holds no game rules of its own — every number shown here comes
+// straight from the server's 'state' broadcasts.
+
+// `ability` is the name of what this race can do, not what it does — the rules
+// come from the server with the rest of init (`abilityDefs`). It is here only
+// so the menu can say which one you are choosing before you have joined
+// anything and there is a server to ask.
+const RACE_INFO = [
+  { id: 'human',  name: 'Human',  color: '#6fa8dc', desc: 'Balanced. No weaknesses, no edges.',
+    ability: 'Strength in Unity' },
+  { id: 'orc',    name: 'Orc',    color: '#c0392b', desc: 'Hard-hitting units. Weaker economy.',
+    ability: 'Warband' },
+  { id: 'elf',    name: 'Elf',    color: '#6fcf7a', desc: 'Fast building, strong economy. Fragile troops.',
+    ability: 'Agility of the Woods' },
+  { id: 'undead', name: 'Undead', color: '#9b59b6', desc: 'Cheap, fast troops. Slow gold income.',
+    ability: 'Reincarnation' },
+];
+
+let ws = null;
+let myId = null;
+let myRace = null;
+let myRoom = null;         // { code, name } of the game this client is in
+let inputsBound = false;   // canvas/keyboard handlers are attached exactly once
+let cardDefs = null, draftCfg = null, outpostCfg = null;
+let draftShown = null;     // the offer currently on screen, so it deals once
+let armedSpell = null;     // card id waiting for a map click to aim it
+let abilityDefs = null;    // race -> ability definition, straight from init
+let inLobby = false;       // held on the lobby screen, waiting for the host
+let lobbyHostId = null;    // who may press Start — the server decides, not us
+let armedAbility = false;  // an aimed race ability waiting for its map click
+let mapCfg = null, terrain = null, buildCfg = null;
+let buildingTypes = null, unitTypes = null, castleCfg = null;
+let latestState = null;
+let armedDeploy = false;   // staged troops waiting for a map click to land on
+let selectedArmy = null;   // id of one of my armies, selected for orders
+let terrainCanvas = null;
+let wallMode = false;      // wall drag tool active?
+let wallDrag = null;       // Set of "x,y" tiles in the in-progress drag
+let camera = { x: 0, y: 0 }; // viewport top-left in world pixels
+let cameraReady = false;     // have we centered on the player's base yet?
+const keysDown = {};         // held keys for continuous WASD/arrow panning
+let lastFrame = 0;           // timestamp of previous animation frame
+let clock = 0;               // seconds since load; drives sprite animation
+const PAN_SPEED = 700;       // camera pan speed in world px/sec
+// Whole-number zoom steps only: pixel art scaled by a fraction gets uneven
+// pixel sizes, which is exactly the thing this art pass is trying to avoid.
+const ZOOM_STEPS = [1, 2, 3];
+let zoomStep = 0;
+let zoom = ZOOM_STEPS[zoomStep];
+let wallLast = null;       // { x, y } last tile visited during the drag
+let hoverTile = null;      // tile under the cursor, when it's one I could build on
+let hoverPoint = null;     // tile under the cursor regardless — spells aim with this
+// Sized to the *art*, not to the frame: the mounted sprite sits in a 64px cell
+// but only fills 28x48 of it, and reaches at most 16px either side of its feet
+// and 48px above them. Anything smaller clips the horse.
+const TROOP_ICON_W = 36, TROOP_ICON_H = 54;
+const TROOP_ICON_BASE = 51;   // where the feet go inside that box
+const armyFacing = {};     // armyId -> last known facing, so idle troops keep it
+const armyPrev = {};       // armyId -> {x, y} from the previous state message
+let effects = [];          // transient smoke puffs: { x, y, start, scale, life }
+let spellFlash = [];       // one-shot rings where a spell landed
+let arrows = [];           // tower shots in flight
+const towerShots = new Map(); // "x,y" -> the last shot that tower took
+const seenBuildings = new Map();   // owner:x,y -> what was standing there
+const buildingPop = new Map();     // same key -> when it landed, for the rise-in
+let buildingsPrimed = false;       // the first state of a match must not erupt
+const seenArmies = new Set();
+
+const canvas = document.getElementById('map');
+const ctx = canvas.getContext('2d');
+
+// ---------- Main menu ----------
+
+const menuEl = document.getElementById('menu');
+const nameInput = document.getElementById('name-input');
+const codeInput = document.getElementById('code-input');
+const serverInput = document.getElementById('server-input');
+const roomListEl = document.getElementById('room-list');
+const menuErrorEl = document.getElementById('menu-error');
+
+const raceGrid = document.getElementById('race-grid');
+const racePreviews = [];   // { race, ctx } — the marching sprite on each card
+
+// Whatever you typed last time is what you almost certainly want this time.
+const STORE = {
+  name: 'empire.name', race: 'empire.race', server: 'empire.server', muted: 'empire.muted',
+  // What it takes to walk back into the same empire after a dropped
+  // connection: which server, which room, and the token that proves it.
+  session: 'empire.session',
+};
+const remembered = (key, fallback) => {
+  try { const v = localStorage.getItem(key); return v === null ? fallback : v; } catch { return fallback; }
+};
+const remember = (key, value) => { try { localStorage.setItem(key, value); } catch { /* private mode */ } };
+
+nameInput.value = remembered(STORE.name, '');
+serverInput.value = remembered(STORE.server, '');
+nameInput.addEventListener('input', () => { remember(STORE.name, nameInput.value); updateMenuButtons(); });
+serverInput.addEventListener('input', () => remember(STORE.server, serverInput.value));
+codeInput.addEventListener('input', () => {
+  codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  updateMenuButtons();
+});
+
+RACE_INFO.forEach(r => {
+  const card = document.createElement('div');
+  card.className = 'race-card';
+  card.innerHTML = '<canvas class="race-preview" width="64" height="52"></canvas>' +
+    '<h3 style="color:' + r.color + '">' + r.name + '</h3><small>' + r.desc + '</small>' +
+    '<small class="race-ability">' + r.ability + '</small>';
+  card.addEventListener('click', () => selectRace(r.id));
+  card.dataset.race = r.id;
+  raceGrid.appendChild(card);
+  const pv = card.querySelector('canvas');
+  pv.getContext('2d').imageSmoothingEnabled = false;
+  racePreviews.push({ race: r.id, ctx: pv.getContext('2d'), canvas: pv });
+});
+
+function selectRace(id) {
+  myRace = id;
+  remember(STORE.race, id);
+  document.querySelectorAll('.race-card').forEach(c => c.classList.toggle('selected', c.dataset.race === id));
+  updateMenuButtons();
+}
+selectRace(remembered(STORE.race, 'human'));
+
+function updateMenuButtons() {
+  const named = nameInput.value.trim().length > 0;
+  const ready = !!myRace && named;
+  document.getElementById('host-btn').disabled = !ready;
+  document.getElementById('join-btn').disabled = !ready || codeInput.value.length < 3;
+  document.getElementById('menu-hint').textContent = named
+    ? 'Host a game and share the code, or join a friend with theirs.'
+    : 'Enter a commander name to play.';
+}
+
+function menuError(text) {
+  menuErrorEl.textContent = text;
+  menuErrorEl.classList.toggle('hidden', !text);
+}
+
+// Art loads once, up front: the race cards want it before anyone has joined,
+// and by the time a match starts it's already warm.
+let assetsReady = false;
+Sprites.load(() => {
+  assetsReady = true;
+  if (mapCfg) { buildTerrainLayer(); render(); }
+  requestAnimationFrame(previewFrame);
+}, (err) => {
+  log('Could not load art assets — run "node tools/build-assets.js".');
+  console.error(err);
+});
+
+// Each race card shows its own troops marching in place.
+function previewFrame(ts) {
+  const t = ts / 1000;
+  for (const p of racePreviews) {
+    const c = p.ctx;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, p.canvas.width, p.canvas.height);
+    c.imageSmoothingEnabled = false;
+    Sprites.drawUnit(c, p.race, 'swordsman', 'walk', 'down', t,
+      p.canvas.width / 2, p.canvas.height - 4);
+  }
+  if (!menuEl.classList.contains('hidden')) requestAnimationFrame(previewFrame);
+}
+
+// ---------- Menu music ----------
+
+// Autoplay with sound is blocked until the page has been interacted with, so
+// the first click or keypress is what actually starts it. Muting is sticky.
+const music = document.getElementById('menu-music');
+const soundBtn = document.getElementById('sound-btn');
+let muted = remembered(STORE.muted, '0') === '1';
+music.volume = 0.45;
+
+function syncSound() {
+  soundBtn.textContent = muted ? 'MUSIC OFF' : 'MUSIC ON';
+  soundBtn.classList.toggle('active', !muted);
+  if (muted || menuEl.classList.contains('hidden')) music.pause();
+  else music.play().catch(() => { /* still waiting for a gesture */ });
+}
+soundBtn.addEventListener('click', () => {
+  muted = !muted;
+  remember(STORE.muted, muted ? '1' : '0');
+  syncSound();
+});
+for (const evt of ['pointerdown', 'keydown']) {
+  window.addEventListener(evt, syncSound, { once: false, passive: true });
+}
+// A backgrounded tab is not allowed to start media at all, so try again the
+// moment it comes back to the front.
+document.addEventListener('visibilitychange', () => { if (!document.hidden) syncSound(); });
+syncSound();
+
+// ---------- Connection ----------
+
+// Where to point the socket. Blank means "the server that served this page",
+// which is the normal case; a host means a friend is running their own.
+function serverUrl() {
+  const raw = serverInput.value.trim();
+  if (!raw) {
+    return (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host;
+  }
+  if (/^wss?:\/\//i.test(raw)) return raw;
+  // A tunnelled or deployed server is reached over https, and its socket has
+  // to be wss to match — so the scheme someone pastes is taken at its word.
+  // A bare host falls back to the scheme this page was served over.
+  const https = /^https:\/\//i.test(raw) ||
+    (!/^http:\/\//i.test(raw) && location.protocol === 'https:');
+  return (https ? 'wss:' : 'ws:') + '//' + raw.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+}
+
+// The credentials for getting back into a game in progress.
+let session = null;          // { url, code, token }
+let reconnectTimer = null;
+let reconnectDelay = 0;
+const RECONNECT_MIN_MS = 800, RECONNECT_MAX_MS = 15000;
+
+function saveSession() {
+  remember(STORE.session, session ? JSON.stringify(session) : '');
+}
+function loadSession() {
+  try { return JSON.parse(remembered(STORE.session, '') || 'null'); } catch { return null; }
+}
+
+// Open a socket (reusing one that's already up) and run the callback once it is
+// open. `onOpen` is re-run on every reconnect, which is how a dropped game
+// re-announces itself.
+function withSocket(onOpen) {
+  if (ws && ws.readyState === WebSocket.OPEN && ws.serverUrl === serverUrl()) { onOpen(); return; }
+  if (ws && ws.readyState === WebSocket.CONNECTING && ws.serverUrl === serverUrl()) { ws.pendingOpen.push(onOpen); return; }
+  if (ws) { ws.intentionallyClosed = true; try { ws.close(); } catch { /* already gone */ } }
+  let url;
+  try { url = serverUrl(); ws = new WebSocket(url); } catch (e) { menuError('That server address is not valid.'); return; }
+  const sock = ws;
+  sock.serverUrl = url;
+  sock.pendingOpen = [onOpen];
+  menuError('');
+  sock.addEventListener('open', () => {
+    reconnectDelay = 0;
+    setConnectionNotice('');
+    const queued = sock.pendingOpen;
+    sock.pendingOpen = [];
+    for (const fn of queued) fn();
+  });
+  sock.addEventListener('message', (event) => {
+    let msg;
+    try { msg = JSON.parse(event.data); } catch { return; }
+    if (msg.type === 'init') onInit(msg);
+    else if (msg.type === 'state') onState(msg);
+    else if (msg.type === 'lobby') renderRoomList(msg.rooms);
+    else if (msg.type === 'lobbyState') onLobbyState(msg);
+    else if (msg.type === 'matchStart') { /* the first state message closes the lobby */ }
+    else if (msg.type === 'joinError') menuError(msg.reason);
+    else if (msg.type === 'resumeFailed') abandonSession('That game is no longer running.');
+    else if (msg.type === 'left') { /* teardown already done locally */ }
+    // The server is going down for a redeploy. The socket closes right behind
+    // this, and scheduleReconnect takes it from there.
+    else if (msg.type === 'serverClosing') setConnectionNotice('Server restarting — reconnecting…');
+  });
+  sock.addEventListener('error', () => {
+    if (!menuEl.classList.contains('hidden')) menuError('Could not reach ' + url + '.');
+  });
+  sock.addEventListener('close', () => {
+    if (sock.intentionallyClosed) return;
+    if (session) scheduleReconnect();
+    else if (!menuEl.classList.contains('hidden')) roomListEl.innerHTML = '<div class="sub">Not connected.</div>';
+  });
+}
+
+// Connections across the internet drop for all sorts of dull reasons. The
+// server holds the empire open for a couple of minutes, so keep trying —
+// backing off so a server that is genuinely down isn't hammered.
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  reconnectDelay = reconnectDelay ? Math.min(RECONNECT_MAX_MS, reconnectDelay * 2) : RECONNECT_MIN_MS;
+  setConnectionNotice(`Connection lost — retrying in ${Math.round(reconnectDelay / 1000)}s…`);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (!session) return;
+    setConnectionNotice('Reconnecting…');
+    withSocket(() => send({ type: 'resume', code: session.code, session: session.token }));
+  }, reconnectDelay);
+}
+
+// The seat is gone — dropped for too long, or given up deliberately. Either
+// way: stop trying to reconnect and put the player back in the menu.
+function abandonSession(reason) {
+  session = null;
+  saveSession();
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  setConnectionNotice('');
+  latestState = null;
+  myId = null;
+  myRoom = null;
+  selectedArmy = null; armedSpell = null; armedAbility = false; armedBuild = null; armedDeploy = false;
+  showLobby(false);
+  lobbyHostId = null;
+  document.getElementById('game-ui').classList.add('hidden');
+  document.getElementById('draft').classList.add('hidden');
+  document.getElementById('game-over-banner').classList.remove('show');
+  showExitConfirm(false);
+  menuEl.classList.remove('hidden');
+  syncSound();
+  menuError(reason || '');
+  refreshRooms();
+}
+
+// ---------- Leaving ----------
+
+// Quitting is destructive and irreversible, so it asks — and says which of the
+// two things it is about to do, because they are very different.
+function showExitConfirm(show) {
+  const box = document.getElementById('exit-confirm');
+  if (!box) return;
+  if (show) {
+    const others = latestState ? latestState.players.filter(p => p.id !== myId).length : 0;
+    document.getElementById('exit-note').textContent = others
+      ? `Your empire is removed and the other ${others === 1 ? 'empire keeps' : `${others} empires keep`} playing. You can't come back.`
+      : 'You are the only empire here, so leaving ends this game for good.';
+  }
+  box.classList.toggle('hidden', !show);
+  document.getElementById('exit-btn').classList.toggle('active', show);
+}
+
+function leaveGame() {
+  // Tell the server before tearing down: it needs the socket to still know
+  // which room this was. The socket itself stays open for the lobby.
+  send({ type: 'leave' });
+  abandonSession('');
+}
+
+function setConnectionNotice(text) {
+  const el = document.getElementById('conn-notice');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('hidden', !text);
+}
+
+function send(msg) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+}
+
+const playerName = () => nameInput.value.trim().slice(0, 16);
+
+document.getElementById('host-btn').addEventListener('click', () => {
+  if (!myRace || !playerName()) return;
+  withSocket(() => send({ type: 'create', playerName: playerName(), race: myRace, roomName: playerName() + "'s game" }));
+});
+
+document.getElementById('join-btn').addEventListener('click', () => joinRoom(codeInput.value));
+document.getElementById('refresh-btn').addEventListener('click', refreshRooms);
+
+function joinRoom(code) {
+  if (!myRace || !playerName() || !code) return;
+  withSocket(() => send({ type: 'join', code, playerName: playerName(), race: myRace }));
+}
+
+function refreshRooms() {
+  roomListEl.innerHTML = '<div class="sub">Looking…</div>';
+  withSocket(() => send({ type: 'lobby' }));
+}
+
+function renderRoomList(list) {
+  if (!list.length) {
+    roomListEl.innerHTML = '<div class="sub">No games running. Host one and share the code.</div>';
+    return;
+  }
+  roomListEl.innerHTML = '';
+  for (const room of list) {
+    const row = document.createElement('div');
+    row.className = 'room-row';
+    row.innerHTML = '<span class="room-code">' + room.code + '</span>' +
+      '<span class="room-name">' + escapeText(room.name) + '</span>' +
+      // In its lobby you get an equal start; running, you would be arriving
+      // late into a map somebody else has had ten minutes in.
+      (room.started ? '<span class="room-live">IN PLAY</span>'
+                    : '<span class="room-open">LOBBY</span>') +
+      '<span class="sub">' + room.players + 'p</span>';
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-sm';
+    btn.textContent = room.started ? 'Join late' : 'Join';
+    btn.addEventListener('click', () => joinRoom(room.code));
+    row.appendChild(btn);
+    roomListEl.appendChild(row);
+  }
+}
+
+// If the last session ended in a disconnect rather than a quit, try to walk
+// straight back into it before showing the menu at all.
+(function resumeLastGame() {
+  const saved = loadSession();
+  if (!saved || !saved.token || !saved.code) { refreshRooms(); return; }
+  if (saved.url && saved.url !== serverUrl()) { refreshRooms(); return; }
+  session = saved;
+  setConnectionNotice('Rejoining your game…');
+  withSocket(() => send({ type: 'resume', code: saved.code, session: saved.token }));
+  withSocket(() => send({ type: 'lobby' }));
+})();
+
+window.addEventListener('beforeunload', () => { if (ws) ws.intentionallyClosed = true; });
+
+document.getElementById('exit-btn').addEventListener('click', () => {
+  showExitConfirm(document.getElementById('exit-confirm').classList.contains('hidden'));
+});
+document.getElementById('exit-no').addEventListener('click', () => showExitConfirm(false));
+document.getElementById('exit-yes').addEventListener('click', leaveGame);
+document.getElementById('quit-btn').addEventListener('click', leaveGame);
+
+document.getElementById('restart-btn').addEventListener('click', () => {
+  document.getElementById('game-over-banner').classList.remove('show');
+  send({ type: 'restart' });
+});
+
+function onInit(msg) {
+  const rejoining = inputsBound;   // a rematch reuses the same socket and DOM
+  myId = msg.playerId;
+  mapCfg = msg.map;
+  terrain = msg.terrain;
+  buildCfg = msg.build;
+  buildingTypes = msg.buildingTypes;
+  unitTypes = msg.unitTypes;
+  castleCfg = msg.castle;
+  cardDefs = msg.cards;
+  abilityDefs = msg.raceAbilities || null;
+  draftCfg = msg.cardDraft;
+  outpostCfg = msg.outpost;
+  myRoom = msg.room || null;
+  if (msg.session && myRoom) {
+    session = { url: ws.serverUrl, code: myRoom.code, token: msg.session };
+    saveSession();
+  }
+  setConnectionNotice('');
+
+  // A fresh match means a fresh map and no leftover selections from the last one.
+  latestState = null;
+  terrainCanvas = null;
+  selectedArmy = null; armedDeploy = false;
+  armedSpell = null; armedAbility = false; draftShown = null;
+  // Held in the lobby, or straight into a match already in progress. Either
+  // way everything below is built now, so pressing Start costs nothing.
+  showLobby(msg.started === false);
+  lobbyHostId = msg.hostId || null;
+  seenBuildings.clear();
+  buildingPop.clear();
+  lastBuildings.clear();
+  buildingsPrimed = false;
+  showExitConfirm(false);
+  for (const k of Object.keys(sectionSig)) delete sectionSig[k];
+  document.getElementById('draft').classList.add('hidden');
+  cameraReady = false;
+  effects = [];
+  seenArmies.clear();
+  for (const k of Object.keys(armyPrev)) delete armyPrev[k];
+  for (const k of Object.keys(armyFacing)) delete armyFacing[k];
+
+  menuEl.classList.add('hidden');
+  syncSound();                  // the theme belongs to the menu, not the match
+  document.getElementById('game-ui').classList.remove('hidden');
+  document.getElementById('room-code').textContent = myRoom ? myRoom.code : '—';
+
+  resizeCanvas();               // canvas now fills the viewport pane, not the whole map
+  buildUnitInputs();
+  if (rejoining) { if (assetsReady) buildTerrainLayer(); return; }
+  inputsBound = true;
+  // The map is prerendered as soon as both the art and this init message have
+  // arrived; whichever lands second does it.
+  if (assetsReady) buildTerrainLayer();
+  window.addEventListener('resize', resizeCanvas);
+  canvas.addEventListener('click', onCanvasClick);
+  canvas.addEventListener('contextmenu', onCanvasRightClick);
+  canvas.addEventListener('mousedown', onCanvasMouseDown);
+  canvas.addEventListener('mousemove', onCanvasMouseMove);
+  canvas.addEventListener('mouseleave', () => { hoverTile = null; hoverPoint = null; });
+  canvas.addEventListener('wheel', onWheel, { passive: false });
+  window.addEventListener('mouseup', onCanvasMouseUp);
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
+  requestAnimationFrame(frame); // continuous render + camera pan loop
+  document.getElementById('wall-tool-btn').addEventListener('click', () => toggleWallMode(!wallMode));
+  buildPalette();
+  log(myRoom ? `Joined game ${myRoom.code} as ${myRace}. Share the code to invite friends.`
+             : `Joined as ${myRace}. Build your empire.`);
+}
+
+// ---------- Lobby ----------
+
+// Held before the match begins so that everybody's draft starts on the same
+// second. The game UI behind this is already fully built and the map already
+// prerendered, so starting is instant — which is the other reason the wait
+// happens here rather than on the menu.
+function showLobby(on) {
+  inLobby = on;
+  document.getElementById('lobby').classList.toggle('hidden', !on);
+}
+
+function onLobbyState(msg) {
+  if (msg.room) myRoom = msg.room;
+  lobbyHostId = msg.hostId || null;
+  document.getElementById('lobby-code').textContent = myRoom ? myRoom.code : '————';
+  document.getElementById('lobby-count').textContent =
+    `${msg.players.length}/${mapCfg ? mapCfg.maxPlayers : '?'}`;
+
+  const holder = document.getElementById('lobby-players');
+  holder.innerHTML = '';
+  for (const p of msg.players) {
+    const info = RACE_INFO.find(r => r.id === p.race);
+    const row = document.createElement('div');
+    row.className = 'lobby-player' + (p.away ? ' is-away' : '');
+    row.innerHTML =
+      `<span class="lobby-name">${escapeText(p.name)}${p.id === myId ? ' (you)' : ''}</span>` +
+      `<span class="lobby-race" style="color:${info ? info.color : '#fff'}">${info ? info.name : p.race}</span>` +
+      (p.id === lobbyHostId ? '<span class="lobby-host">HOST</span>' : '') +
+      (p.away ? '<span class="lobby-away">AWAY</span>' : '');
+    holder.appendChild(row);
+  }
+
+  // Only the host gets a button; everyone else gets told what they are waiting
+  // for, so nobody sits wondering whether the screen is broken.
+  const amHost = lobbyHostId === myId;
+  const startBtn = document.getElementById('lobby-start');
+  startBtn.classList.toggle('hidden', !amHost);
+  // The count lives on the roster header right above it; repeating it here
+  // only made the label wrap to three lines.
+  startBtn.textContent = 'Start Match';
+  const hostName = (msg.players.find(p => p.id === lobbyHostId) || {}).name;
+  document.getElementById('lobby-hint').textContent = amHost
+    ? 'Everyone drafts the moment you start, so nobody gets a head start.'
+    : `Waiting for ${escapeText(hostName || 'the host')} to start the match…`;
+}
+
+// Names come from other players, so they are escaped before they go anywhere
+// near innerHTML.
+function escapeText(raw) {
+  return String(raw == null ? '' : raw).replace(/[&<>"']/g,
+    ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+document.getElementById('lobby-start').addEventListener('click', () => send({ type: 'startMatch' }));
+document.getElementById('lobby-leave').addEventListener('click', () => {
+  send({ type: 'leave' });
+  abandonSession('');
+});
+
+// ---------- Opening draft ----------
+
+// The hand is only dealt once per offer. Re-rendering it every state message
+// would restart the roll-in animation five times a second.
+function renderDraft(me) {
+  const overlay = document.getElementById('draft');
+  if (!me || !me.draft) {
+    overlay.classList.add('hidden');
+    draftShown = null;
+    return;
+  }
+  const timer = document.getElementById('draft-timer');
+  timer.textContent = Math.ceil(me.draft.remainingSec);
+  timer.classList.toggle('urgent', me.draft.remainingSec <= 10);
+  const left = draftCfg.pick - me.cards.length;
+  document.getElementById('draft-pick').textContent = left;
+
+  const key = me.draft.offered.join(',');
+  if (draftShown === key) { markTakenCards(me); return; }
+  draftShown = key;
+  overlay.classList.remove('hidden');
+
+  const holder = document.getElementById('draft-cards');
+  holder.innerHTML = '';
+  me.draft.offered.forEach((id, i) => {
+    const def = cardDefs[id];
+    if (!def) return;
+    const el = document.createElement('div');
+    el.className = `draft-card card-${def.kind}`;
+    const art = cardArt(id, 'full');
+    el.style.setProperty('--i', i);
+    el.dataset.card = id;
+    // The sigil is the fallback face. Real art, when the pipeline has produced
+    // it, covers the sigil; if the file is missing the <img> takes itself out
+    // of the document and the sigil shows through.
+    el.innerHTML =
+      `<div class="card-face"><span class="card-sigil">${def.sigil}</span>` +
+      (art ? `<img src="assets/${art.file}" alt="" onerror="this.remove()">` : '') + '</div>' +
+      `<div class="card-kind">${def.kind}</div>` +
+      `<div class="card-title">${def.name}</div>` +
+      `<div class="card-desc">${def.desc}</div>`;
+    el.addEventListener('click', () => {
+      if (el.classList.contains('taken') || el.classList.contains('spent')) return;
+      send({ type: 'pickCard', cardId: id });
+    });
+    holder.appendChild(el);
+  });
+  markTakenCards(me);
+}
+
+// Kept apart from the deal so the hand can update without re-animating.
+function markTakenCards(me) {
+  const full = me.cards.length >= draftCfg.pick;
+  document.querySelectorAll('.draft-card').forEach(el => {
+    const taken = me.cards.includes(el.dataset.card);
+    el.classList.toggle('taken', taken);
+    el.classList.toggle('spent', !taken && full);
+  });
+}
+
+// ---------- Deploying troops ----------
+
+// Troops leave the keep by being put somewhere, never by being pointed at an
+// enemy. Arm the staged troops, click the ground, and they march out and hold
+// it — inside your own border, at an outpost you have taken, or out in the open
+// where you want a group standing.
+function armDeploy(on) {
+  armedDeploy = !!on && !!stagedUnits();
+  if (armedDeploy) { armedSpell = null; armedAbility = false; armBuild(null); }
+  canvas.style.cursor = armedDeploy ? 'crosshair' : (wallMode ? 'cell' : 'crosshair');
+  render(); renderPanel();
+}
+
+// Send the staged troops to a tile and clear the staging row. Returns whether
+// the order went out, so a click on water can leave the deployment armed to try
+// again rather than silently throwing the selection away.
+function deployStagedAt(ix, iy) {
+  const units = stagedUnits();
+  if (!units) return false;
+  if (!isMarchable(ix, iy)) { log('Troops cannot march onto water or rock.'); return false; }
+  if (!isMyTerritory(ix, iy)) {
+    log('Troops can only be deployed inside your own territory — send them on from there.');
+    return false;
+  }
+  send({ type: 'deployUnits', units, x: ix, y: iy });
+  document.querySelectorAll('#unit-inputs input').forEach(inp => { inp.value = 0; });
+  updateDeployButton();
+  return true;
+}
+
+// ---------- Race ability ----------
+
+// One button, and it is the same button for the whole match: an ability is
+// neither drafted nor bought, so unlike the hand there is nothing here to
+// discover. Both clocks shown are the server's own — the client never runs an
+// ability timer of its own, so a dropped connection can't leave this claiming
+// a buff the empire doesn't have.
+function renderAbility(me) {
+  const holder = document.getElementById('ability-card');
+  const ab = abilityDefs && abilityDefs[me.race];
+  if (!ab) { syncSection(holder, 'none', '<div class="sub">No ability.</div>'); return; }
+  const st = me.ability || { cooldownRemaining: 0, activeRemaining: 0 };
+  // The name, the face and the rules never change, so they are written once
+  // and the two countdowns are poked into the nodes below every tick.
+  if (syncSection(holder, me.race, `
+    <div class="ability-head">
+      <span class="ability-sigil">${ab.sigil}</span>
+      <span class="ability-name">${ab.name}</span>
+    </div>
+    <div class="sub ability-desc">${ab.desc}</div>
+    <div class="ability-timer"><span data-live="timer"></span></div>
+    <button class="btn btn-sm" id="ability-btn"><span data-live="label">Use</span><span class="btn-note">Q</span></button>
+  `)) {
+    holder.querySelector('#ability-btn').addEventListener('click', useAbility);
+  }
+  const ready = st.cooldownRemaining <= 0;
+  const btn = holder.querySelector('#ability-btn');
+  btn.disabled = !ready || !me.alive;
+  btn.classList.toggle('armed', armedAbility);
+  holder.querySelector('.ability-timer').classList.toggle('on', st.activeRemaining > 0);
+  syncLive(holder, {
+    label: !ready ? `Ready in ${st.cooldownRemaining}s`
+         : armedAbility ? 'Click the map…'
+         : ab.aim === 'point' ? 'Aim' : 'Use',
+    timer: st.activeRemaining > 0 ? `Active — ${st.activeRemaining}s left` : '',
+  });
+}
+
+// A self-cast goes out at once; an aimed one arms the next map click, exactly
+// the way a spell card does. The server decides either way — this only spares
+// the player a click that was never going to be accepted.
+function useAbility() {
+  const me = myPlayer();
+  const ab = me && abilityDefs && abilityDefs[me.race];
+  if (!me || !ab || !me.alive) return;
+  if (me.ability && me.ability.cooldownRemaining > 0) return;
+  if (ab.aim === 'point') { armAbility(!armedAbility); return; }
+  send({ type: 'useAbility' });
+  armAbility(false);
+}
+
+function armAbility(on) {
+  armedAbility = !!on;
+  if (armedAbility) { armedSpell = null; armBuild(null); }
+  canvas.style.cursor = armedAbility ? 'crosshair' : (wallMode ? 'cell' : 'crosshair');
+  renderPanel();
+}
+
+// ---------- Spells ----------
+
+function armSpell(id) {
+  armedSpell = (id && armedSpell !== id) ? id : null;
+  if (armedSpell) { armedAbility = false; armBuild(null); }
+  canvas.style.cursor = armedSpell ? 'crosshair' : (wallMode ? 'cell' : 'crosshair');
+  renderPanel();
+}
+
+// The face a card shows, at whichever of the two generated sizes is asked for.
+// Anything without art falls back to the card back, and a card list with no
+// manifest at all falls back to the sigil glyph the markup already carries.
+function cardArt(id, size) {
+  const all = Sprites.manifest.cards;
+  const entry = all && (all[id] || all.back);
+  if (!entry) return null;
+  return size === 'small' ? entry.small || entry : entry;
+}
+
+// What the panel shows for everything drafted: the hand, laid out as a row of
+// faces the way a hand of cards actually reads. A card is a picture and a
+// tooltip — spelling every boon out in the panel cost more height than the
+// whole rest of the section and it never changes after the draft. A spell also
+// carries its remaining charges, and clicking one arms the next map click.
+function renderCards(me) {
+  const holder = document.getElementById('card-list');
+  if (!cardDefs || !me.cards.length) {
+    syncSection(holder, 'empty', '<div class="sub">No cards.</div>');
+    return;
+  }
+  let anySpell = false;
+  const faces = me.cards.map(id => {
+    const def = cardDefs[id];
+    if (!def) return '';
+    const charges = me.spells[id] || 0;
+    const art = cardArt(id, 'small');
+    const spent = def.spell && charges <= 0;
+    if (def.spell) anySpell = true;
+    // A spell's whole face is the button — it is already card-shaped and the
+    // panel has no room for a card and a button beside it.
+    return `<div class="owned-card card-${def.kind}${armedSpell === id ? ' spell-armed' : ''}${spent ? ' spell-spent' : ''}"` +
+      (def.spell && !spent ? ` role="button" tabindex="0" data-spell="${id}"` : '') +
+      ` title="${def.name} — ${def.desc}${def.spell ? ` (${charges} left)` : ''}">` +
+      `<span class="card-sigil">${def.sigil}</span>` +
+      (art ? `<img src="assets/${art.file}" alt="" onerror="this.remove()">` : '') +
+      (def.spell ? `<span class="charge-badge">×${charges}</span>` : '') +
+      (armedSpell === id ? '<span class="aiming">Aiming…</span>' : '') +
+      '</div>';
+  }).join('');
+  const hint = anySpell
+    ? `<div class="sub hand-hint">${armedSpell ? 'Click the map to aim, or the card again to cancel.' : 'Click a spell card to aim it.'}</div>`
+    : '';
+  const html = `<div class="card-hand">${faces}</div>${hint}`;
+  const sig = me.cards.map(id => `${id}:${me.spells[id] || 0}`).join('|') + '|' + armedSpell;
+  if (syncSection(holder, sig, html)) {
+    holder.querySelectorAll('[data-spell]').forEach(el => {
+      el.addEventListener('click', () => armSpell(el.dataset.spell));
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); armSpell(el.dataset.spell); }
+      });
+    });
+  }
+}
+
+function toggleWallMode(on) {
+  wallMode = on;
+  document.getElementById('wall-tool-btn').classList.toggle('active', wallMode);
+  wallDrag = null; wallLast = null;
+  if (wallMode) armedBuild = null;
+  document.querySelectorAll('.build-item').forEach(el => el.classList.remove('armed'));
+  canvas.style.cursor = wallMode ? 'cell' : 'crosshair';
+  render(); renderPanel();
+}
+
+// ---------- Camera / viewport ----------
+
+function resizeCanvas() {
+  const wrap = document.getElementById('map-wrap');
+  canvas.width = Math.max(1, wrap.clientWidth);
+  canvas.height = Math.max(1, wrap.clientHeight);
+  clampCamera();
+}
+
+function worldSize() {
+  return { w: mapCfg.width * mapCfg.tileSize, h: mapCfg.height * mapCfg.tileSize };
+}
+
+// Viewport size expressed in world pixels (shrinks as you zoom in).
+function viewWorld() {
+  return { vw: canvas.width / zoom, vh: canvas.height / zoom };
+}
+
+// Keep the camera inside the world; if the (zoomed) viewport is larger than the
+// world on an axis, center it on that axis.
+function clampCamera() {
+  if (!mapCfg) return;
+  const { w, h } = worldSize();
+  const { vw, vh } = viewWorld();
+  camera.x = w <= vw ? (w - vw) / 2 : Math.max(0, Math.min(w - vw, camera.x));
+  camera.y = h <= vh ? (h - vh) / 2 : Math.max(0, Math.min(h - vh, camera.y));
+}
+
+function centerCameraOn(tileX, tileY) {
+  const ts = mapCfg.tileSize;
+  const { vw, vh } = viewWorld();
+  camera.x = tileX * ts - vw / 2;
+  camera.y = tileY * ts - vh / 2;
+  clampCamera();
+}
+
+// Mouse-wheel zoom, anchored on the tile under the cursor. Steps between whole
+// magnifications so every sprite pixel stays a clean square.
+function onWheel(e) {
+  e.preventDefault();
+  const next = Math.max(0, Math.min(ZOOM_STEPS.length - 1, zoomStep + (e.deltaY < 0 ? 1 : -1)));
+  if (next === zoomStep) return;
+  const rect = canvas.getBoundingClientRect();
+  const sx = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const sy = (e.clientY - rect.top) * (canvas.height / rect.height);
+  const wx = camera.x + sx / zoom, wy = camera.y + sy / zoom; // world point under cursor
+  zoomStep = next;
+  zoom = ZOOM_STEPS[zoomStep];
+  camera.x = wx - sx / zoom; camera.y = wy - sy / zoom;        // keep that point fixed
+  clampCamera();
+}
+
+function updateCamera(dt) {
+  let dx = 0, dy = 0;
+  if (keysDown['w'] || keysDown['arrowup']) dy -= 1;
+  if (keysDown['s'] || keysDown['arrowdown']) dy += 1;
+  if (keysDown['a'] || keysDown['arrowleft']) dx -= 1;
+  if (keysDown['d'] || keysDown['arrowright']) dx += 1;
+  if (dx || dy) {
+    const len = Math.hypot(dx, dy) || 1;
+    camera.x += (dx / len) * PAN_SPEED * dt;
+    camera.y += (dy / len) * PAN_SPEED * dt;
+    clampCamera();
+  }
+}
+
+// Main animation loop: pan the camera from held keys, then redraw. Rendering
+// every frame (not just per state message) also smooths army motion.
+function frame(ts) {
+  const dt = lastFrame ? Math.min(0.05, (ts - lastFrame) / 1000) : 0;
+  lastFrame = ts;
+  clock += dt;
+  if (latestState && !cameraReady) {
+    const me = myPlayer();
+    if (me) { centerCameraOn(me.baseX, me.baseY); cameraReady = true; }
+  }
+  updateCamera(dt);
+  render();
+  drawTroopIcons();
+  drawBuildIcons();
+  requestAnimationFrame(frame);
+}
+
+// ---------- Rendering ----------
+
+// Prerender the whole map once into an offscreen canvas, drawn offset by the
+// camera each frame. Grass, earth and rock are blended by autotile and dressed
+// with scenery — see Sprites.buildTerrainCanvas.
+function buildTerrainLayer() {
+  terrainCanvas = Sprites.buildTerrainCanvas(
+    mapCfg.width, mapCfg.height,
+    (x, y) => terrain[y][x] === 1,        // mountain
+    (x, y) => terrain[y][x] === 2);       // water
+}
+
+function colorForPlayer(id) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  const palette = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22', '#1abc9c', '#ecf0f1'];
+  return palette[hash % palette.length];
+}
+
+const BUILDING_COLOR = { bank: '#e6c14a', barracks: '#c0392b', stable: '#3498db', siege: '#8e44ad', tower: '#7f8c8d', wall: '#9a8b6f' };
+
+// Every wall tile currently on the map, so each one can pick the rampart
+// piece that matches its neighbours instead of a lone block.
+function wallLookup() {
+  const set = new Set();
+  if (latestState) {
+    for (const p of latestState.players)
+      for (const b of p.buildings) if (b.type === 'wall') set.add(`${b.x},${b.y}`);
+  }
+  return (x, y) => set.has(`${x},${y}`);
+}
+
+// Draw one building on its tile. Walls are rampart sections keyed off their
+// neighbours; everything else is a structure sprite with a ground shadow and
+// the owner's pennant.
+function drawBuilding(b, px, py, color, hasWall, race, pop, insideX) {
+  const ts = mapCfg.tileSize;
+  if (b.type === 'wall') {
+    if (!Sprites.drawWall(ctx, b.x, b.y, hasWall, { race, insideX, alpha: pop && pop.alpha })) {
+      ctx.fillStyle = BUILDING_COLOR.wall;
+      ctx.fillRect(px - ts / 2, py - ts / 2, ts, ts);
+    }
+    return;
+  }
+  // The art set follows the owner's race, and the town center's sprite follows
+  // its level, so an upgraded keep is visibly a bigger keep.
+  const art = Object.assign({ race, level: b.level, time: clock }, pop || {});
+  if (!Sprites.drawBuilding(ctx, b.type, px, py, art)) {
+    ctx.fillStyle = b.type === 'castle' ? color : (BUILDING_COLOR[b.type] || '#888');
+    ctx.fillRect(px - ts / 2, py - ts / 2, ts, ts);
+    return;
+  }
+  // A tower's archer is a separate sprite standing in its gallery. He watches
+  // the last thing the tower shot at and plays his loose while the arrow is
+  // still in the air; with nothing to do he idles facing the camera.
+  if (b.type === 'tower') {
+    const shot = towerShots.get(`${b.x},${b.y}`);
+    const shotAge = shot ? clock - shot.at : null;
+    const live = shotAge != null && shotAge < ARCHER_LOOSE_SECS;
+    Sprites.drawTowerArcher(ctx, px, py, clock, Object.assign({}, art, {
+      aim: live ? shot.aim : null,
+      shotAge: live ? shotAge : null,
+    }));
+  }
+  // The pennant is planted once the building has actually settled — watching
+  // it fade up out of the dust with the roof looks like part of the sprite.
+  if (!pop) Sprites.drawBanner(ctx, b.type, px, py, color, art);
+}
+
+// Tiles occupied by any building or a live camp — used to mirror the server's
+// placement rules for the local build-preview (server still re-validates).
+function occupiedTiles() {
+  const set = new Set();
+  if (!latestState) return set;
+  for (const p of latestState.players) for (const b of p.buildings) if (b.type) set.add(`${b.x},${b.y}`);
+  for (const c of latestState.aiCamps) if (!c.defeated || c.capturedBy) set.add(`${c.x},${c.y}`);
+  return set;
+}
+
+// Display name for a player id — falls back to the id for anyone who has
+// already left the match but is still referenced by an army or a log line.
+function playerNameOf(id) {
+  const p = latestState && latestState.players.find(q => q.id === id);
+  return p ? p.name : id;
+}
+
+// What a thing actually costs this player, rounded exactly as the server
+// rounds it — an off-by-one here means a button that lies about affordability.
+function priceFor(baseCost) {
+  return Math.round(baseCost * modOf('costMult'));
+}
+
+function modOf(key) {
+  const me = myPlayer();
+  return me && me.mods && me.mods[key] !== undefined ? me.mods[key] : 1;
+}
+
+// One decimal, and only when it earns one — "2" reads better than "2.0".
+function trim(n) {
+  return Math.round(n * 10) / 10;
+}
+
+function myPlayer() {
+  return latestState && latestState.players.find(p => p.id === myId);
+}
+
+// The server sends each player's current border with the state; buildCfg is
+// only the level-1 fallback for the frame or two before that arrives.
+function borderRadius(player) {
+  return (player && player.buildRadius) || (buildCfg && buildCfg.radius) || 0;
+}
+
+function outpostRadius() {
+  return (outpostCfg && outpostCfg.radius) || 0;
+}
+
+// An empire's territory is a disc around the keep plus one around every razed
+// camp, and where two of them meet it is one country, not two overlapping
+// ones. Drawing each circle whole says the opposite: it puts a border through
+// the middle of your own ground.
+//
+// So the outline is the union of the discs. Canvas has no boolean path
+// operations, but circles do not need them: the part of circle A that falls
+// inside circle B is the arc centred on the direction from A to B, half as
+// wide as the angle the intersection subtends, which is one acos. Hide those
+// arcs on every circle and what is left is exactly the outline of the union.
+//
+// The dash phase is set from each arc's start so the pattern runs unbroken
+// around the whole shape instead of restarting at every join.
+const TWO_PI = Math.PI * 2;
+
+function hiddenArcs(circles, i) {
+  const c = circles[i];
+  const spans = [];
+  for (let j = 0; j < circles.length; j++) {
+    if (j === i) continue;
+    const o = circles[j];
+    const d = Math.hypot(o.x - c.x, o.y - c.y);
+    // Swallowed whole: draw nothing. Two circles that are the same circle
+    // swallow each other, so the tie goes to the first of them and the
+    // outline survives.
+    if (d + c.r <= o.r && (o.r > c.r || j < i)) return null;
+    if (d >= c.r + o.r || d + o.r <= c.r) continue;  // apart, or it is inside us
+    const cos = (d * d + c.r * c.r - o.r * o.r) / (2 * d * c.r);
+    if (cos <= -1 || cos >= 1) continue;
+    const half = Math.acos(cos);
+    const mid = Math.atan2(o.y - c.y, o.x - c.x);
+    let from = (mid - half) % TWO_PI;
+    if (from < 0) from += TWO_PI;
+    const to = from + half * 2;
+    // A span that runs off the end of the circle comes back on at the start.
+    if (to > TWO_PI) { spans.push([0, to - TWO_PI]); spans.push([from, TWO_PI]); }
+    else spans.push([from, to]);
+  }
+  return spans;
+}
+
+function strokeTerritory(circles) {
+  for (let i = 0; i < circles.length; i++) {
+    const c = circles[i];
+    const spans = hiddenArcs(circles, i);
+    if (!spans) continue;
+    if (!spans.length) {
+      ctx.lineDashOffset = 0;
+      ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, TWO_PI); ctx.stroke();
+      continue;
+    }
+    spans.sort((a, b) => a[0] - b[0]);
+    // Walk the hidden spans in order, stroking whatever gap precedes each.
+    let at = 0;
+    for (const [from, to] of spans) {
+      if (from > at) {
+        ctx.lineDashOffset = -at * c.r;
+        ctx.beginPath(); ctx.arc(c.x, c.y, c.r, at, from); ctx.stroke();
+      }
+      at = Math.max(at, to);
+    }
+    if (at < TWO_PI) {
+      ctx.lineDashOffset = -at * c.r;
+      ctx.beginPath(); ctx.arc(c.x, c.y, c.r, at, TWO_PI); ctx.stroke();
+    }
+  }
+  ctx.lineDashOffset = 0;
+}
+
+// Client-side echo of Match.validMoveTile (UX only; the server is
+// authoritative). Troops march on open ground and nothing else, and an order
+// that lands on a lake used to be dropped in silence — which reads as a broken
+// right-click rather than as a refusal.
+function isMarchable(tx, ty) {
+  if (!terrain || !mapCfg) return false;
+  if (tx < 0 || ty < 0 || tx >= mapCfg.width || ty >= mapCfg.height) return false;
+  return terrain[ty][tx] === 0;
+}
+
+// Client-side echo of Match.inTerritory (UX only; the server is
+// authoritative). Ground you hold: inside your border, or inside an outpost you
+// have taken.
+function isMyTerritory(tx, ty) {
+  const me = myPlayer();
+  if (!me || !me.alive) return false;
+  if (Math.hypot(tx - me.baseX, ty - me.baseY) <= borderRadius(me)) return true;
+  for (const o of me.outposts || []) {
+    if (Math.hypot(tx - o.x, ty - o.y) <= outpostRadius()) return true;
+  }
+  return false;
+}
+
+// Client-side echo of Match.canBuildAt (UX only; the server is authoritative).
+function isMyBuildable(tx, ty, occupied) {
+  const me = myPlayer();
+  if (!me || !me.alive || !buildCfg || !terrain) return false;
+  if (tx < 0 || ty < 0 || tx >= mapCfg.width || ty >= mapCfg.height) return false;
+  if (terrain[ty][tx] !== 0) return false;
+  if (Math.hypot(tx - me.baseX, ty - me.baseY) < 0.5) return false;   // the castle's own tile
+  let inside = Math.hypot(tx - me.baseX, ty - me.baseY) <= borderRadius(me);
+  for (const o of me.outposts || []) {
+    if (inside) break;
+    inside = Math.hypot(tx - o.x, ty - o.y) <= outpostRadius();
+  }
+  if (!inside) return false;
+  return !(occupied || occupiedTiles()).has(`${tx},${ty}`);
+}
+
+function render() {
+  if (!latestState) return;
+  if (!terrainCanvas) {
+    // Art still loading: paint the backdrop so the pane isn't a white flash.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#0e0b08';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+  const ts = mapCfg.tileSize;
+  // Clear, then shift the world so the camera's top-left maps to (0,0). All
+  // draws below stay in world coordinates; off-screen pixels are clipped.
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#0e0b08';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // world -> screen: scale by zoom, then translate by the camera.
+  ctx.setTransform(zoom, 0, 0, zoom, -Math.round(camera.x * zoom), -Math.round(camera.y * zoom));
+  ctx.imageSmoothingEnabled = false; // crisp pixel-art scaling
+  // Offset, not (0,0): the terrain canvas is drawn on its own 0-based grid with
+  // a tile of margin, and this lines its cells up with the tile centres that
+  // buildings stand on and clicks round to.
+  const t0 = Sprites.terrainOrigin();
+  ctx.drawImage(terrainCanvas, t0, t0);
+
+  // ---- My territory ----
+  // Just the boundary, not a wash over every buildable tile: the terrain art is
+  // the point now, and a tinted grid over it reads as a bug. Individual tiles
+  // light up on hover instead (see hoverTile).
+  const me = myPlayer();
+  if (me && me.alive && buildCfg) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 235, 150, 0.5)';
+    ctx.setLineDash([6, 5]); ctx.lineWidth = 2;
+    // The keep's border, plus one for every razed camp, drawn as one outline.
+    const territory = [{ x: me.baseX * ts, y: me.baseY * ts, r: borderRadius(me) * ts }];
+    for (const o of me.outposts || []) {
+      territory.push({ x: o.x * ts, y: o.y * ts, r: outpostRadius() * ts });
+    }
+    strokeTerritory(territory);
+    ctx.restore();
+  }
+
+  // Where an armed spell or an aimed ability would land. Both are a disc round
+  // the cursor and only one can be armed at a time, so they share the ring.
+  const aimRadius =
+    armedSpell && cardDefs[armedSpell] ? cardDefs[armedSpell].spell.radius :
+    armedAbility && me && abilityDefs && abilityDefs[me.race] ? abilityDefs[me.race].radius : null;
+  if (aimRadius && hoverPoint) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(150, 210, 255, 0.85)';
+    ctx.fillStyle = 'rgba(120, 190, 255, 0.13)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(hoverPoint.x * ts, hoverPoint.y * ts, aimRadius * ts, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+  if (hoverTile && !armedBuild) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,235,150,0.45)'; ctx.lineWidth = 2;
+    ctx.strokeRect(hoverTile.x * ts - ts / 2 + 1, hoverTile.y * ts - ts / 2 + 1, ts - 2, ts - 2);
+    ctx.restore();
+  }
+
+  // ---- What you are carrying, hovering over where it would go ----
+  if (armedBuild && hoverPoint) {
+    const ok = isMyBuildable(hoverPoint.x, hoverPoint.y) &&
+      me && me.gold >= priceFor(buildingTypes[armedBuild].cost);
+    ctx.save();
+    ctx.strokeStyle = ok ? 'rgba(150, 240, 150, 0.9)' : 'rgba(255, 110, 90, 0.9)';
+    ctx.fillStyle = ok ? 'rgba(150, 240, 150, 0.16)' : 'rgba(255, 110, 90, 0.16)';
+    ctx.lineWidth = 2;
+    ctx.fillRect(hoverPoint.x * ts - ts / 2, hoverPoint.y * ts - ts / 2, ts, ts);
+    ctx.strokeRect(hoverPoint.x * ts - ts / 2 + 1, hoverPoint.y * ts - ts / 2 + 1, ts - 2, ts - 2);
+    ctx.restore();
+    Sprites.drawBuilding(ctx, armedBuild, hoverPoint.x * ts, hoverPoint.y * ts,
+      { race: myRace, alpha: ok ? 0.7 : 0.4 });
+  }
+
+  // ---- Wall drag preview ----
+  if (wallDrag && wallDrag.size) {
+    // Show the rampart the drag would actually build, ghosted.
+    const inDrag = (x, y) => wallDrag.has(`${x},${y}`);
+    const dragged = [...wallDrag].map(k => k.split(',').map(Number)).sort((a, b) => a[1] - b[1]);
+    const myRaceNow = me ? me.race : myRace;
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    for (const [x, y] of dragged) {
+      if (!Sprites.drawWall(ctx, x, y, inDrag, { race: myRaceNow, insideX: me ? me.baseX : null })) {
+        ctx.fillStyle = 'rgba(154,139,111,0.85)';
+        ctx.fillRect(x * ts - ts / 2, y * ts - ts / 2, ts, ts);
+      }
+    }
+    ctx.restore();
+    if (wallLast) {
+      const unit = buildingTypes.wall ? priceFor(buildingTypes.wall.cost) : 0;
+      const label = `${wallDrag.size} tiles · ${wallDrag.size * unit}g`;
+      const lx = wallLast.x * ts, ly = wallLast.y * ts;
+      ctx.font = '11px monospace'; ctx.textAlign = 'left';
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(lx + 8, ly - 15, ctx.measureText(label).width + 8, 16);
+      ctx.fillStyle = '#ffd76a';
+      ctx.fillText(label, lx + 12, ly - 3);
+    }
+  }
+
+  // ---- World entities, drawn back-to-front so tall sprites overlap right ----
+  const hasWall = wallLookup();
+  const scene = [];
+  for (const camp of latestState.aiCamps) {
+    if (!camp.defeated || camp.capturedBy) scene.push({ y: camp.y, kind: 'camp', camp });
+  }
+  for (const p of latestState.players) {
+    for (const b of p.buildings) if (b.type) scene.push({ y: b.y, kind: 'building', b, p });
+  }
+  for (const a of latestState.armies) scene.push({ y: a.y, kind: 'army', a });
+  scene.sort((m, n) => m.y - n.y);
+
+  for (const item of scene) {
+    if (item.kind === 'camp') drawCamp(item.camp, ts);
+    else if (item.kind === 'building') drawPlayerBuilding(item.b, item.p, ts, hasWall);
+    else drawArmy(item.a, ts);
+  }
+
+  // Damage and unit counts go on last. Both are things you have to be able to
+  // find: a wall being broken into is covered by the squad breaking into it,
+  // and an army marching behind a castle is correctly hidden by it.
+  drawDamageBars(ts);
+  for (const a of latestState.armies) drawArmyBadge(a, ts);
+
+  // ---- Transient effects, above everything ----
+  effects = effects.filter(fx => {
+    const age = clock - fx.start;
+    if (age < 0) return true;                     // queued, hasn't begun yet
+    return Sprites.drawSmoke(ctx, fx.x, fx.y, age, fx);
+  });
+  spellFlash = spellFlash.filter(fx => drawSpellFlash(fx, ts));
+  arrows = arrows.filter(a => drawFlyingArrow(a));
+}
+
+// A shot in flight, in world pixels — it starts up in the gallery and ends on
+// the ground where the target was, so tiles are the wrong unit for it. The
+// path is a shallow arc: a dead straight line reads as a laser rather than a
+// bowshot. The angle is taken from the arc's own slope, so the arrow points
+// along the path it is actually on rather than at where it will land.
+function drawFlyingArrow(a) {
+  const t = (clock - a.start) / a.life;
+  if (t < 0) return true;
+  if (t >= 1) return false;
+  const lift = a.arc * 4 * t * (1 - t);              // zero at both ends, peak in the middle
+  const dLift = a.arc * 4 * (1 - 2 * t);             // its slope, per unit of t
+  const x = a.x0 + (a.x1 - a.x0) * t;
+  const y = a.y0 + (a.y1 - a.y0) * t - lift;
+  // Screen y grows downwards, so negate to get the angle the way a reader
+  // means it. Both components are per unit of t, which is all atan2 needs.
+  Sprites.drawArrow(ctx, x, y, Math.atan2(-((a.y1 - a.y0) - dLift), a.x1 - a.x0));
+  return true;
+}
+
+// A bandit camp: a tent with its garrison milling around outside.
+function drawCamp(camp, ts) {
+  const px = camp.x * ts, py = camp.y * ts;
+  Sprites.drawBuilding(ctx, 'camp', px, py);
+  // A captured camp keeps its fort but loses its garrison, and flies the
+  // banner of whoever took it.
+  if (camp.capturedBy) {
+    Sprites.drawBanner(ctx, 'camp', px, py, colorForPlayer(camp.capturedBy));
+    return;
+  }
+  const guards = [{ x: -13, y: 5 }, { x: 12, y: 8 }];
+  guards.forEach((g, i) => {
+    Sprites.drawUnit(ctx, 'bandit', 'swordsman', 'idle', i ? 'left' : 'down', clock,
+      px + g.x, py + g.y, { phase: i * 2.5 });
+  });
+  drawHpBar(px - ts / 2, py - ts * 0.9, ts, camp.hp, camp.maxHp, '#a33');
+}
+
+function drawPlayerBuilding(b, p, ts, hasWall) {
+  const color = colorForPlayer(p.id);
+  const px = b.x * ts, py = b.y * ts;
+  // Freshly placed: fade up and settle onto its shadow, under cover of the
+  // dust. Appearing at full strength beside a puff looks like two unrelated
+  // things happening at once; rising out of it looks like one.
+  const key = buildingKey(p.id, b.x, b.y);
+  const landed = buildingPop.get(key);
+  if (landed != null) {
+    const t = (clock - landed) / POP_SECS;
+    if (t < 0) return;                            // queued behind the stagger
+    if (t >= 1) buildingPop.delete(key);
+    else {
+      const ease = t * t * (3 - 2 * t);
+      drawBuilding(b, px, py, color, hasWall, p.race, { alpha: 0.15 + 0.85 * ease, lift: (1 - ease) * 5 }, p.baseX);
+      return;
+    }
+  }
+  drawBuilding(b, px, py, color, hasWall, p.race, null, p.baseX);
+  if (b.underConstruction || b.upgrading) {
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(px - ts / 2, py - ts / 2, ts, ts);
+    ctx.fillStyle = '#fff'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(Math.ceil(b.remainingSec), px, py + 4);
+  }
+  if (b.type === 'castle') {
+    if (p.alive) drawHpBar(px - ts / 2, py - ts * 1.15, ts, b.hp, b.maxHp, color);
+    else {
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.beginPath();
+      ctx.moveTo(px - ts / 2, py - ts / 2); ctx.lineTo(px + ts / 2, py + ts / 2);
+      ctx.moveTo(px + ts / 2, py - ts / 2); ctx.lineTo(px - ts / 2, py + ts / 2);
+      ctx.stroke(); ctx.lineWidth = 1;
+    }
+  }
+}
+
+// Armies render as a small marching squad of the owner's race, plus a badge
+// with the real unit count (the squad is capped, the number is not).
+function drawArmy(a, ts) {
+  const color = colorForPlayer(a.ownerId);
+  const px = a.x * ts, py = a.y * ts;
+  const isSelected = a.ownerId === myId && a.id === selectedArmy;
+
+  if (isSelected && a.order !== 'hold' && a.destX != null) {
+    ctx.strokeStyle = 'rgba(255,215,106,0.7)'; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(a.destX * ts, a.destY * ts); ctx.stroke();
+    ctx.setLineDash([]); ctx.lineWidth = 1;
+  }
+
+  // Team ring on the ground doubles as the selection indicator.
+  ctx.save();
+  ctx.strokeStyle = isSelected ? '#ffd76a' : color;
+  ctx.lineWidth = isSelected ? 2 : 1;
+  ctx.globalAlpha = isSelected ? 1 : 0.75;
+  ctx.beginPath();
+  ctx.ellipse(px, py + 4, ts * 0.62, ts * 0.26, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
+  const moving = a.order !== 'hold' && a.destX != null &&
+    (Math.abs(a.destX - a.x) > 0.05 || Math.abs(a.destY - a.y) > 0.05);
+  const facing = armyFacing[a.id] || 'down';
+  Sprites.drawArmy(ctx, a, a.race || 'human', facing, armyAnim(a, moving), clock);
+  drawArmyHpBar(a, px, py, ts);
+}
+
+// Troops draw weapons as they close on what they were sent to attack, and keep
+// swinging for as long as the fight runs on the server.
+function armyAnim(a, moving) {
+  if (a.breach) return 'attack';           // stopped at a wall, swinging at it
+  if (a.order === 'fight') return 'attack';
+  if (a.order === 'attack' && a.destX != null &&
+      Math.hypot(a.destX - a.x, a.destY - a.y) < 1.6) return 'attack';
+  return moving ? 'walk' : 'idle';
+}
+
+// Every building below full health wears a bar; ones at full health do not, or
+// the map would be buried in furniture. It rides at the top of the sprite's own
+// tile rather than above it, which is the one height that survives a wall run —
+// a bar drawn over a segment is covered by the next segment down.
+function drawDamageBars(ts) {
+  for (const p of latestState.players) {
+    if (!p.alive) continue;
+    for (const b of p.buildings) {
+      if (b.type === 'castle' || !b.maxHp || b.hp >= b.maxHp) continue;
+      if (buildingPop.has(buildingKey(p.id, b.x, b.y))) continue;   // still settling
+      // Damage red rather than the owner's colour. The bar only exists while
+      // something is hurt, so what it has to say is how badly — and a pale
+      // empire's colour on pale stonework says nothing at all.
+      drawHpBar(b.x * ts - ts / 2, b.y * ts - ts * 0.62, ts, b.hp, b.maxHp, '#d0432f');
+    }
+  }
+}
+
+// A small bar under each squad. Armies only lose health in battle, so a
+// half-empty bar means these troops have already been through one.
+function drawArmyHpBar(a, px, py, ts) {
+  if (!a.maxHp) return;
+  const w = Math.round(ts * 0.7), h = 3;
+  const x = Math.round(px - w / 2), y = Math.round(py + ts * 0.42);
+  const frac = Math.max(0, Math.min(1, a.hp / a.maxHp));
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+  ctx.fillStyle = frac > 0.5 ? '#5fd35f' : frac > 0.25 ? '#e8c04a' : '#d9534f';
+  ctx.fillRect(x, y, Math.round(w * frac), h);
+}
+
+function drawArmyBadge(a, ts) {
+  const px = a.x * ts, py = a.y * ts - ts * 0.85;
+  const count = a.count;
+  ctx.save();
+  ctx.font = 'bold 11px monospace';
+  ctx.textAlign = 'center';
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+  ctx.strokeText(count, px, py);
+  ctx.fillStyle = a.order === 'attack' ? '#ff9b6a' : '#fff';
+  ctx.fillText(count, px, py);
+  ctx.restore();
+}
+
+// A ring that expands and fades where a spell landed. Returns false once it
+// has finished, so the caller can drop it.
+// Keyed by card id for a spell and by ability id for an ability; an ability
+// arrives as kind 'ability' and carries which one it was alongside.
+const SPELL_FLASH_COLOR = {
+  meteor: '255, 150, 90', terraform: '150, 230, 140', bulwark: '160, 210, 255',
+  reincarnation: '196, 132, 255', warband: '255, 108, 74',
+  strengthInUnity: '122, 178, 255', agilityOfTheWoods: '128, 232, 148',
+};
+function drawSpellFlash(fx, ts) {
+  const age = clock - fx.start;
+  const life = 0.9;
+  if (age > life) return false;
+  const t = age / life;
+  const rgb = SPELL_FLASH_COLOR[fx.ability || fx.kind] || '255, 220, 140';
+  ctx.save();
+  ctx.strokeStyle = `rgba(${rgb}, ${(1 - t) * 0.95})`;
+  ctx.fillStyle = `rgba(${rgb}, ${(1 - t) * 0.22})`;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(fx.x * ts, fx.y * ts, fx.radius * ts * (0.35 + t * 0.9), 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
+  ctx.restore();
+  return true;
+}
+
+function drawHpBar(x, y, w, hp, maxHp, color) {
+  ctx.fillStyle = '#000'; ctx.fillRect(x, y, w, 3);
+  ctx.fillStyle = color; ctx.fillRect(x, y, w * Math.max(0, hp / maxHp), 3);
+}
+
+// ---------- Input ----------
+
+// Convert a mouse event to tile coordinates (float + rounded).
+function tileFromEvent(e) {
+  const rect = canvas.getBoundingClientRect();
+  // Screen -> canvas pixels -> world pixels (unzoom + add camera) -> tiles.
+  const cx = (e.clientX - rect.left) * (canvas.width / rect.width) / zoom + camera.x;
+  const cy = (e.clientY - rect.top) * (canvas.height / rect.height) / zoom + camera.y;
+  const ts = mapCfg.tileSize;
+  return { fx: cx / ts, fy: cy / ts, ix: Math.round(cx / ts), iy: Math.round(cy / ts) };
+}
+
+// Tiles on the straight line between two tiles (Bresenham) so fast drags don't
+// leave gaps in the wall.
+function tilesBetween(x0, y0, x1, y1) {
+  const pts = [];
+  let dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+  let sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, err = dx - dy, x = x0, y = y0;
+  while (true) {
+    pts.push({ x, y });
+    if (x === x1 && y === y1) break;
+    const e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; x += sx; }
+    if (e2 < dx) { err += dx; y += sy; }
+  }
+  return pts;
+}
+
+function onCanvasMouseDown(e) {
+  if (!wallMode || e.button !== 0 || !latestState) return;
+  const { ix, iy } = tileFromEvent(e);
+  wallDrag = new Set();
+  wallLast = { x: ix, y: iy };
+  if (isMyBuildable(ix, iy)) wallDrag.add(`${ix},${iy}`);
+  render();
+}
+
+function onCanvasMouseMove(e) {
+  if (!latestState) return;
+  const hover = tileFromEvent(e);
+  hoverPoint = { x: hover.ix, y: hover.iy };
+  hoverTile = isMyBuildable(hover.ix, hover.iy) ? { x: hover.ix, y: hover.iy } : null;
+  if (!wallMode || !wallDrag || !wallLast) return;
+  const { ix, iy } = tileFromEvent(e);
+  if (ix === wallLast.x && iy === wallLast.y) return;
+  for (const t of tilesBetween(wallLast.x, wallLast.y, ix, iy)) {
+    if (isMyBuildable(t.x, t.y)) wallDrag.add(`${t.x},${t.y}`);
+  }
+  wallLast = { x: ix, y: iy };
+  render();
+}
+
+function onCanvasMouseUp() {
+  if (!wallMode || !wallDrag) return;
+  const tiles = [...wallDrag].map(k => { const [a, b] = k.split(','); return { x: +a, y: +b }; });
+  wallDrag = null; wallLast = null;
+  if (tiles.length && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'buildWall', tiles }));
+  }
+  render();
+}
+
+// Nearest enemy castle or AI camp to a point, within a click radius, or null.
+function nearestTarget(fx, fy, maxDist = 1.6) {
+  let best = null, bestDist = maxDist;
+  if (!latestState) return null;
+  for (const camp of latestState.aiCamps) {
+    if (camp.defeated) continue;
+    const d = Math.hypot(camp.x - fx, camp.y - fy);
+    if (d < bestDist) { bestDist = d; best = { type: 'camp', id: camp.id }; }
+  }
+  for (const p of latestState.players) {
+    if (p.id === myId || !p.alive) continue;
+    const d = Math.hypot(p.baseX - fx, p.baseY - fy);
+    if (d < bestDist) { bestDist = d; best = { type: 'player', id: p.id }; }
+  }
+  return best;
+}
+
+// Nearest of my armies to a point, within a click radius, or null.
+// `exclude` is the group already selected: right-clicking the one you are
+// commanding should not be read as an order to join itself.
+function nearestMyArmy(fx, fy, maxDist = 0.8, exclude = null) {
+  let best = null, bestDist = maxDist;
+  if (!latestState) return null;
+  for (const a of latestState.armies) {
+    if (a.ownerId !== myId || a.id === exclude) continue;
+    const d = Math.hypot(a.x - fx, a.y - fy);
+    if (d < bestDist) { bestDist = d; best = a.id; }
+  }
+  return best;
+}
+
+// Read the unit counts staged in the Send Army inputs.
+function stagedUnits() {
+  const units = {};
+  let any = false;
+  document.querySelectorAll('#unit-inputs input').forEach(inp => {
+    const n = parseInt(inp.value, 10) || 0;
+    if (n > 0) { units[inp.dataset.unit] = n; any = true; }
+  });
+  return any ? units : null;
+}
+
+function onCanvasClick(e) {
+  if (wallMode) return; // drag handlers own the canvas while the wall tool is on
+  const { fx: tileX, fy: tileY, ix, iy } = tileFromEvent(e);
+  if (!latestState) return;
+
+  // Whatever is being carried takes the click before anything else can
+  // interpret it as a selection.
+  if (armedBuild) {
+    if (dropBuild(ix, iy)) armBuild(null);
+    return;
+  }
+
+  // Staged troops land where you click, before anything else can read the click
+  // as a selection.
+  if (armedDeploy) {
+    if (deployStagedAt(ix, iy)) armDeploy(false);
+    return;
+  }
+
+  // An aimed ability takes the click the same way, and before a spell only
+  // because the two can never be armed at once.
+  if (armedAbility) {
+    send({ type: 'useAbility', x: ix, y: iy });
+    armAbility(false);
+    return;
+  }
+
+  // An armed spell takes the click before anything else can interpret it.
+  if (armedSpell) {
+    send({ type: 'castSpell', cardId: armedSpell, x: ix, y: iy });
+    armSpell(null);
+    return;
+  }
+
+  // 1) Select one of my armies (left-click). Highest priority so armies parked
+  //    on a base/target are still clickable.
+  const armyHit = nearestMyArmy(tileX, tileY);
+  if (armyHit) {
+    selectedArmy = armyHit;
+    render();
+    renderPanel();
+    return;
+  }
+
+  selectedArmy = null;
+  render();
+  renderPanel();
+}
+
+// Releasing a dragged building over the map places it there. The pointer is
+// captured by the panel, so this listens on the window rather than the canvas.
+window.addEventListener('pointerup', (e) => {
+  if (!armedBuild || !latestState) return;
+  const rect = canvas.getBoundingClientRect();
+  if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
+  const t = tileFromEvent(e);
+  if (dropBuild(t.ix, t.iy)) armBuild(null);
+});
+
+// While carrying, the ghost has to follow the pointer across the whole window —
+// the drag starts on the panel, so the canvas never sees those moves.
+window.addEventListener('pointermove', (e) => {
+  if (!armedBuild || !mapCfg) return;
+  const rect = canvas.getBoundingClientRect();
+  if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
+    hoverPoint = null;
+    return;
+  }
+  const t = tileFromEvent(e);
+  hoverPoint = { x: t.ix, y: t.iy };
+});
+
+// Right-click issues movement orders (classic RTS command button).
+function onCanvasRightClick(e) {
+  e.preventDefault();
+  if (wallMode || !latestState) return;
+  const { ix, iy } = tileFromEvent(e);
+  const fx = ix, fy = iy;
+  const tgt = nearestTarget(fx, fy);
+
+  // Commanding an already-selected group: right-click one of your own groups to
+  // join it, an enemy or a camp to attack it, anywhere else to march there and
+  // hold. Your own troops are checked first — a group of yours standing on a
+  // camp you have taken is far more likely to be something you want to
+  // reinforce than something you want to attack.
+  if (selectedArmy && latestState.armies.some(a => a.id === selectedArmy && a.ownerId === myId)) {
+    const friend = nearestMyArmy(fx, fy, 0.9, selectedArmy);
+    if (friend) {
+      ws.send(JSON.stringify({ type: 'mergeArmy', armyId: selectedArmy, targetId: friend }));
+      // Follow the survivor: the group being commanded is the one that ceases
+      // to exist, and a selection pointing at nothing is a dead panel.
+      selectedArmy = friend;
+      render(); renderPanel();
+      return;
+    }
+    if (tgt) ws.send(JSON.stringify({ type: 'attackArmy', armyId: selectedArmy, targetType: tgt.type, targetId: tgt.id }));
+    else if (!isMarchable(ix, iy)) log('Troops cannot march onto water or rock.');
+    else ws.send(JSON.stringify({ type: 'moveArmy', armyId: selectedArmy, x: ix, y: iy }));
+    return;
+  }
+
+  // ...otherwise the staged troops are deployed here. Right-click is the
+  // shortcut for the Deploy button and does the same thing; there is no way to
+  // raise a group already attacking, by design.
+  if (!stagedUnits()) {
+    log('Right-click a group to command it, or pick troops below and deploy them.');
+    return;
+  }
+  if (deployStagedAt(ix, iy)) armDeploy(false);
+}
+
+function onKeyDown(e) {
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+  const k = e.key.toLowerCase();
+  if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
+    keysDown[k] = true;
+    e.preventDefault(); // stop arrow keys from scrolling the page
+    return;
+  }
+  if (k === 'escape') {
+    if (!document.getElementById('exit-confirm').classList.contains('hidden')) { showExitConfirm(false); return; }
+    if (armedBuild) { armBuild(null); return; }
+    if (armedSpell) { armSpell(null); return; }
+    if (armedAbility) { armAbility(false); return; }
+    if (armedDeploy) { armDeploy(false); return; }
+  }
+  if (k === 'q') { useAbility(); return; }
+  if (k === 'r' && selectedArmy) {
+    ws.send(JSON.stringify({ type: 'recallArmy', armyId: selectedArmy }));
+  }
+}
+
+function onKeyUp(e) {
+  keysDown[e.key.toLowerCase()] = false;
+}
+
+// ---------- Side panel ----------
+
+// Rewrite a section only when its markup would actually differ. Returns true
+// if it rebuilt, so callers know when to re-attach anything they own.
+const sectionSig = {};
+function syncSection(el, sig, html) {
+  if (sectionSig[el.id] === sig) return false;
+  sectionSig[el.id] = sig;
+  el.innerHTML = html;
+  return true;
+}
+
+// Prices move with gold, and gold moves constantly. Toggling an existing
+// button's disabled flag costs nothing and doesn't disturb a click in flight.
+function syncAffordability(root, gold) {
+  root.querySelectorAll('[data-cost]').forEach(btn => {
+    btn.disabled = gold < Number(btn.dataset.cost);
+  });
+}
+
+// Countdowns and other per-tick numbers, written into nodes that already exist.
+function syncLive(root, values) {
+  root.querySelectorAll('[data-live]').forEach(node => {
+    const v = values[node.dataset.live];
+    if (v !== undefined && node.textContent !== String(v)) node.textContent = v;
+  });
+}
+
+// ---------- Build palette ----------
+
+// Buildings are picked up from the panel and dropped on the map. Press on an
+// icon and it is armed; drag onto the ground and release to place it. Letting
+// go over the panel instead leaves it armed, so a plain click on the icon
+// followed by a click on the map does the same thing — one state machine
+// covers both habits.
+let armedBuild = null;      // building type being carried, or null
+const buildIcons = [];      // { type, ctx } — redrawn by the render loop
+
+// Palette cells are narrow, so the labels are short. The real name is on the
+// tooltip, where there is room for it.
+const BUILD_SHORT_NAME = { siege: 'Siege', tower: 'Tower' };
+
+const BUILD_ICON_W = 34;
+// Tall enough for two tiles. The archer tower is taller still and is dealt
+// with in drawBuildIcons.
+const BUILD_ICON_H = 68;
+
+function buildPalette() {
+  const holder = document.getElementById('build-palette');
+  holder.innerHTML = '';
+  buildIcons.length = 0;
+  for (const type in buildingTypes) {
+    if (buildingTypes[type].isWall) continue;      // walls have their own tool
+    const item = document.createElement('div');
+    item.className = 'build-item';
+    item.dataset.build = type;
+    item.title = buildingTypes[type].name + ' \u2014 drag onto your ground to build';
+    const def = Sprites.buildingDef(type, { race: myRace });
+    const h = def && def.h > 40 ? BUILD_ICON_H : BUILD_ICON_H / 2;
+    item.innerHTML =
+      `<canvas class="build-icon" width="${BUILD_ICON_W}" height="${h}"></canvas>` +
+      `<span class="build-name">${BUILD_SHORT_NAME[type] || buildingTypes[type].name}</span>` +
+      `<span class="build-cost" data-price="${type}">${priceFor(buildingTypes[type].cost)}g</span>`;
+    holder.appendChild(item);
+    const c = item.querySelector('canvas').getContext('2d');
+    c.imageSmoothingEnabled = false;
+    buildIcons.push({ type, ctx: c, w: BUILD_ICON_W, h });
+  }
+  holder.addEventListener('pointerdown', (e) => {
+    const item = e.target.closest('.build-item');
+    if (!item) return;
+    e.preventDefault();
+    armBuild(item.dataset.build);
+  });
+}
+
+function armBuild(type) {
+  if (armedBuild === type) { armedBuild = null; }
+  else {
+    armedBuild = type;
+    if (wallMode) toggleWallMode(false);
+    armedSpell = null;
+    armedAbility = false;
+  }
+  document.querySelectorAll('.build-item').forEach(el =>
+    el.classList.toggle('armed', el.dataset.build === armedBuild));
+  canvas.style.cursor = armedBuild ? 'copy' : (wallMode ? 'cell' : 'crosshair');
+  renderPanel();
+}
+
+// Place what is being carried, if the tile will take it. Returns whether the
+// order went out, so a failed drop can keep the icon armed to try again.
+function dropBuild(x, y) {
+  if (!armedBuild) return false;
+  const me = myPlayer();
+  if (!isMyBuildable(x, y) || !me || me.gold < priceFor(buildingTypes[armedBuild].cost)) return false;
+  send({ type: 'build', x, y, buildingType: armedBuild });
+  return true;
+}
+
+// The palette icons are the real building sprites, animated off the same clock
+// as everything else so the panel doesn't look like a different program.
+//
+// A sprite taller than its slot is stood so its *top* is what shows rather
+// than its floor: the archer tower is three tiles tall and the half of it
+// worth recognising is the roof and the gallery, not the stonework. Nothing is
+// scaled to fit — that would resample the one thing the whole pipeline exists
+// to keep at 1:1 — so an over-tall sprite simply runs off the bottom.
+function drawBuildIcons() {
+  if (!assetsReady || !myRace) return;
+  for (const icon of buildIcons) {
+    const c = icon.ctx;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, icon.w, icon.h);
+    const def = Sprites.buildingDef(icon.type, { race: myRace });
+    // drawBuilding anchors bottom-centre a third of a tile below the point it
+    // is given, so aim below the canvas to stand the sprite on its floor.
+    const floor = icon.h - 4 - mapCfg.tileSize * 0.35;
+    const overflow = def ? Math.max(0, def.h - (icon.h - 4)) : 0;
+    Sprites.drawBuilding(c, icon.type, icon.w / 2, floor + overflow,
+      { race: myRace, shadow: false, time: clock });
+    if (icon.type === 'tower') {
+      Sprites.drawTowerArcher(c, icon.w / 2, floor + overflow, clock, { race: myRace });
+    }
+  }
+}
+
+// Each slot is the unit's own sprite, idling, with what you have and what you
+// are about to send. Clicking it orders one; the grey that sits over the
+// portrait wipes away as that one trains. Right-click stages the whole lot for
+// sending, since that is the other thing you constantly want from this row.
+const troopIcons = [];   // { type, ctx, canvas, fill } — redrawn by the render loop
+
+function buildUnitInputs() {
+  const container = document.getElementById('unit-inputs');
+  container.innerHTML = '';
+  troopIcons.length = 0;
+  for (const type in unitTypes) {
+    const slot = document.createElement('div');
+    slot.className = 'troop-slot';
+    slot.dataset.slot = type;
+    slot.innerHTML =
+      `<div class="troop-portrait">` +
+      `<canvas class="troop-icon" width="${TROOP_ICON_W}" height="${TROOP_ICON_H}"></canvas>` +
+      `<div class="troop-progress"></div>` +
+      `<span class="troop-queue"></span>` +
+      `</div>` +
+      `<span class="troop-have" id="have-${type}">0</span>` +
+      `<input type="number" min="0" value="0" data-unit="${type}" title="How many to send">`;
+    container.appendChild(slot);
+    const cv = slot.querySelector('canvas');
+    const c = cv.getContext('2d');
+    c.imageSmoothingEnabled = false;
+    troopIcons.push({ type, ctx: c, canvas: cv, fill: slot.querySelector('.troop-progress'), queue: slot.querySelector('.troop-queue') });
+  }
+  container.addEventListener('input', updateDeployButton);
+  container.addEventListener('click', (e) => {
+    const slot = e.target.closest('.troop-slot');
+    if (!slot || e.target.tagName === 'INPUT') return;
+    send({ type: 'trainUnit', unitType: slot.dataset.slot });
+  });
+  // Right-click is the staging shortcut: all of them, or none if you had them all.
+  container.addEventListener('contextmenu', (e) => {
+    const slot = e.target.closest('.troop-slot');
+    if (!slot) return;
+    e.preventDefault();
+    const type = slot.dataset.slot;
+    const have = idleCount(type);
+    setUnitInput(type, stagedCount(type) >= have ? 0 : have);
+  });
+  document.getElementById('max-all-btn').addEventListener('click', () => {
+    for (const type in unitTypes) setUnitInput(type, idleCount(type));
+  });
+  document.getElementById('clear-all-btn').addEventListener('click', () => {
+    for (const type in unitTypes) setUnitInput(type, 0);
+  });
+}
+
+// Which building trains a given unit, for the tooltip on a slot you can't use.
+function trainerNameFor(unitType) {
+  for (const key in buildingTypes) {
+    if (buildingTypes[key].trains === unitType) return buildingTypes[key].name;
+  }
+  return 'building';
+}
+
+function stagedCount(type) {
+  const inp = document.querySelector(`#unit-inputs input[data-unit="${type}"]`);
+  return inp ? (parseInt(inp.value, 10) || 0) : 0;
+}
+
+// The portraits animate off the same clock as the map, so the roster is alive
+// even when nothing is happening. Drawn straight from the race's own sheets —
+// an Orc player sees orcs here, not a generic icon.
+function drawTroopIcons() {
+  if (!assetsReady || !myRace) return;
+  for (const icon of troopIcons) {
+    const c = icon.ctx;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, TROOP_ICON_W, TROOP_ICON_H);
+    Sprites.drawUnit(c, myRace, icon.type, 'idle', 'down', clock,
+      TROOP_ICON_W / 2, TROOP_ICON_BASE);
+  }
+}
+
+function idleCount(type) {
+  const me = myPlayer();
+  return (me && me.idleUnits[type]) || 0;
+}
+
+function setUnitInput(type, value) {
+  const inp = document.querySelector(`#unit-inputs input[data-unit="${type}"]`);
+  if (!inp) return;
+  inp.value = value;
+  updateDeployButton();
+}
+
+// Deploy needs troops staged and nothing else — there is no target to pick.
+function updateDeployButton() {
+  const btn = document.getElementById('deploy-btn');
+  const staged = !!stagedUnits();
+  btn.disabled = !staged;
+  btn.classList.toggle('armed', armedDeploy);
+  if (armedDeploy && !staged) armedDeploy = false;   // the row was emptied under it
+  document.getElementById('deploy-hint').textContent = armedDeploy
+    ? 'Click inside your own territory to put them there.'
+    : staged ? 'Press Deploy, then click where they should go.'
+             : 'Pick troops below, then Deploy them inside your territory.';
+}
+
+document.getElementById('deploy-btn').addEventListener('click', () => armDeploy(!armedDeploy));
+
+function renderPanel() {
+  if (!latestState) return;
+  const me = latestState.players.find(p => p.id === myId);
+  if (!me) return;
+
+  updateDeployButton();
+
+  // First, because the draft covers everything else while it is up.
+  renderDraft(me);
+  renderAbility(me);
+  renderCards(me);
+
+  document.getElementById('gold-val').textContent = me.gold;
+  const castle = me.buildings.find(b => b.type === 'castle');
+  document.getElementById('income-val').textContent = me.incomePerSec;
+  const marching = latestState.armies
+    .filter(a => a.ownerId === myId)
+    .reduce((sum, a) => sum + a.count, 0);
+  const garrison = Object.values(me.idleUnits).reduce((n, v) => n + v, 0);
+  document.getElementById('troops-val').textContent = marching ? `${garrison} + ${marching} out` : garrison;
+  const castleCard = document.getElementById('castle-card');
+  const maxed = castle.level >= castleCfg.maxLevel;
+  const upgradeCost = maxed ? 0 : priceFor(castleCfg.upgradeCost[castle.level]);
+  // The server's radius already includes any border boon, so carry the same
+  // difference over to the figure quoted for the next level.
+  const borderBonus = borderRadius(me) - castleCfg.buildRadius[castle.level - 1];
+  const nextRadius = maxed ? null : castleCfg.buildRadius[castle.level] + borderBonus;
+  const outpostCount = (me.outposts || []).length;
+  const nextLimit = maxed ? null : castleCfg.buildLimit[castle.level];
+  const castleSig = [castle.level, castle.maxHp, borderRadius(me), nextRadius, outpostCount,
+    castle.upgrading, maxed, upgradeCost, me.buildLimit, nextLimit].join('|');
+  if (syncSection(castleCard, castleSig, `
+    <div class="row"><span class="label">Level ${castle.level}</span><span class="sub">HP <span data-live="hp">${castle.hp}</span>/${castle.maxHp}</span></div>
+    <div class="sub">Border ${borderRadius(me)} tiles${nextRadius ? ` → ${nextRadius} next level` : ''}</div>
+    <div class="sub">Buildings <span data-live="used">${me.buildingsUsed}</span>/${me.buildLimit}${nextLimit ? ` → ${nextLimit} next level` : ''}</div>
+    ${outpostCount ? `<div class="sub">${outpostCount} outpost${outpostCount === 1 ? '' : 's'} held (${outpostRadius()} tiles each)</div>` : ''}
+    ${castle.upgrading ? `<div class="sub">Upgrading… <span data-live="upgradeLeft">${castle.remainingSec}</span>s</div>` :
+      maxed ? `<div class="sub">Max level</div>` :
+      `<div class="btn-row"><button class="btn btn-sm" id="upgrade-btn" data-cost="${upgradeCost}">Upgrade (${upgradeCost}g)</button></div>`}
+  `) && !castle.upgrading && !maxed) {
+    document.getElementById('upgrade-btn').addEventListener('click', () => send({ type: 'upgradeCastle' }));
+  }
+  syncLive(castleCard, { hp: castle.hp, upgradeLeft: castle.remainingSec, used: me.buildingsUsed });
+  syncAffordability(castleCard, me.gold);
+
+  // The palette is static; only its prices, what you can afford, and whether
+  // there is any room left for it move. The server owns the rule either way —
+  // this only saves the player a click that was never going to be accepted.
+  const atLimit = me.buildingsUsed >= me.buildLimit;
+  const buildMenu = document.getElementById('build-menu');
+  document.querySelectorAll('[data-price]').forEach(el => {
+    const price = priceFor(buildingTypes[el.dataset.price].cost);
+    if (el.textContent !== price + 'g') el.textContent = price + 'g';
+    const item = el.closest('.build-item');
+    item.classList.toggle('unaffordable', me.gold < price);
+    item.classList.toggle('at-limit', atLimit);
+  });
+  syncSection(buildMenu, wallMode ? 'wall' : (armedBuild || (atLimit ? 'full' : 'idle')),
+    wallMode ? '<div class="sub">Click-drag across your border to lay a wall. Click the button again to exit.</div>'
+      : armedBuild ? `<div class="sub">Carrying a ${buildingTypes[armedBuild].name} — drop it inside your border, or press Escape.</div>`
+        : atLimit ? '<div class="sub">No room for another building — upgrade the town center. Walls do not count against the limit.</div>'
+          : '<div class="sub">Drag a building onto your ground, or use the Wall Tool to drag a wall.</div>');
+
+  // Constructed buildings (castle handled separately above; walls aggregated).
+  // Built as one string keyed on its own shape, so the Train buttons survive
+  // between state messages instead of being replaced under the cursor.
+  const plotsList = document.getElementById('plots-list');
+  const walls = me.buildings.filter(b => b.type === 'wall');
+  const rows = [];
+  const sig = [];
+  me.buildings.filter(b => b.type && b.type !== 'castle' && b.type !== 'wall').forEach((b) => {
+    const def = buildingTypes[b.type];
+    let extra = '';
+    if (b.underConstruction) {
+      extra = `<div class="sub">Building… <span data-live="b${b.x}_${b.y}">${b.remainingSec}</span>s</div>`;
+    } else if (def.trains) {
+      // Orders are placed from the roster at the bottom of the map now, so this
+      // only has to say what the building does and how busy it is.
+      const unitDef = unitTypes[def.trains];
+      extra = `<div class="sub">Trains ${unitDef.name} · queue <span data-live="q${b.x}_${b.y}">${b.trainQueueLen}</span>/5</div>`;
+    } else if (def.defensePower) {
+      extra = `<div class="sub">Defense +${def.defensePower}</div>`;
+    } else if (def.incomePerSec) {
+      extra = `<div class="sub">+${trim(def.incomePerSec * modOf('incomeMult'))} gold/sec</div>`;
+    }
+    rows.push(`<div class="card"><div class="row"><span class="label">${def.name} <span class="sub">(${b.x},${b.y})</span></span>` +
+      `<span class="sub">HP <span data-live="h${b.x}_${b.y}">${b.hp}</span>/${b.maxHp}</span></div>${extra}</div>`);
+    sig.push(`${b.type}${b.x},${b.y}:${b.underConstruction ? 'c' : 'd'}:${b.maxHp}:${me.cards.length}`);
+  });
+  if (walls.length) {
+    // Not a defence number any more: a wall is ground an enemy has to go round
+    // or break through, so what matters is how many are still whole.
+    const hurt = walls.filter(w => w.hp < w.maxHp).length;
+    rows.push(`<div class="card"><div class="row"><span class="label">Walls ×${walls.length}</span>` +
+      `<span class="sub">${hurt ? hurt + ' under attack' : 'all sound'}</span></div></div>`);
+    sig.push(`walls:${walls.length}:${hurt}`);
+  }
+  if (!rows.length) rows.push('<div class="card"><div class="sub">No buildings yet — click inside your border to build.</div></div>');
+  syncSection(plotsList, sig.join('|'), rows.join(''));
+  {
+    const live = {};
+    for (const b of me.buildings) {
+      if (!b.type || b.type === 'castle' || b.type === 'wall') continue;
+      live[`h${b.x}_${b.y}`] = b.hp;
+      live[`q${b.x}_${b.y}`] = b.trainQueueLen;
+      live[`b${b.x}_${b.y}`] = b.remainingSec;
+    }
+    syncLive(plotsList, live);
+  }
+  syncAffordability(plotsList, me.gold);
+
+  // Who else is in this game.
+  const playerList = document.getElementById('player-list');
+  const playerHtml = latestState.players.map(pl => {
+    const marching = latestState.armies
+      .filter(a => a.ownerId === pl.id)
+      .reduce((sum, a) => sum + a.count, 0);
+    const keep = pl.buildings.find(b => b.type === 'castle');
+    const state = !pl.alive ? 'eliminated' : `keep L${keep ? keep.level : 1} · ${marching} in the field`;
+    // Another player's name, going into innerHTML: escaped, like every other
+    // piece of text somebody else chose. cleanText on the server strips control
+    // characters but has no reason to care about angle brackets.
+    return `<div class="row"><span class="label" style="color:${colorForPlayer(pl.id)}">${escapeText(pl.name)}${pl.id === myId ? ' (you)' : ''}</span>` +
+      `<span class="sub">${state}</span></div>`;
+  }).join('');
+  syncSection(playerList, playerHtml, playerHtml);
+
+  // Selected army command panel.
+  const armyCmd = document.getElementById('army-cmd');
+  if (selectedArmy && !latestState.armies.some(a => a.id === selectedArmy && a.ownerId === myId)) selectedArmy = null;
+  if (selectedArmy) {
+    const a = latestState.armies.find(a => a.id === selectedArmy);
+    // One kind of soldier per group, so the roster line is a count and a name —
+    // plus how many of them are carrying a wound, which is the whole reason
+    // soldiers have their own health.
+    const count = a.count;
+    const def = unitTypes[a.type];
+    const name = !def ? a.type : (count === 1 ? def.name : (def.plural || def.name + 's'));
+    const parts = [];
+    if (a.wounded) parts.push(`${a.wounded} wounded`);
+    if (a.count < a.mustered) parts.push(`${a.mustered - a.count} of ${a.mustered} lost`);
+    if (!parts.length) parts.push('At full strength.');
+    const orderLabel = { move: 'Moving', attack: 'Marching to attack', fight: 'In battle',
+      return: 'Marching home', hold: 'Holding position', merge: 'Joining another group' }[a.order] || a.order;
+    if (syncSection(armyCmd, `${a.id}|${count}|${a.order}|${parts.join(',')}`, `<div class="row"><span class="label">${count} ${name}</span><span class="sub">${orderLabel}</span></div>
+      <div class="sub">${parts.join(', ')}</div>
+      <div class="sub">Right-click: ground to march and hold, one of your groups to join it, an enemy/camp to attack.</div>
+      <div class="btn-row"><button class="btn btn-sm" id="recall-btn">Recall (R)</button></div>`)) {
+      document.getElementById('recall-btn').addEventListener('click', () => send({ type: 'recallArmy', armyId: selectedArmy }));
+    }
+  } else {
+    syncSection(armyCmd, 'none', `<div class="sub">Left-click one of your groups to select it, then right-click: ground to march there and hold, another of your groups to join it, an enemy or camp to attack. R marches them home.</div>`);
+  }
+
+  for (const icon of troopIcons) {
+    const type = icon.type;
+    const inp = document.querySelector(`#unit-inputs input[data-unit="${type}"]`);
+    const slot = inp.closest('.troop-slot');
+    const have = me.idleUnits[type] || 0;
+    const t = (me.training && me.training[type]) || { queued: 0, capacity: 0, progress: 0, canTrain: false, full: false };
+    const price = priceFor(unitTypes[type].cost);
+
+    inp.max = have;
+    const haveEl = document.getElementById(`have-${type}`);
+    if (haveEl.textContent !== String(have)) haveEl.textContent = have;
+    if (parseInt(inp.value, 10) > have) inp.value = have;   // only reachable by typing
+
+    // Grey covers what is not yet trained and recedes as it is, so a glance at
+    // the row tells you what is on the way as well as what you have.
+    icon.fill.style.height = `${Math.round((1 - (t.queued ? t.progress : 1)) * 100)}%`;
+    // Anything past the one in progress is a number, not a second bar.
+    const waiting = Math.max(0, t.queued - 1);
+    const queueText = waiting ? `+${waiting}` : '';
+    if (icon.queue.textContent !== queueText) icon.queue.textContent = queueText;
+
+    slot.classList.toggle('empty', have === 0 && !t.queued);
+    slot.classList.toggle('untrainable', !t.canTrain);
+    slot.classList.toggle('unaffordable', t.canTrain && !t.full && me.gold < price);
+    // One line: a title attribute is not the place for a layout.
+    slot.title = !t.canTrain
+      ? unitTypes[type].name + ' \u2014 build a ' + trainerNameFor(type) + ' to train these'
+      : unitTypes[type].name + ' \u2014 click to train (' + price + 'g) \u00b7 ' +
+        trim(unitTypes[type].attack * modOf('attackMult')) + ' attack \u00b7 ' +
+        trim(unitTypes[type].hp * modOf('hpMult')) + ' hp' +
+        ' \u00b7 queue ' + t.queued + '/' + t.capacity +
+        (t.full ? ' (full ' + '\u2014' + ' another ' + trainerNameFor(type) + ' widens it)' : '') +
+        ' \u00b7 right-click to stage all';
+  }
+
+  if (latestState.gameOver) {
+    const banner = document.getElementById('game-over-banner');
+    const won = latestState.winnerId === myId;
+    document.getElementById('game-over-text').textContent = won ? 'VICTORY' : 'DEFEATED';
+    document.getElementById('game-over-sub').textContent = won
+      ? 'The map is yours.'
+      : `${playerNameOf(latestState.winnerId)} holds the map.`;
+    banner.classList.add('show');
+  }
+}
+
+// Exposed for debugging/testing in the browser console.
+window.__game = { getState: () => latestState, getMapCfg: () => mapCfg, getMyId: () => myId };
+
+// ---------- Construction ----------
+
+// How long a building spends rising out of its own dust.
+// Tiles per second an arrow travels, and how high it arcs (tiles per second of
+// flight, so a longer shot lofts higher). The archer holds his loose for this
+// long after firing.
+const ARROW_SPEED = 14, ARROW_ARC = 0.35, ARCHER_LOOSE_SECS = 0.45;
+const POP_SECS = 0.42;
+
+// A building lands in a burst of dust: one cloud over the footprint and a ring
+// of smaller ones thrown outward from it. Sized off the footprint, so a keep
+// kicks up noticeably more than a wall does, and each puff delayed a hair so
+// the ring reads as dust being pushed out rather than one flat circle.
+function puffPlacement(px, py, footW, delay) {
+  const base = py + mapCfg.tileSize * 0.35;
+  const s = footW / 64;
+  effects.push({ x: px, y: base - footW * 0.18, start: clock + delay, scale: s * 1.15, life: 0.58 });
+  const ring = footW > 40 ? 5 : 3;
+  for (let i = 0; i < ring; i++) {
+    const a = (i / ring) * Math.PI * 2 + (footW % 7) * 0.3;
+    effects.push({
+      x: px + Math.cos(a) * footW * 0.34,
+      y: base - footW * 0.05 + Math.sin(a) * footW * 0.13,
+      start: clock + delay + 0.03 + i * 0.022,
+      scale: s * 0.62, life: 0.46,
+    });
+  }
+}
+
+// The counterpart: something that was standing a moment ago is gone. Bigger and
+// slower than the placement burst, so the two never read as the same event.
+function puffRubble(px, py, footW) {
+  const base = py + mapCfg.tileSize * 0.35;
+  const s = footW / 64;
+  effects.push({ x: px, y: base - footW * 0.25, start: clock, scale: s * 1.5, life: 0.8 });
+  effects.push({ x: px - footW * 0.22, y: base - footW * 0.05, start: clock + 0.06, scale: s * 0.9, life: 0.7 });
+  effects.push({ x: px + footW * 0.24, y: base - footW * 0.1, start: clock + 0.11, scale: s * 0.85, life: 0.7 });
+}
+
+// How wide the dust should be. Walls have no sprite entry of their own, so they
+// fall back to something tile-sized.
+function footprintOf(b, race) {
+  if (b.type === 'wall') return mapCfg.tileSize * 0.8;
+  const def = Sprites.buildingDef(b.type, { race, level: b.level });
+  return def ? def.footW : mapCfg.tileSize;
+}
+
+const buildingKey = (ownerId, x, y) => ownerId + ':' + x + ',' + y;
+
+// Watch the state for buildings that were not there last time. A dragged wall
+// arrives as dozens at once, so they are staggered outward from the town centre
+// — the run then appears to lay itself rather than blinking into place.
+function trackBuildings(msg) {
+  const ts = mapCfg ? mapCfg.tileSize : 32;
+  const live = new Set();
+  const arrived = [];
+  for (const p of msg.players) {
+    for (const b of p.buildings) {
+      if (!b.type) continue;
+      const key = buildingKey(p.id, b.x, b.y);
+      live.add(key);
+      if (seenBuildings.has(key)) continue;
+      seenBuildings.set(key, { type: b.type, race: p.race, x: b.x, y: b.y, level: b.level });
+      if (buildingsPrimed) arrived.push({ b, p, key, d: Math.hypot(b.x - p.baseX, b.y - p.baseY) });
+    }
+  }
+  arrived.sort((m, n) => m.d - n.d);
+  // One drag can place hundreds; past a point the stagger has to tighten, or
+  // the last wall in the run lands a full second after the first.
+  const step = arrived.length > 30 ? 0.012 : 0.045;
+  arrived.forEach((item, i) => {
+    const delay = Math.min(1.1, i * step);
+    buildingPop.set(item.key, clock + delay);
+    puffPlacement(item.b.x * ts, item.b.y * ts, footprintOf(item.b, item.p.race), delay);
+  });
+
+  for (const [key, was] of [...seenBuildings]) {
+    if (live.has(key)) continue;
+    seenBuildings.delete(key);
+    buildingPop.delete(key);
+    if (buildingsPrimed) puffRubble(was.x * ts, was.y * ts, footprintOf(was, was.race));
+  }
+  buildingsPrimed = true;
+}
+
+// Update the facing each army's sprites should use, and kick off a smoke puff
+// wherever an army vanished — which, in this game, means it just fought.
+function trackArmies(msg) {
+  const ts = mapCfg ? mapCfg.tileSize : 32;
+  const live = new Set();
+  for (const a of msg.armies) {
+    live.add(a.id);
+    // Face where the army is actually headed. The bearing to its destination is
+    // exact and doesn't jitter the way sampling two broadcasts apart can; the
+    // observed step is only the fallback for an army with no orders left.
+    const prev = armyPrev[a.id];
+    const enRoute = a.destX != null && a.order !== 'hold' && a.order !== 'fight';
+    let dx = 0, dy = 0;
+    // An army held up at a wall faces the wall, not the keep behind it.
+    if (a.breach) { dx = a.breach.x - a.x; dy = a.breach.y - a.y; }
+    else if (enRoute) { dx = a.destX - a.x; dy = a.destY - a.y; }
+    else if (prev) { dx = a.x - prev.x; dy = a.y - prev.y; }
+    if (Math.abs(dx) > 0.02 || Math.abs(dy) > 0.02) {
+      armyFacing[a.id] = ArtDefs.facingFrom(dx, dy, armyFacing[a.id] || 'down');
+    }
+    armyPrev[a.id] = { x: a.x, y: a.y };
+    seenArmies.add(a.id);
+  }
+  for (const id of [...seenArmies]) {
+    if (live.has(id)) continue;
+    const last = armyPrev[id];
+    if (last) effects.push({ x: last.x * ts, y: last.y * ts, start: clock, scale: 0.8, life: 0.5 });
+    delete armyPrev[id];
+    delete armyFacing[id];
+    seenArmies.delete(id);
+  }
+}
+
+// The server leaves a player's buildings out of a broadcast when they have not
+// changed, so the last block we were sent is the current one. Keeping the same
+// array object across ticks is deliberate: everything downstream only reads it,
+// and the building-pop animation compares against what it saw last frame.
+const lastBuildings = new Map();
+
+function restoreBuildings(msg) {
+  for (const p of msg.players) {
+    if (p.buildings) lastBuildings.set(p.id, p.buildings);
+    else p.buildings = lastBuildings.get(p.id) || [];
+  }
+}
+
+function onState(msg) {
+  // Before anything reads them — trackBuildings included.
+  restoreBuildings(msg);
+  // A match that has begun sends state; a lobby does not. So the arrival of
+  // any state at all is the signal that the wait is over — no separate
+  // handshake, and a late joiner is covered by exactly the same rule.
+  if (inLobby) showLobby(false);
+  trackArmies(msg);
+  trackBuildings(msg);
+  if (msg.events) for (const e of msg.events) if (e.playerId === myId) log(e.text);
+  // A spell reshaped the ground: patch the copy of the map this client was
+  // handed at init, then repaint the prerendered layer.
+  if (msg.terrainEdits && msg.terrainEdits.length && terrain) {
+    for (const t of msg.terrainEdits) terrain[t.y][t.x] = t.tile;
+    if (assetsReady) buildTerrainLayer();
+  }
+  if (msg.effects) for (const fx of msg.effects) {
+    if (fx.kind === 'arrow') addArrow(fx);
+    else spellFlash.push({ ...fx, start: clock });
+  }
+  latestState = msg;
+  render();
+  renderPanel();
+}
+
+// One tower shot: an arrow to fly and a note to the tower that fired it, so
+// its archer plays the loose that goes with this arrow rather than idling
+// through it.
+// The same bolt whether an archer tower or a ballista crew loosed it — that is
+// the point of sharing it. What differs is where it leaves from: a tower's
+// comes off the archer's platform, so the origin is raised to the muzzle and
+// the tower is told to face its shot. A ballista's comes off the ground, from
+// a crew that has no sprite of its own to aim.
+function addArrow(fx) {
+  const ts = mapCfg.tileSize;
+  const fromTower = fx.from !== 'unit';
+  const owner = fromTower ? towerOwnerAt(fx.x, fx.y) : null;
+  const x0 = fx.x * ts, y0 = fromTower ? Sprites.towerMuzzle(fx.y * ts, owner) : fx.y * ts;
+  const x1 = fx.tx * ts, y1 = fx.ty * ts;
+  const life = Math.max(0.12, Math.hypot(x1 - x0, y1 - y0) / (ARROW_SPEED * ts));
+  arrows.push({ x0, y0, x1, y1, start: clock, life, arc: ARROW_ARC * ts });
+  // Only a tower has a sprite that turns to follow its shot.
+  if (fromTower) {
+    towerShots.set(`${fx.x},${fx.y}`, {
+      at: clock,
+      aim: { x: fx.tx - fx.x, y: fx.ty - fx.y },
+    });
+  }
+}
+
+// Whose tower is on this tile — the muzzle height depends on the art set, and
+// the art set depends on the owner's race.
+function towerOwnerAt(x, y) {
+  if (!latestState) return null;
+  for (const p of latestState.players) {
+    for (const b of p.buildings) if (b.type === 'tower' && b.x === x && b.y === y) return p.race;
+  }
+  return null;
+}
+
+function log(text) {
+  const el = document.getElementById('log');
+  const div = document.createElement('div');
+  div.textContent = text;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}

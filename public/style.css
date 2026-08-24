@@ -1,0 +1,635 @@
+/* Chrome for the game. The frames come from the same pixel-art pipeline as the
+   sprites: tools/build-assets.js writes 9-slice PNGs into assets/ui/, and
+   border-image stretches them around whatever they wrap. Every frame keeps its
+   corner slice at 1:1 (16px art, 16px border) so nothing ever resamples. */
+
+:root {
+  --wood-dark: #1c1611;
+  --parchment: #f2e6cd;
+  --ink: #b8a687;         /* muted text on wood */
+  --ink-dark: #4a3722;    /* text on the tan cards */
+  --ink-dark-dim: #7b6144;
+  --gold: #ffd76a;
+  --frame: 16px;          /* 9-slice corner size, at 1:1 with the source art */
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--wood-dark);
+  color: var(--parchment);
+  font-family: 'Courier New', ui-monospace, monospace;
+  overflow: hidden;
+  -webkit-font-smoothing: none;
+}
+
+canvas { image-rendering: pixelated; }
+
+/* ---- 9-slice frames -------------------------------------------------------
+   One rule per frame art. `fill` paints the middle slice too, so these need no
+   background of their own. */
+
+.frame {
+  border: var(--frame) solid transparent;
+  image-rendering: pixelated;
+}
+.frame-panel  { border-image: url("assets/ui/panel.png")    16 fill repeat; }
+.frame-card   { border-image: url("assets/ui/card.png")     16 fill repeat; }
+.frame-inset  { border-image: url("assets/ui/inset.png")    16 fill repeat; }
+
+/* ---- Buttons ---- */
+
+/* Every frame keeps a 16px border so its corner art stays at 1:1 — size is
+   changed with font and padding, never by shrinking the slice, which would
+   resample the pixels. */
+button {
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--parchment);
+  border: var(--frame) solid transparent;
+  border-image: url("assets/ui/button.png") 16 fill repeat;
+  image-rendering: pixelated;
+  font-size: 0.8rem;
+  line-height: 1.1;
+  padding: 0 0.2rem;
+  min-height: 40px;
+  display: inline-flex; align-items: center; justify-content: center;
+  text-align: center;
+  text-shadow: 0 1px 0 #0008;
+}
+button:hover:not(:disabled) { filter: brightness(1.15); }
+button:active:not(:disabled) { border-image: url("assets/ui/buttonPressed.png") 16 fill repeat; filter: none; }
+button:disabled { border-image: url("assets/ui/disabled.png") 16 fill repeat; color: #8b8579; cursor: not-allowed; text-shadow: none; }
+button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+
+.btn-primary { color: #4a3208; text-shadow: 0 1px 0 #ffffff55; font-weight: bold; border-image: url("assets/ui/primary.png") 16 fill repeat; }
+.btn-primary:active:not(:disabled) { border-image: url("assets/ui/primaryPressed.png") 16 fill repeat; }
+.btn.active { color: #4a3208; text-shadow: none; font-weight: bold; border-image: url("assets/ui/primary.png") 16 fill repeat; }
+
+.btn-lg { font-size: 1.05rem; letter-spacing: 3px; min-height: 56px; padding: 0 1.6rem; }
+.btn-sm { font-size: 0.7rem; }
+
+.btn-row { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem; }
+.btn-row .btn { flex: 1 1 auto; }
+
+/* ---- Main menu ----------------------------------------------------------
+   The painted background is an illustration, not tile art, so it is left to
+   scale smoothly; a scrim over it keeps the panels readable wherever the
+   viewport crops to. */
+
+#menu {
+  position: fixed; inset: 0;
+  z-index: 10;
+  overflow-y: auto;
+  background: #150f0a url("media/menu-bg.png") center / cover no-repeat;
+  display: flex; align-items: center; justify-content: center;
+}
+#menu.hidden { display: none; }
+
+#menu-scrim {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(12, 8, 16, 0.35) 0%, rgba(10, 6, 12, 0.82) 78%),
+    linear-gradient(180deg, rgba(10, 6, 12, 0.55) 0%, rgba(10, 6, 12, 0.15) 35%, rgba(10, 6, 12, 0.8) 100%);
+  pointer-events: none;
+}
+
+#menu-inner { position: relative; padding: 2rem 1.5rem; width: 100%; max-width: 900px; }
+
+#menu h1 {
+  color: var(--gold);
+  letter-spacing: 12px;
+  font-size: 3rem;
+  text-align: center;
+  margin: 0 0 0.2rem;
+  text-shadow: 0 0 22px #ff9a3c66, 0 4px 0 #000, 0 6px 14px #000;
+}
+#menu .tagline {
+  color: #e7d5b4; text-align: center; margin: 0 0 1.6rem;
+  letter-spacing: 1px; text-shadow: 0 2px 6px #000;
+}
+
+.menu-cols { display: flex; gap: 1rem; align-items: flex-start; }
+.menu-box { flex: 1 1 0; min-width: 0; }
+.menu-box h2 {
+  color: var(--gold); font-size: 0.78rem; letter-spacing: 2px;
+  text-transform: uppercase; margin: 0.9rem 0 0.4rem; text-shadow: 0 1px 0 #0009;
+}
+.menu-box h2:first-child { margin-top: 0; }
+.menu-box > .btn { width: 100%; }
+
+/* Text fields read as inked parchment, matching the cards. */
+#menu input[type="text"] {
+  width: 100%;
+  background: #efe2c6;
+  border: 2px solid #a48b62;
+  color: var(--ink-dark);
+  font-family: inherit; font-size: 0.95rem;
+  padding: 0.5rem 0.55rem;
+}
+#menu input[type="text"]::placeholder { color: #a3906f; }
+#code-input {
+  text-align: center; letter-spacing: 8px; font-size: 1.3rem;
+  font-weight: bold; text-transform: uppercase;
+}
+
+.join-row { display: flex; gap: 0.4rem; align-items: stretch; }
+.join-row input { flex: 1 1 auto; }
+.join-row .btn { flex: none; padding: 0 1.1rem; }
+
+#server-row { margin-top: 0.5rem; }
+#server-row label { display: block; margin-bottom: 0.25rem; }
+#server-row input { font-size: 0.8rem; }
+
+#room-list { max-height: 132px; overflow-y: auto; }
+.room-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.2rem 0; color: var(--parchment);
+}
+.room-row + .room-row { border-top: 1px solid #ffffff14; }
+.room-code { color: var(--gold); font-weight: bold; letter-spacing: 2px; }
+.room-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.78rem; }
+.room-row .btn { min-height: 28px; padding: 0 0.6rem; font-size: 0.68rem; }
+
+#menu-error { color: #7d2b1d; border-image: url("assets/ui/card.png") 16 fill repeat; margin-top: 0.6rem; }
+#menu-error.hidden { display: none; }
+
+#sound-btn { position: absolute; top: 14px; right: 16px; z-index: 2; min-height: 32px; padding: 0 0.7rem; }
+
+.race-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+
+.race-card {
+  border: var(--frame) solid transparent;
+  border-image: url("assets/ui/button.png") 16 fill repeat;
+  image-rendering: pixelated;
+  cursor: pointer;
+  text-align: center;
+  color: var(--parchment);
+  transition: transform .08s;
+}
+.race-card:hover { transform: translateY(-2px); }
+.race-card.selected { border-image: url("assets/ui/primary.png") 16 fill repeat; }
+.race-card.selected h3, .race-card.selected small { color: #4a3208; }
+.race-card .race-preview {
+  display: block;
+  margin: 0 auto 0.2rem;
+  /* The sprite's own shadow does the grounding; this is just a plinth for it. */
+  background: radial-gradient(ellipse at 50% 84%, #ffffff26 0%, transparent 62%);
+}
+.race-card h3 { margin: 0 0 0.2rem; font-size: 0.95rem; letter-spacing: 1px; }
+.race-card small { color: #c9b697; display: block; line-height: 1.35; font-size: 0.66rem; }
+
+@media (max-width: 900px) {
+  #draft-cards { flex-wrap: wrap; }
+  .draft-card { flex: 0 0 150px; }
+}
+
+@media (max-width: 760px) {
+  .menu-cols { flex-direction: column; }
+  #menu h1 { font-size: 2.1rem; letter-spacing: 7px; }
+}
+
+/* ---- Main game layout ---- */
+
+#game-ui { display: flex; height: 100vh; }
+#game-ui.hidden { display: none; }
+#map-wrap { flex: 1; overflow: hidden; background: #0e0b08; position: relative; }
+#map { cursor: crosshair; display: block; }
+
+/* Treasury sits on the map instead of eating panel height. */
+#hud {
+  position: absolute; top: 10px; left: 10px;
+  display: flex; gap: 1.1rem;
+  font-size: 0.85rem;
+  padding: 0;
+  pointer-events: none;
+}
+.hud-stat { white-space: nowrap; color: var(--parchment); }
+.hud-label { color: var(--ink); margin-right: 0.35rem; }
+.gold { color: var(--gold); font-weight: bold; }
+
+#panel {
+  width: 336px;
+  flex: none;
+  overflow-y: auto;
+  font-size: 0.85rem;
+  border-left-width: 20px;
+}
+#panel h2 {
+  color: var(--gold);
+  font-size: 0.78rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin: 0.7rem 0 0.35rem;
+  text-shadow: 0 1px 0 #0009;
+}
+#panel h2:first-child { margin-top: 0; }
+#panel > .btn { width: 100%; margin-bottom: 0.4rem; }
+
+/* ---- Cards: tan parchment notes pinned to the wood ---- */
+
+.card {
+  border: var(--frame) solid transparent;
+  border-image: url("assets/ui/card.png") 16 fill repeat;
+  image-rendering: pixelated;
+  color: var(--ink-dark);
+  margin-bottom: 0.4rem;
+  min-height: 34px;
+}
+.card .row { display: flex; justify-content: space-between; align-items: center; gap: 0.3rem; }
+.card .label { color: #2f2110; font-weight: bold; }
+.card .sub { color: var(--ink-dark-dim); }
+.card .btn { color: var(--parchment); }
+.sub { font-size: 0.74rem; line-height: 1.45; color: var(--ink); }
+
+.stat-row { display: flex; justify-content: space-between; margin: 0.18rem 0; }
+
+/* ---- Troop bar --------------------------------------------------------
+   Sits over the map, centred at the bottom: the roster is what you read while
+   deciding where to click, so it lives where your eyes already are. */
+
+#troop-bar {
+  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+  z-index: 6;
+  display: flex; align-items: center; gap: 0.9rem;
+  border-width: 14px;
+  max-width: calc(100% - 24px);
+}
+
+#unit-inputs { display: flex; gap: 0.5rem; }
+
+.troop-slot {
+  position: relative;
+  width: 52px;
+  padding: 0.1rem 0;
+  text-align: center;
+  cursor: pointer;
+  border: 2px solid transparent;
+  border-radius: 2px;
+  transition: background .1s, border-color .1s;
+}
+.troop-slot:hover { background: #ffffff14; border-color: #ffffff2e; }
+.troop-slot.empty { opacity: 0.42; }
+.troop-slot.empty:hover { background: none; border-color: transparent; cursor: default; }
+
+.troop-icon {
+  display: block; margin: 0 auto;
+  image-rendering: pixelated;
+  /* A plinth, so a sprite with no ground under it still reads as standing. */
+  background: radial-gradient(ellipse at 50% 88%, #ffffff1f 0%, transparent 62%);
+}
+
+/* How many you have, over the portrait's shoulder. */
+.troop-have {
+  position: absolute; top: 2px; right: 4px;
+  font-size: 0.78rem; font-weight: bold;
+  color: var(--parchment);
+  text-shadow: 0 0 3px #000, 0 1px 0 #000;
+  pointer-events: none;
+}
+
+/* How many you are about to send. */
+.troop-slot input {
+  width: 46px;
+  background: #efe2c6;
+  border: 2px solid #a48b62;
+  color: var(--ink-dark);
+  font-family: inherit; font-size: 0.78rem;
+  padding: 0.1rem 0.2rem; text-align: center;
+}
+
+.troop-actions { display: flex; flex-direction: column; gap: 0.35rem; min-width: 190px; }
+.troop-actions .btn-row { margin-top: 0; }
+.troop-actions .btn { flex: 1 1 auto; }
+
+#deploy-hint {
+  font-size: 0.72rem; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#deploy-btn.armed { background: #ffd76a2e; border-color: var(--gold); }
+
+@media (max-height: 620px) {
+  #troop-bar { bottom: 6px; border-width: 12px; }
+  .troop-slot { width: 46px; }
+}
+
+/* Bottom-left corner of the map, opposite the HUD and clear of the troop bar
+   in the middle. Sized so it never grows into the play area — old lines
+   scroll away rather than pushing the box taller. */
+#log {
+  position: absolute; left: 10px; bottom: 12px; z-index: 6;
+  width: 300px; height: 118px; overflow-y: auto;
+  border-width: 14px;
+  font-size: 0.7rem; color: var(--ink);
+  opacity: 0.86; transition: opacity 120ms;
+}
+#log:hover { opacity: 1; }
+#log div { margin-bottom: 0.15rem; }
+
+/* ---- Game over ---- */
+
+#game-over-banner {
+  position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+  background: rgba(10, 8, 5, 0.88); z-index: 20;
+}
+.game-over-box { text-align: center; padding: 0 2rem; }
+#game-over-banner h1 {
+  color: var(--gold); font-size: 2.6rem; letter-spacing: 8px; margin: 0.4rem 0 1.2rem;
+  text-shadow: 0 4px 0 #000;
+}
+#game-over-banner.show { display: flex; }
+
+/* ---- Scrollbars ---- */
+
+#panel, #log { scrollbar-width: thin; scrollbar-color: #6b563a #1a140e; }
+#panel::-webkit-scrollbar, #log::-webkit-scrollbar { width: 10px; }
+#panel::-webkit-scrollbar-track, #log::-webkit-scrollbar-track { background: #1a140e; }
+#panel::-webkit-scrollbar-thumb, #log::-webkit-scrollbar-thumb { background: #6b563a; border: 2px solid #1a140e; }
+
+.btn-note { color: var(--ink); font-size: 0.7rem; margin-left: 0.5rem; }
+
+/* ---- Opening draft ------------------------------------------------------
+   The cards roll in from off-screen, staggered, so the hand deals itself
+   rather than appearing. --i is the card's index, set inline. */
+
+#draft {
+  position: fixed; inset: 0; z-index: 15;
+  display: flex; align-items: center; justify-content: center;
+  overflow-y: auto;
+  background: radial-gradient(ellipse at 50% 45%, rgba(20, 12, 6, 0.82) 0%, rgba(8, 5, 3, 0.94) 75%);
+  overflow: hidden;
+}
+#draft.hidden { display: none; }
+#draft-inner { text-align: center; max-width: 1240px; padding: 1rem; }
+#draft h1 {
+  color: var(--gold); letter-spacing: 10px; font-size: 2rem; margin: 0 0 0.3rem;
+  text-shadow: 0 0 20px #ff9a3c55, 0 3px 0 #000;
+}
+.draft-sub { color: var(--ink); margin: 0 0 1.4rem; letter-spacing: 1px; }
+#draft-timer { color: var(--gold); font-weight: bold; }
+#draft-timer.urgent { color: #ff8a6a; }
+
+/* One row of six. They shrink before they wrap — a hand that reflows onto a
+   second line stops reading as a hand. */
+#draft-cards { display: flex; gap: 0.7rem; justify-content: center; align-items: stretch; }
+
+.draft-card {
+  /* Fixed, not flexible: the face has to stay at exactly the size the art was
+     magnified to, or the browser resamples pixel art it has no business
+     touching. 153 = the 51px tarot at x3, plus the 16px frame either side. */
+  width: 185px; flex: none;
+  display: flex; flex-direction: column;
+  border: var(--frame) solid transparent;
+  border-image: url("assets/ui/button.png") 16 fill repeat;
+  image-rendering: pixelated;
+  cursor: pointer;
+  color: var(--parchment);
+  text-align: center;
+  animation: card-roll-in 620ms cubic-bezier(.16, .84, .32, 1.06) backwards;
+  animation-delay: calc(var(--i) * 95ms);
+  transition: transform .1s, filter .1s;
+}
+.draft-card:hover { transform: translateY(-8px); filter: brightness(1.18); }
+.draft-card.taken {
+  border-image: url("assets/ui/primary.png") 16 fill repeat;
+  color: #4a3208;
+  cursor: default;
+}
+.draft-card.taken .card-desc { color: #6b4c14; }
+.draft-card.taken:hover { transform: none; filter: none; }
+.draft-card.spent { opacity: 0.4; cursor: not-allowed; }
+.draft-card.spent:hover { transform: none; filter: none; }
+
+@keyframes card-roll-in {
+  from { transform: translate(120vw, -12vh) rotate(680deg) scale(0.45); opacity: 0; }
+  60%  { opacity: 1; }
+  to   { transform: translate(0, 0) rotate(0) scale(1); opacity: 1; }
+}
+
+/* The face: a sigil by default, covered by real art the moment there is any.
+   Sized to a tarot card at x3 (51x79 -> 153x237). */
+.card-face {
+  position: relative;
+  width: 153px; height: 237px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #2b1f14, #17110b);
+  border: 2px solid #00000055;
+  overflow: hidden;
+}
+/* `none`, not `contain`: the art is already at its display size, so any
+   fitting the browser does is a resample. A tarot card fills the box exactly;
+   a tome is smaller and sits centred in it, which is the right way round —
+   a card is a card and a book is an object lying on one. */
+.card-face img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: none;
+  image-rendering: pixelated;
+}
+.card-sigil { font-size: 3.2rem; line-height: 1; }
+.card-boon .card-sigil { color: #ffd76a; text-shadow: 0 0 18px #e3b23c88; }
+.card-spell .card-sigil { color: #8fd0ff; text-shadow: 0 0 18px #4aa8ff88; }
+
+.card-kind { font-size: 0.6rem; letter-spacing: 3px; text-transform: uppercase; margin-top: 0.4rem; }
+.card-boon .card-kind { color: #e0b24a; }
+.card-spell .card-kind { color: #7fb6e6; }
+.draft-card.taken .card-kind { color: #6b4c14; }
+.card-title { font-size: 0.9rem; margin: 0.1rem 0 0.3rem; font-weight: bold; }
+.card-desc { font-size: 0.66rem; line-height: 1.4; color: var(--ink); flex: 1 1 auto; }
+
+/* ---- Cards in the side panel ---- */
+
+/* The hand, in the side panel: a row of faces at the raw size the pipeline
+   writes them (51x79). Fixed, never scaled — see .card-face. Names and rules
+   live in the tooltip; spelling them out here cost more panel height than the
+   rest of the section put together. */
+.card-hand { display: flex; flex-wrap: wrap; gap: 6px; }
+.owned-card {
+  position: relative; flex: none;
+  width: 51px; height: 79px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #2b1f14, #17110b);
+  border: 1px solid #00000066;
+  overflow: hidden;
+}
+.owned-card img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: none;
+  image-rendering: pixelated;
+}
+.owned-card.card-spell { background: radial-gradient(ellipse at 50% 45%, #2a3550 0%, #10131f 70%); }
+.owned-card .card-sigil { font-size: 1.1rem; }
+/* Only a spell is clickable, so only a spell reacts to the pointer. */
+.owned-card[data-spell] { cursor: pointer; }
+.owned-card[data-spell]:hover, .owned-card[data-spell]:focus-visible {
+  outline: 2px solid var(--gold); outline-offset: -2px;
+}
+.owned-card.spell-armed { outline: 2px solid var(--gold); outline-offset: -2px; }
+.owned-card.spell-spent { filter: grayscale(1) brightness(0.55); }
+.charge-badge {
+  position: absolute; right: 0; bottom: 0; z-index: 2;
+  padding: 0 3px;
+  background: #000000bb; color: var(--gold);
+  font-size: 0.6rem; line-height: 1.4;
+}
+.aiming {
+  position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
+  z-index: 2; text-align: center;
+  padding: 2px 0; background: #000000cc; color: var(--gold);
+  font-size: 0.55rem; letter-spacing: 0.5px;
+}
+.hand-hint { margin-top: 0.35rem; font-size: 0.66rem; }
+
+/* A connection that has dropped is the one thing worth interrupting the map
+   for, so it sits across the top rather than in the log. */
+#conn-notice {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 5;
+  padding: 0.45rem 1rem; text-align: center;
+  background: rgba(120, 40, 20, 0.92);
+  color: #ffe0c8; font-size: 0.8rem; letter-spacing: 1px;
+  border-bottom: 2px solid #00000055;
+}
+#conn-notice.hidden { display: none; }
+
+/* ---- Exit ---- */
+
+#exit-wrap { position: absolute; top: 10px; right: 12px; z-index: 6; text-align: right; }
+#exit-btn { padding: 0 0.8rem; min-height: 32px; }
+#exit-confirm { width: 250px; margin-top: 0.4rem; text-align: left; }
+#exit-confirm.hidden { display: none; }
+#exit-confirm .btn-row { margin-top: 0.5rem; }
+#exit-confirm .btn { flex: 1 1 0; }
+#exit-yes { color: #ffd2c4; }
+
+/* ---- Build palette ----------------------------------------------------
+   Buildings are picked up here and dropped on the map, so the icons are the
+   real sprites rather than labels: what you drag is what you get. */
+
+#build-palette {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  align-items: flex-end;
+  margin-bottom: 0.45rem;
+}
+.build-item {
+  width: 54px;
+  text-align: center;
+  cursor: grab;
+  padding-bottom: 2px;
+  border: 2px solid transparent;
+  border-radius: 2px;
+  touch-action: none;
+  transition: background .1s, border-color .1s;
+}
+.build-item:hover { background: #ffffff14; border-color: #ffffff2e; }
+.build-item.armed { background: #ffd76a2e; border-color: var(--gold); cursor: grabbing; }
+.build-item.unaffordable { opacity: 0.42; }
+/* No room left under the town center's building limit. Same dimming as being
+   unable to afford it — it is the same answer: not this one, not yet. */
+.build-item.at-limit { opacity: 0.42; cursor: not-allowed; }
+.build-icon { display: block; margin: 0 auto; image-rendering: pixelated; }
+.build-name {
+  display: block; font-size: 0.58rem; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.build-cost { display: block; font-size: 0.62rem; color: var(--gold); }
+.build-item.unaffordable .build-cost { color: #c58e6a; }
+
+/* ---- Training on the roster ---- */
+
+.troop-portrait { position: relative; width: 100%; }
+/* Grey covers what has not been trained yet and recedes as it is — a queue you
+   read at a glance rather than a number you have to find. */
+.troop-progress {
+  position: absolute; left: 0; right: 0; top: 0;
+  background: rgba(210, 215, 225, 0.42);
+  pointer-events: none;
+  transition: height .12s linear;
+}
+.troop-queue {
+  position: absolute; bottom: 0; left: 3px;
+  font-size: 0.62rem; font-weight: bold; color: var(--gold);
+  text-shadow: 0 0 3px #000, 0 1px 0 #000;
+  pointer-events: none;
+}
+.troop-slot.untrainable { cursor: default; }
+.troop-slot.untrainable .troop-portrait { filter: grayscale(1); opacity: 0.5; }
+.troop-slot.unaffordable .troop-portrait { opacity: 0.62; }
+
+/* Spell faces are objects rather than cards, so the panel behind them does the
+   framing. */
+.card-spell .card-face {
+  background: radial-gradient(ellipse at 50% 45%, #2a3550 0%, #10131f 70%);
+}
+
+#plots-list { max-height: 190px; overflow-y: auto; }
+#player-list { max-height: 160px; overflow-y: auto; }
+
+/* ---- The race ability ----------------------------------------------------
+   Deliberately not styled as a card. A card is something you drew and might
+   not have; this is the one power every empire is guaranteed, and it reads
+   better as a labelled button than as a face in a hand. */
+.ability-head { display: flex; align-items: center; gap: 0.45rem; }
+.ability-sigil { font-size: 1.3rem; line-height: 1; color: var(--gold); text-shadow: 0 0 12px #e3b23c66; }
+.ability-name { font-weight: bold; font-size: 0.85rem; }
+.ability-desc { font-size: 0.66rem; line-height: 1.4; margin: 0.3rem 0 0.45rem; }
+/* Empty and invisible while the ability is idle, so the panel does not jump
+   by a line every time one runs out. */
+/* Not gold: gold is the palette's colour for text on wood, and this line sits
+   on a tan card where it barely reads. A hot brown does the same job here. */
+.ability-timer { min-height: 1.1em; font-size: 0.68rem; font-weight: bold; color: #9a3d0b; opacity: 0; }
+.ability-timer.on { opacity: 1; }
+#ability-btn { width: 100%; }
+#ability-btn.armed { background: #ffd76a2e; border-color: var(--gold); }
+/* Which power a race brings, on the menu card, under the stat line. */
+.race-ability { display: block; margin-top: 0.3rem; color: var(--gold); font-size: 0.62rem; }
+
+/* ---- The lobby -----------------------------------------------------------
+   Same full-bleed overlay as the draft, because it is the same kind of moment:
+   the map is already behind it and the match is simply held. */
+#lobby {
+  position: fixed; inset: 0; z-index: 16;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at 50% 45%, rgba(20, 12, 6, 0.86) 0%, rgba(8, 5, 3, 0.96) 75%);
+  overflow-y: auto;
+}
+#lobby.hidden { display: none; }
+#lobby-inner { text-align: center; width: 440px; max-width: 94vw; padding: 1rem; }
+#lobby h1 {
+  color: var(--gold); letter-spacing: 10px; font-size: 1.8rem; margin: 0 0 0.3rem;
+  text-shadow: 0 0 20px #ff9a3c55, 0 3px 0 #000;
+}
+.lobby-sub { color: var(--ink); margin: 0 0 0.6rem; letter-spacing: 1px; font-size: 0.8rem; }
+/* The code is the whole reason this screen exists — somebody is reading it out
+   loud to somebody else, so it is the biggest thing on it. */
+#lobby-code {
+  color: var(--gold); font-size: 3rem; letter-spacing: 14px; font-weight: bold;
+  margin: 0 0 1.1rem; text-indent: 14px;      /* re-centre against the trailing space */
+  text-shadow: 0 0 26px #ff9a3c66, 0 3px 0 #000;
+}
+.lobby-box { text-align: left; margin-bottom: 0.8rem; }
+.lobby-box h2 { margin-top: 0; }
+#lobby-players { display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow-y: auto; }
+.lobby-player {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 5px 7px;
+  background: #ffffff10; border: 1px solid #ffffff1a;
+}
+.lobby-player .lobby-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The race colours are tuned for the menu's lit cards; on this near-black
+   overlay the darker ones (orc red especially) sink into it. */
+.lobby-player .lobby-race { font-size: 0.68rem; letter-spacing: 1px; text-transform: uppercase; filter: brightness(1.45); }
+/* The chair, and the seat being held for someone whose connection dropped. */
+.lobby-player .lobby-host { color: var(--gold); font-size: 0.62rem; letter-spacing: 1px; }
+.lobby-player.is-away { opacity: 0.5; }
+.lobby-player .lobby-away { color: #e08a6a; font-size: 0.62rem; letter-spacing: 1px; }
+#lobby-hint { min-height: 1.2em; margin-bottom: 0.7rem; font-size: 0.72rem; }
+.lobby-actions { justify-content: center; }
+/* Only the host has a Start button; everyone else just gets Leave. Every
+   .hidden in this sheet is scoped to its own element, so this one is too. */
+#lobby-start.hidden { display: none; }
+.lobby-actions .btn { flex: 1 1 0; padding: 0 0.8rem; }
+/* Whether a listed game can still be joined at the start line. */
+.room-row .room-live { color: #e08a6a; font-size: 0.62rem; letter-spacing: 1px; }
+.room-row .room-open { color: #7fd07f; font-size: 0.62rem; letter-spacing: 1px; }

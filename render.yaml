@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: empire-game
+    runtime: node
+    plan: starter          # always-on, no spin-down — needed for a live game server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22

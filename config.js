@@ -1,0 +1,291 @@
+// Shared game data tables. Server is authoritative; the client uses this
+// only for labels/costs in the UI (never trusts client-side calculations).
+
+const MAP = {
+  width: 120,
+  height: 80,
+  // Pixels per tile at 1x zoom. Matches the native cell size of the tilesets
+  // and character sheets in public/assets, so art draws 1:1 with no resampling.
+  tileSize: 32,
+  // Starting positions are chosen and cleared when the map is generated, not
+  // when players arrive, so the terrain every client is sent stays fixed for
+  // the whole match. That fixes how many empires a map can seat.
+  maxPlayers: 12,
+  spawnSpacing: 24,   // minimum tiles between two starting positions
+  // How far from the edge of the map an empire prefers to start. A base close
+  // to the edge can't be centred on screen — the camera stops at the world
+  // edge — so it sits in a corner of the view with half its border off-map.
+  // Relaxed automatically if the map runs out of room; see prepareSpawns.
+  spawnMargin: 16,
+  lakeCount: 9,       // bodies of water grown into the map
+  lakeSize: [45, 130],// tiles each one covers, before the shoreline is drawn
+};
+
+// Free-form building placement. A player may place a building on any land tile
+// within their border (and that isn't already occupied by a building or camp);
+// "territory" is simply the disc of tiles around the town center. The live
+// radius comes from CASTLE.buildRadius[level - 1] — upgrading the town center
+// pushes the border out — and this is the level-1 value the client starts from.
+const BUILD = {
+  radius: 7, // starting border radius, in tiles, before any upgrade
+};
+
+// Razing an AI camp doesn't just pay out — the ruins become an outpost, a
+// second disc of ground its conqueror can build inside, half the size of the
+// border they started with. Captured camps never respawn.
+const OUTPOST = {
+  radius: BUILD.radius / 2,
+};
+
+const RACES = {
+  human:  { name: 'Human',  incomeMult: 1.00, attackMult: 1.00, hpMult: 1.00, buildTimeMult: 1.00, costMult: 1.00 },
+  orc:    { name: 'Orc',    incomeMult: 0.90, attackMult: 1.25, hpMult: 1.05, buildTimeMult: 1.00, costMult: 1.00 },
+  elf:    { name: 'Elf',    incomeMult: 1.10, attackMult: 0.90, hpMult: 0.85, buildTimeMult: 0.85, costMult: 1.00 },
+  undead: { name: 'Undead', incomeMult: 0.85, attackMult: 1.00, hpMult: 1.00, buildTimeMult: 0.80, costMult: 0.80 },
+};
+
+// One active ability per race, on a cooldown of its own. Abilities are not
+// drafted and not bought: every empire starts with exactly one, it is the same
+// one every match, and it is the only thing a player can do that no amount of
+// gold will buy. That is deliberate — the multipliers above are a race you
+// feel slowly, and this is the part of it you feel all at once.
+//
+// `aim: 'point'` asks the client for a target tile; `aim: 'self'` needs none
+// and simply starts the clock in `durationSec`. Either way the ability
+// dispatches to Match.ability_<id>. A timed ability's `mods` are multiplied
+// into player.mods for as long as it lasts — the same object every calculation
+// already reads, so nothing downstream has to know abilities exist at all.
+//
+// The two mitigations are read by Match.mitigate, which every point of damage
+// a player takes passes through:
+//   foreignDamageMult — scales damage from any source of a *different* race,
+//                       anywhere the player owns anything. A mirror match gets
+//                       nothing, which is what "against other races" means.
+//   fieldEvasion      — scales damage to that player's armies out in the
+//                       field, whoever is dealing it. Troops in the open
+//                       dodge; a garrison standing behind its own walls does
+//                       not.
+const RACE_ABILITIES = {
+  undead: {
+    id: 'reincarnation', name: 'Reincarnation', sigil: '☥',
+    aim: 'point', radius: 5, cooldownSec: 150,
+    desc: 'Raise the fallen anywhere on the map. Every army of yours inside the zone is restored to the strength it marched out with, and the wounded at home are made whole.',
+  },
+  orc: {
+    id: 'warband', name: 'Warband', sigil: '⚔',
+    aim: 'self', durationSec: 30, cooldownSec: 120,
+    desc: 'For 30 seconds every soldier under your banner hits 60% harder.',
+    mods: { attackMult: 1.6 },
+  },
+  human: {
+    id: 'strengthInUnity', name: 'Strength in Unity', sigil: '⛨',
+    aim: 'self', durationSec: 60, cooldownSec: 150,
+    desc: 'For 1 minute everything you own takes 35% less damage from every race but your own.',
+    foreignDamageMult: 0.65,
+  },
+  elf: {
+    id: 'agilityOfTheWoods', name: 'Agility of the Woods', sigil: '❧',
+    aim: 'self', durationSec: 60, cooldownSec: 150,
+    desc: 'For 1 minute your armies in the field slip 30% of every blow aimed at them.',
+    fieldEvasion: 0.30,
+  },
+};
+
+// Castle is special: it's always present (on the player's base tile) and
+// upgrades in place rather than being "built". Levels are 1-indexed; arrays
+// below are 0-indexed.
+const CASTLE = {
+  maxLevel: 3,
+  hp:            [400, 700, 1100],
+  incomePerSec:  [3, 5, 7],
+  upgradeCost:   [0, 250, 550],     // cost to reach this level from the previous
+  upgradeTimeSec:[0, 38, 77],
+  // Territory radius per level: levelling the town center widens the border,
+  // which is the main reason to do it — more ground means more buildings.
+  // The level-1 disc is cleared of mountains and water when the map is built,
+  // so an empire's opening ground is always fully buildable.
+  buildRadius:   [7, 11, 15],
+  // How many buildings the empire can run at once. Levelling the town center
+  // is now two things at once — more ground, and the right to fill more of it
+  // — which is what stops a level-1 empire simply sprawling to the horizon.
+  //
+  // Walls and the town center itself do not count against this. A wall is a
+  // tile of ground you have denied someone, not a building you are running,
+  // and counting a 40-segment enclosure against a limit of 10 would delete the
+  // wall tool. See Match.buildingsUsed, which is the one place that decides.
+  buildLimit:    [10, 15, 20],
+};
+
+// buildTimeSec is 0 across the board: buildings finish instantly on placement
+// (no construction timers).
+const BUILDING_TYPES = {
+  bank:     { name: 'Bank',          cost: 150, buildTimeSec: 0, hp: 150, incomePerSec: 2 },
+  barracks: { name: 'Barracks',      cost: 100, buildTimeSec: 0, hp: 150, trains: 'swordsman' },
+  stable:   { name: 'Stable',        cost: 200, buildTimeSec: 0, hp: 150, trains: 'knight' },
+  siege:    { name: 'Siege Factory', cost: 300, buildTimeSec: 0, hp: 150, trains: 'catapult' },
+  // The one building that fights on its own account. `defensePower` is what it
+  // adds to the garrison when the empire itself is stormed (walls do not — see
+  // below); `shot*` is the
+  // archer on top loosing at whatever comes within range, whether or not it is
+  // headed for the town center. 12 every 3s is 4 damage a second — a tower
+  // harasses a passing army and wears a besieging one down, but three of them
+  // still take the better part of a minute to break a real assault.
+  tower:    { name: 'Archer Tower',  cost: 120, buildTimeSec: 0, hp: 220, defensePower: 15,
+              range: 5, shotSec: 3, shotDamage: 12 },
+  // Walls are placed by click-and-drag (one building per dragged tile). Cheap
+  // per tile; cost scales with how many tiles you drag across.
+  //
+  // A wall is not a number added to the garrison — it is ground an army cannot
+  // walk on. It has to be gone round, and if there is no way round, broken
+  // through one segment at a time, each with its own `hp`. `defensePower` is
+  // what a segment hits back with while it is being broken through, and that is
+  // all it is: walls are deliberately absent from `homeDefense`.
+  //
+  // isWall flags the client to place it via the drag tool instead of the
+  // single-tile build menu.
+  wall:     { name: 'Wall',          cost: 15,  buildTimeSec: 0, hp: 120, defensePower: 4, isWall: true },
+};
+
+// attack is damage per second of a fight, and hp is what each individual
+// soldier of this kind carries — every soldier in an army has their own, so a
+// group's health is the sum of what is still standing in it, not a pool.
+// Race multipliers (attackMult / hpMult) scale them per empire, and hpMult is
+// folded in once, when the army musters.
+//
+// `plural` is data rather than an -s the UI sticks on the end: an army is
+// always a group of one kind now, so the plural is read constantly and
+// "Swordsmans" is not a thing.
+const UNIT_TYPES = {
+  swordsman: { name: 'Swordsman', plural: 'Swordsmen', cost: 20, trainTimeSec: 5.1,  attack: 5,  hp: 30, speed: 3.0 },
+  knight:    { name: 'Knight',    plural: 'Knights',   cost: 40, trainTimeSec: 8.5,  attack: 9,  hp: 55, speed: 5.0 },
+  // `projectile` is what this unit is seen to loose while it fights, on its own
+  // `shotSec` clock. It is presentation only — the damage is the same
+  // per-second exchange every other unit fights, and nothing reads these two
+  // except the flourish in stepProjectiles. The ballista borrows the archer
+  // tower's bolt because it is the same weapon by another name.
+  // `range` is how far out a group of these stops and starts shooting instead
+  // of closing to the target's own tile. Four tiles is deliberately shorter
+  // than a keep's border, so a ring of walls still has to be broken through to
+  // get inside artillery range — siege outranges a wall only if you built the
+  // wall almost on top of the keep.
+  catapult:  { name: 'Catapult',  plural: 'Catapults', cost: 70, trainTimeSec: 13.6, attack: 20, hp: 25, speed: 1.8,
+               range: 4, projectile: 'arrow', shotSec: 1.4 },
+};
+
+const AI_CAMP = {
+  // Deliberately sparse — the map is four times the old one but this is only
+  // doubled, so camps stay something you go looking for rather than trip over.
+  count: 8,
+  hp: 120,
+  garrison: { swordsman: 4 },
+  lootGold: 200,
+  // Raiding pays twice: gold per point of damage put into the camp (so a raid
+  // that stalls still earns something) and a lump bonus for razing it outright.
+  plunderPerDamage: 0.6,
+  clearBonusGold: 250,
+  respawnSec: 60,
+  spacing: 10,      // minimum tiles between camps, and from any starting position
+};
+
+// Battles play out over time rather than resolving the instant an army lands,
+// so troops are visibly fighting and can be pulled out mid-fight. tempo scales
+// every unit's damage-per-second: both sides are scaled equally, so it changes
+// only how long a fight takes to watch, never who wins it.
+const COMBAT = {
+  tempo: 0.35,
+  // Health a garrison's carried wound recovers per second between attacks.
+  woundHealPerSec: 2,
+  // How close an army has to get before it stops marching and starts swinging.
+  engageRange: 0.6,
+};
+
+// ---------------------------------------------------------------------------
+// Cards
+// ---------------------------------------------------------------------------
+
+// Every empire drafts on arrival: it is offered `offer` cards, keeps `pick` of
+// them, and has `seconds` to decide before the rest are chosen for it.
+const CARD_DRAFT = { offer: 6, pick: 3, seconds: 30 };
+
+// A card is either a boon — permanent multipliers folded into the player's
+// stats — or a spell, which grants charges of something aimed at the map.
+//
+// `mods` keys multiply the player's race modifiers of the same name, so a boon
+// never has to know what race drafted it. `grant` is applied once, on pick.
+// `sigil` is the fallback face, used only if a card has no picture. Real faces
+// come out of the asset pipeline: add the card's id to `CARD_ART` in
+// tools/build-assets.js and rebuild.
+const CARDS = {
+  // ---- boons ----
+  prosperity: {
+    name: 'Prosperity', kind: 'boon', sigil: '✦',
+    desc: '+25% gold income, for as long as the empire stands.',
+    mods: { incomeMult: 1.25 },
+  },
+  warChest: {
+    name: 'War Chest', kind: 'boon', sigil: '◆',
+    desc: '400 gold in the treasury right now, and +10% income after.',
+    mods: { incomeMult: 1.10 }, grant: { gold: 400 },
+  },
+  drillmaster: {
+    name: 'Drillmaster', kind: 'boon', sigil: '⚔',
+    desc: 'Training and upgrades finish 25% faster.',
+    mods: { buildTimeMult: 0.75 },
+  },
+  forgeFires: {
+    name: 'Forge Fires', kind: 'boon', sigil: '✳',
+    desc: 'Every soldier hits 15% harder.',
+    mods: { attackMult: 1.15 },
+  },
+  ironhide: {
+    name: 'Ironhide', kind: 'boon', sigil: '◉',
+    desc: 'Every soldier carries 20% more health.',
+    mods: { hpMult: 1.20 },
+  },
+  thrift: {
+    name: 'Thrift', kind: 'boon', sigil: '△',
+    desc: 'Everything you build and train costs 15% less.',
+    mods: { costMult: 0.85 },
+  },
+  surveyors: {
+    name: "Surveyor's Charter", kind: 'boon', sigil: '◎',
+    desc: 'Your border reaches 2 tiles further at every level.',
+    mods: { borderBonus: 2 },
+  },
+  masonry: {
+    name: 'Deep Masonry', kind: 'boon', sigil: '▣',
+    desc: 'Walls and towers stand with 50% more health.',
+    mods: { structureHpMult: 1.5 },
+  },
+
+  // ---- spells ----
+  meteor: {
+    name: 'Meteor', kind: 'spell', sigil: '☄',
+    desc: 'Call a burning rock down anywhere on the map. Wrecks enemy buildings and armies caught in the blast.',
+    spell: { charges: 2, radius: 2.6, damage: 300, range: 'anywhere' },
+  },
+  terraform: {
+    name: 'Reshape the Land', kind: 'spell', sigil: '▲',
+    desc: 'Level mountains and drain water inside your own border, turning them into ground you can build on.',
+    spell: { charges: 2, radius: 2.6, range: 'territory' },
+  },
+  bulwark: {
+    name: 'Bulwark', kind: 'spell', sigil: '▥',
+    desc: 'Raise a free ring of walls around any tile inside your border.',
+    spell: { charges: 2, radius: 2.2, range: 'territory' },
+  },
+};
+
+// The training queue for one kind of unit, across every building that makes
+// it. The first such building brings TRAIN_QUEUE_MAX; each one after that adds
+// TRAIN_QUEUE_PER_EXTRA on top, so a second barracks is worth building and a
+// fifth is not — which matters now that BUILD limits how many you may have at
+// all. A single building still never holds more than TRAIN_QUEUE_MAX itself.
+const TRAIN_QUEUE_MAX = 5;
+const TRAIN_QUEUE_PER_EXTRA = 2;
+const TICK_MS = 200;
+
+module.exports = {
+  MAP, BUILD, OUTPOST, RACES, RACE_ABILITIES, CASTLE, BUILDING_TYPES, UNIT_TYPES,
+  AI_CAMP, COMBAT, CARD_DRAFT, CARDS, TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA, TICK_MS,
+};

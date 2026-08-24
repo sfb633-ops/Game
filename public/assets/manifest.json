@@ -1,0 +1,2575 @@
+{
+ "tileSize": 32,
+ "terrain": {
+  "grass": "terrain/grass.png",
+  "dirt": "terrain/dirt.png",
+  "rock": "terrain/rock.png",
+  "water": "terrain/water.png",
+  "sheetCols": 8,
+  "blobLookup": [
+   [
+    46
+   ],
+   [
+    43
+   ],
+   [
+    40
+   ],
+   [
+    21
+   ],
+   [
+    42
+   ],
+   [
+    31,
+    39,
+    47
+   ],
+   [
+    5,
+    9
+   ],
+   [
+    49,
+    53
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    23,
+    27
+   ],
+   [
+    30,
+    38
+   ],
+   [
+    1,
+    3
+   ],
+   [
+    41
+   ],
+   [
+    2,
+    62
+   ],
+   [
+    29
+   ],
+   [
+    51,
+    63
+   ],
+   [
+    46
+   ],
+   [
+    43
+   ],
+   [
+    40
+   ],
+   [
+    25
+   ],
+   [
+    42
+   ],
+   [
+    31,
+    39,
+    47
+   ],
+   [
+    5,
+    9
+   ],
+   [
+    12,
+    20,
+    28,
+    61
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    23,
+    27
+   ],
+   [
+    30,
+    38
+   ],
+   [
+    1,
+    3
+   ],
+   [
+    41
+   ],
+   [
+    2,
+    62
+   ],
+   [
+    29
+   ],
+   [
+    2,
+    62
+   ],
+   [
+    46
+   ],
+   [
+    43
+   ],
+   [
+    40
+   ],
+   [
+    21
+   ],
+   [
+    42
+   ],
+   [
+    31,
+    39,
+    47
+   ],
+   [
+    5,
+    9
+   ],
+   [
+    49,
+    53
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    23,
+    27
+   ],
+   [
+    30,
+    38
+   ],
+   [
+    1,
+    3
+   ],
+   [
+    41
+   ],
+   [
+    2,
+    62
+   ],
+   [
+    29
+   ],
+   [
+    51,
+    63
+   ],
+   [
+    46
+   ],
+   [
+    43
+   ],
+   [
+    40
+   ],
+   [
+    25
+   ],
+   [
+    42
+   ],
+   [
+    31,
+    39,
+    47
+   ],
+   [
+    5,
+    9
+   ],
+   [
+    12,
+    20,
+    28,
+    61
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    23,
+    27
+   ],
+   [
+    30,
+    38
+   ],
+   [
+    1,
+    3
+   ],
+   [
+    41
+   ],
+   [
+    2,
+    62
+   ],
+   [
+    29
+   ],
+   [
+    2,
+    62
+   ],
+   [
+    46
+   ],
+   [
+    43
+   ],
+   [
+    40
+   ],
+   [
+    21
+   ],
+   [
+    42
+   ],
+   [
+    31,
+    39,
+    47
+   ],
+   [
+    5,
+    9
+   ],
+   [
+    49,
+    53
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    23,
+    27
+   ],
+   [
+    30,
+    38
+   ],
+   [
+    1,
+    3
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    8,
+    16,
+    24,
+    48,
+    52,
+    60
+   ],
+   [
+    33,
+    34,
+    35,
+    50,
+    54,
+    55
+   ],
+   [
+    6,
+    14,
+    15,
+    32,
+    44,
+    56,
+    58,
+    59
+   ],
+   [
+    46
+   ],
+   [
+    43
+   ],
+   [
+    40
+   ],
+   [
+    25
+   ],
+   [
+    42
+   ],
+   [
+    31,
+    39,
+    47
+   ],
+   [
+    5,
+    9
+   ],
+   [
+    12,
+    20,
+    28,
+    61
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    23,
+    27
+   ],
+   [
+    30,
+    38
+   ],
+   [
+    1,
+    3
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    8,
+    16,
+    24,
+    48,
+    52,
+    60
+   ],
+   [
+    33,
+    34,
+    35,
+    50,
+    54,
+    55
+   ],
+   [
+    0,
+    4,
+    10,
+    13,
+    17,
+    18,
+    19,
+    22,
+    26,
+    36,
+    45,
+    57
+   ],
+   [
+    46
+   ],
+   [
+    43
+   ],
+   [
+    40
+   ],
+   [
+    21
+   ],
+   [
+    42
+   ],
+   [
+    31,
+    39,
+    47
+   ],
+   [
+    5,
+    9
+   ],
+   [
+    49,
+    53
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    23,
+    27
+   ],
+   [
+    30,
+    38
+   ],
+   [
+    1,
+    3
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    8,
+    16,
+    24,
+    48,
+    52,
+    60
+   ],
+   [
+    33,
+    34,
+    35,
+    50,
+    54,
+    55
+   ],
+   [
+    6,
+    14,
+    15,
+    32,
+    44,
+    56,
+    58,
+    59
+   ],
+   [
+    46
+   ],
+   [
+    43
+   ],
+   [
+    40
+   ],
+   [
+    25
+   ],
+   [
+    42
+   ],
+   [
+    31,
+    39,
+    47
+   ],
+   [
+    5,
+    9
+   ],
+   [
+    12,
+    20,
+    28,
+    61
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    23,
+    27
+   ],
+   [
+    30,
+    38
+   ],
+   [
+    1,
+    3
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    8,
+    16,
+    24,
+    48,
+    52,
+    60
+   ],
+   [
+    33,
+    34,
+    35,
+    50,
+    54,
+    55
+   ],
+   [
+    0,
+    4,
+    10,
+    13,
+    17,
+    18,
+    19,
+    22,
+    26,
+    36,
+    45,
+    57
+   ],
+   [
+    46
+   ],
+   [
+    43
+   ],
+   [
+    40
+   ],
+   [
+    21
+   ],
+   [
+    42
+   ],
+   [
+    31,
+    39,
+    47
+   ],
+   [
+    5,
+    9
+   ],
+   [
+    49,
+    53
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    23,
+    27
+   ],
+   [
+    30,
+    38
+   ],
+   [
+    1,
+    3
+   ],
+   [
+    41
+   ],
+   [
+    2,
+    62
+   ],
+   [
+    29
+   ],
+   [
+    51,
+    63
+   ],
+   [
+    46
+   ],
+   [
+    43
+   ],
+   [
+    40
+   ],
+   [
+    25
+   ],
+   [
+    42
+   ],
+   [
+    31,
+    39,
+    47
+   ],
+   [
+    5,
+    9
+   ],
+   [
+    12,
+    20,
+    28,
+    61
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    23,
+    27
+   ],
+   [
+    30,
+    38
+   ],
+   [
+    1,
+    3
+   ],
+   [
+    41
+   ],
+   [
+    2,
+    62
+   ],
+   [
+    29
+   ],
+   [
+    2,
+    62
+   ],
+   [
+    46
+   ],
+   [
+    43
+   ],
+   [
+    40
+   ],
+   [
+    21
+   ],
+   [
+    42
+   ],
+   [
+    31,
+    39,
+    47
+   ],
+   [
+    5,
+    9
+   ],
+   [
+    49,
+    53
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    23,
+    27
+   ],
+   [
+    30,
+    38
+   ],
+   [
+    1,
+    3
+   ],
+   [
+    41
+   ],
+   [
+    2,
+    62
+   ],
+   [
+    29
+   ],
+   [
+    51,
+    63
+   ],
+   [
+    46
+   ],
+   [
+    43
+   ],
+   [
+    40
+   ],
+   [
+    25
+   ],
+   [
+    42
+   ],
+   [
+    31,
+    39,
+    47
+   ],
+   [
+    5,
+    9
+   ],
+   [
+    12,
+    20,
+    28,
+    61
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    23,
+    27
+   ],
+   [
+    30,
+    38
+   ],
+   [
+    1,
+    3
+   ],
+   [
+    41
+   ],
+   [
+    2,
+    62
+   ],
+   [
+    29
+   ],
+   [
+    2,
+    62
+   ],
+   [
+    46
+   ],
+   [
+    43
+   ],
+   [
+    40
+   ],
+   [
+    21
+   ],
+   [
+    42
+   ],
+   [
+    31,
+    39,
+    47
+   ],
+   [
+    5,
+    9
+   ],
+   [
+    49,
+    53
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    23,
+    27
+   ],
+   [
+    30,
+    38
+   ],
+   [
+    1,
+    3
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    8,
+    16,
+    24,
+    48,
+    52,
+    60
+   ],
+   [
+    33,
+    34,
+    35,
+    50,
+    54,
+    55
+   ],
+   [
+    6,
+    14,
+    15,
+    32,
+    44,
+    56,
+    58,
+    59
+   ],
+   [
+    46
+   ],
+   [
+    43
+   ],
+   [
+    40
+   ],
+   [
+    25
+   ],
+   [
+    42
+   ],
+   [
+    31,
+    39,
+    47
+   ],
+   [
+    5,
+    9
+   ],
+   [
+    12,
+    20,
+    28,
+    61
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    23,
+    27
+   ],
+   [
+    30,
+    38
+   ],
+   [
+    1,
+    3
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    8,
+    16,
+    24,
+    48,
+    52,
+    60
+   ],
+   [
+    33,
+    34,
+    35,
+    50,
+    54,
+    55
+   ],
+   [
+    0,
+    4,
+    10,
+    13,
+    17,
+    18,
+    19,
+    22,
+    26,
+    36,
+    45,
+    57
+   ],
+   [
+    46
+   ],
+   [
+    43
+   ],
+   [
+    40
+   ],
+   [
+    21
+   ],
+   [
+    42
+   ],
+   [
+    31,
+    39,
+    47
+   ],
+   [
+    5,
+    9
+   ],
+   [
+    49,
+    53
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    23,
+    27
+   ],
+   [
+    30,
+    38
+   ],
+   [
+    1,
+    3
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    8,
+    16,
+    24,
+    48,
+    52,
+    60
+   ],
+   [
+    33,
+    34,
+    35,
+    50,
+    54,
+    55
+   ],
+   [
+    6,
+    14,
+    15,
+    32,
+    44,
+    56,
+    58,
+    59
+   ],
+   [
+    46
+   ],
+   [
+    43
+   ],
+   [
+    40
+   ],
+   [
+    25
+   ],
+   [
+    42
+   ],
+   [
+    31,
+    39,
+    47
+   ],
+   [
+    5,
+    9
+   ],
+   [
+    12,
+    20,
+    28,
+    61
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    23,
+    27
+   ],
+   [
+    30,
+    38
+   ],
+   [
+    1,
+    3
+   ],
+   [
+    7,
+    11
+   ],
+   [
+    8,
+    16,
+    24,
+    48,
+    52,
+    60
+   ],
+   [
+    33,
+    34,
+    35,
+    50,
+    54,
+    55
+   ],
+   [
+    0,
+    4,
+    10,
+    13,
+    17,
+    18,
+    19,
+    22,
+    26,
+    36,
+    45,
+    57
+   ]
+  ]
+ },
+ "buildings": {
+  "sets": {
+   "cyan": {
+    "castle": [
+     {
+      "file": "buildings/cyan/castle1.png",
+      "w": 96,
+      "h": 96,
+      "anchorX": 48,
+      "anchorY": 96,
+      "footW": 77
+     },
+     {
+      "file": "buildings/cyan/castle2.png",
+      "w": 96,
+      "h": 96,
+      "anchorX": 48,
+      "anchorY": 96,
+      "footW": 77
+     },
+     {
+      "file": "buildings/cyan/castle3.png",
+      "w": 96,
+      "h": 96,
+      "anchorX": 48,
+      "anchorY": 96,
+      "footW": 77
+     }
+    ],
+    "barracks": {
+     "file": "buildings/cyan/barracks.png",
+     "w": 32,
+     "h": 32,
+     "anchorX": 16,
+     "anchorY": 32,
+     "footW": 26
+    },
+    "bank": {
+     "file": "buildings/cyan/bank.png",
+     "w": 32,
+     "h": 32,
+     "anchorX": 16,
+     "anchorY": 32,
+     "footW": 26
+    },
+    "stable": {
+     "file": "buildings/cyan/stable.png",
+     "w": 32,
+     "h": 32,
+     "anchorX": 16,
+     "anchorY": 32,
+     "footW": 26
+    },
+    "siege": {
+     "file": "buildings/cyan/siege.png",
+     "w": 32,
+     "h": 32,
+     "anchorX": 16,
+     "anchorY": 32,
+     "footW": 26
+    },
+    "tower": {
+     "file": "buildings/cyan/tower.png",
+     "w": 66,
+     "h": 96,
+     "frames": 6,
+     "fps": 6,
+     "anchorX": 33,
+     "anchorY": 96,
+     "footW": 36,
+     "bannerAt": 0.45,
+     "archer": {
+      "w": 32,
+      "h": 32,
+      "anchorX": 20,
+      "anchorY": 32,
+      "fps": {
+       "idle": 6,
+       "attack": 14
+      },
+      "dirs": {
+       "down": {
+        "idle": {
+         "file": "buildings/cyan/archer_down_idle.png",
+         "frames": 4
+        },
+        "attack": {
+         "file": "buildings/cyan/archer_down_attack.png",
+         "frames": 6
+        }
+       },
+       "up": {
+        "idle": {
+         "file": "buildings/cyan/archer_up_idle.png",
+         "frames": 4
+        },
+        "attack": {
+         "file": "buildings/cyan/archer_up_attack.png",
+         "frames": 6
+        }
+       },
+       "side": {
+        "idle": {
+         "file": "buildings/cyan/archer_side_idle.png",
+         "frames": 4
+        },
+        "attack": {
+         "file": "buildings/cyan/archer_side_attack.png",
+         "frames": 6
+        }
+       }
+      }
+     },
+     "mountX": 33,
+     "mountY": 40,
+     "front": {
+      "file": "buildings/cyan/tower_front.png",
+      "h": 16,
+      "top": 31
+     }
+    },
+    "wall": {
+     "capW": {
+      "file": "buildings/cyan/wall_capW.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "mid": {
+      "file": "buildings/cyan/wall_mid.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "capE": {
+      "file": "buildings/cyan/wall_capE.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "post": {
+      "file": "buildings/cyan/wall_post.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "vertCapN": {
+      "file": "buildings/cyan/wall_vertCapN.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "vertMid": {
+      "file": "buildings/cyan/wall_vertMid.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "vertCapS": {
+      "file": "buildings/cyan/wall_vertCapS.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     }
+    }
+   },
+   "red": {
+    "castle": [
+     {
+      "file": "buildings/red/castle1.png",
+      "w": 96,
+      "h": 96,
+      "anchorX": 48,
+      "anchorY": 96,
+      "footW": 77
+     },
+     {
+      "file": "buildings/red/castle2.png",
+      "w": 96,
+      "h": 96,
+      "anchorX": 48,
+      "anchorY": 96,
+      "footW": 77
+     },
+     {
+      "file": "buildings/red/castle3.png",
+      "w": 96,
+      "h": 96,
+      "anchorX": 48,
+      "anchorY": 96,
+      "footW": 77
+     }
+    ],
+    "barracks": {
+     "file": "buildings/red/barracks.png",
+     "w": 32,
+     "h": 32,
+     "anchorX": 16,
+     "anchorY": 32,
+     "footW": 26
+    },
+    "bank": {
+     "file": "buildings/red/bank.png",
+     "w": 32,
+     "h": 32,
+     "anchorX": 16,
+     "anchorY": 32,
+     "footW": 26
+    },
+    "stable": {
+     "file": "buildings/red/stable.png",
+     "w": 32,
+     "h": 32,
+     "anchorX": 16,
+     "anchorY": 32,
+     "footW": 26
+    },
+    "siege": {
+     "file": "buildings/red/siege.png",
+     "w": 32,
+     "h": 32,
+     "anchorX": 16,
+     "anchorY": 32,
+     "footW": 26
+    },
+    "tower": {
+     "file": "buildings/red/tower.png",
+     "w": 66,
+     "h": 96,
+     "frames": 6,
+     "fps": 6,
+     "anchorX": 33,
+     "anchorY": 96,
+     "footW": 36,
+     "bannerAt": 0.45,
+     "archer": {
+      "w": 32,
+      "h": 32,
+      "anchorX": 20,
+      "anchorY": 32,
+      "fps": {
+       "idle": 6,
+       "attack": 14
+      },
+      "dirs": {
+       "down": {
+        "idle": {
+         "file": "buildings/red/archer_down_idle.png",
+         "frames": 4
+        },
+        "attack": {
+         "file": "buildings/red/archer_down_attack.png",
+         "frames": 6
+        }
+       },
+       "up": {
+        "idle": {
+         "file": "buildings/red/archer_up_idle.png",
+         "frames": 4
+        },
+        "attack": {
+         "file": "buildings/red/archer_up_attack.png",
+         "frames": 6
+        }
+       },
+       "side": {
+        "idle": {
+         "file": "buildings/red/archer_side_idle.png",
+         "frames": 4
+        },
+        "attack": {
+         "file": "buildings/red/archer_side_attack.png",
+         "frames": 6
+        }
+       }
+      }
+     },
+     "mountX": 33,
+     "mountY": 40,
+     "front": {
+      "file": "buildings/red/tower_front.png",
+      "h": 16,
+      "top": 31
+     }
+    },
+    "wall": {
+     "capW": {
+      "file": "buildings/red/wall_capW.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "mid": {
+      "file": "buildings/red/wall_mid.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "capE": {
+      "file": "buildings/red/wall_capE.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "post": {
+      "file": "buildings/red/wall_post.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "vertCapN": {
+      "file": "buildings/red/wall_vertCapN.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "vertMid": {
+      "file": "buildings/red/wall_vertMid.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "vertCapS": {
+      "file": "buildings/red/wall_vertCapS.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     }
+    }
+   },
+   "lime": {
+    "castle": [
+     {
+      "file": "buildings/lime/castle1.png",
+      "w": 96,
+      "h": 96,
+      "anchorX": 48,
+      "anchorY": 96,
+      "footW": 77
+     },
+     {
+      "file": "buildings/lime/castle2.png",
+      "w": 96,
+      "h": 96,
+      "anchorX": 48,
+      "anchorY": 96,
+      "footW": 77
+     },
+     {
+      "file": "buildings/lime/castle3.png",
+      "w": 96,
+      "h": 96,
+      "anchorX": 48,
+      "anchorY": 96,
+      "footW": 77
+     }
+    ],
+    "barracks": {
+     "file": "buildings/lime/barracks.png",
+     "w": 32,
+     "h": 32,
+     "anchorX": 16,
+     "anchorY": 32,
+     "footW": 26
+    },
+    "bank": {
+     "file": "buildings/lime/bank.png",
+     "w": 32,
+     "h": 32,
+     "anchorX": 16,
+     "anchorY": 32,
+     "footW": 26
+    },
+    "stable": {
+     "file": "buildings/lime/stable.png",
+     "w": 32,
+     "h": 32,
+     "anchorX": 16,
+     "anchorY": 32,
+     "footW": 26
+    },
+    "siege": {
+     "file": "buildings/lime/siege.png",
+     "w": 32,
+     "h": 32,
+     "anchorX": 16,
+     "anchorY": 32,
+     "footW": 26
+    },
+    "tower": {
+     "file": "buildings/lime/tower.png",
+     "w": 66,
+     "h": 96,
+     "frames": 6,
+     "fps": 6,
+     "anchorX": 33,
+     "anchorY": 96,
+     "footW": 36,
+     "bannerAt": 0.45,
+     "archer": {
+      "w": 32,
+      "h": 32,
+      "anchorX": 20,
+      "anchorY": 32,
+      "fps": {
+       "idle": 6,
+       "attack": 14
+      },
+      "dirs": {
+       "down": {
+        "idle": {
+         "file": "buildings/lime/archer_down_idle.png",
+         "frames": 4
+        },
+        "attack": {
+         "file": "buildings/lime/archer_down_attack.png",
+         "frames": 6
+        }
+       },
+       "up": {
+        "idle": {
+         "file": "buildings/lime/archer_up_idle.png",
+         "frames": 4
+        },
+        "attack": {
+         "file": "buildings/lime/archer_up_attack.png",
+         "frames": 6
+        }
+       },
+       "side": {
+        "idle": {
+         "file": "buildings/lime/archer_side_idle.png",
+         "frames": 4
+        },
+        "attack": {
+         "file": "buildings/lime/archer_side_attack.png",
+         "frames": 6
+        }
+       }
+      }
+     },
+     "mountX": 33,
+     "mountY": 40,
+     "front": {
+      "file": "buildings/lime/tower_front.png",
+      "h": 16,
+      "top": 31
+     }
+    },
+    "wall": {
+     "capW": {
+      "file": "buildings/lime/wall_capW.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "mid": {
+      "file": "buildings/lime/wall_mid.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "capE": {
+      "file": "buildings/lime/wall_capE.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "post": {
+      "file": "buildings/lime/wall_post.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "vertCapN": {
+      "file": "buildings/lime/wall_vertCapN.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "vertMid": {
+      "file": "buildings/lime/wall_vertMid.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "vertCapS": {
+      "file": "buildings/lime/wall_vertCapS.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     }
+    }
+   },
+   "purple": {
+    "castle": [
+     {
+      "file": "buildings/purple/castle1.png",
+      "w": 96,
+      "h": 96,
+      "anchorX": 48,
+      "anchorY": 96,
+      "footW": 77
+     },
+     {
+      "file": "buildings/purple/castle2.png",
+      "w": 96,
+      "h": 96,
+      "anchorX": 48,
+      "anchorY": 96,
+      "footW": 77
+     },
+     {
+      "file": "buildings/purple/castle3.png",
+      "w": 96,
+      "h": 96,
+      "anchorX": 48,
+      "anchorY": 96,
+      "footW": 77
+     }
+    ],
+    "barracks": {
+     "file": "buildings/purple/barracks.png",
+     "w": 32,
+     "h": 32,
+     "anchorX": 16,
+     "anchorY": 32,
+     "footW": 26
+    },
+    "bank": {
+     "file": "buildings/purple/bank.png",
+     "w": 32,
+     "h": 32,
+     "anchorX": 16,
+     "anchorY": 32,
+     "footW": 26
+    },
+    "stable": {
+     "file": "buildings/purple/stable.png",
+     "w": 32,
+     "h": 32,
+     "anchorX": 16,
+     "anchorY": 32,
+     "footW": 26
+    },
+    "siege": {
+     "file": "buildings/purple/siege.png",
+     "w": 32,
+     "h": 32,
+     "anchorX": 16,
+     "anchorY": 32,
+     "footW": 26
+    },
+    "tower": {
+     "file": "buildings/purple/tower.png",
+     "w": 66,
+     "h": 96,
+     "frames": 6,
+     "fps": 6,
+     "anchorX": 33,
+     "anchorY": 96,
+     "footW": 36,
+     "bannerAt": 0.45,
+     "archer": {
+      "w": 32,
+      "h": 32,
+      "anchorX": 20,
+      "anchorY": 32,
+      "fps": {
+       "idle": 6,
+       "attack": 14
+      },
+      "dirs": {
+       "down": {
+        "idle": {
+         "file": "buildings/purple/archer_down_idle.png",
+         "frames": 4
+        },
+        "attack": {
+         "file": "buildings/purple/archer_down_attack.png",
+         "frames": 6
+        }
+       },
+       "up": {
+        "idle": {
+         "file": "buildings/purple/archer_up_idle.png",
+         "frames": 4
+        },
+        "attack": {
+         "file": "buildings/purple/archer_up_attack.png",
+         "frames": 6
+        }
+       },
+       "side": {
+        "idle": {
+         "file": "buildings/purple/archer_side_idle.png",
+         "frames": 4
+        },
+        "attack": {
+         "file": "buildings/purple/archer_side_attack.png",
+         "frames": 6
+        }
+       }
+      }
+     },
+     "mountX": 33,
+     "mountY": 40,
+     "front": {
+      "file": "buildings/purple/tower_front.png",
+      "h": 16,
+      "top": 31
+     }
+    },
+    "wall": {
+     "capW": {
+      "file": "buildings/purple/wall_capW.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "mid": {
+      "file": "buildings/purple/wall_mid.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "capE": {
+      "file": "buildings/purple/wall_capE.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "post": {
+      "file": "buildings/purple/wall_post.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "vertCapN": {
+      "file": "buildings/purple/wall_vertCapN.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "vertMid": {
+      "file": "buildings/purple/wall_vertMid.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     },
+     "vertCapS": {
+      "file": "buildings/purple/wall_vertCapS.png",
+      "w": 32,
+      "h": 32,
+      "anchorX": 16,
+      "anchorY": 32,
+      "footW": 26
+     }
+    }
+   },
+   "neutral": {
+    "camp": {
+     "file": "buildings/neutral/camp.png",
+     "w": 64,
+     "h": 64,
+     "anchorX": 32,
+     "anchorY": 64,
+     "footW": 51
+    }
+   }
+  },
+  "byRace": {
+   "human": "cyan",
+   "orc": "red",
+   "elf": "lime",
+   "undead": "purple"
+  },
+  "defaultSet": "red",
+  "neutralSet": "neutral"
+ },
+ "props": {
+  "tree": [
+   {
+    "file": "props/tree1.png",
+    "w": 62,
+    "h": 76,
+    "anchorX": 31,
+    "anchorY": 76
+   },
+   {
+    "file": "props/tree2.png",
+    "w": 52,
+    "h": 76,
+    "anchorX": 26,
+    "anchorY": 76
+   },
+   {
+    "file": "props/tree3.png",
+    "w": 46,
+    "h": 77,
+    "anchorX": 23,
+    "anchorY": 76
+   }
+  ],
+  "bush": [
+   {
+    "file": "props/bush1.png",
+    "w": 16,
+    "h": 33,
+    "anchorX": 8,
+    "anchorY": 24
+   },
+   {
+    "file": "props/bush2.png",
+    "w": 20,
+    "h": 33,
+    "anchorX": 10,
+    "anchorY": 26
+   },
+   {
+    "file": "props/bush3.png",
+    "w": 29,
+    "h": 34,
+    "anchorX": 15,
+    "anchorY": 27
+   },
+   {
+    "file": "props/bush4.png",
+    "w": 35,
+    "h": 34,
+    "anchorX": 18,
+    "anchorY": 32
+   },
+   {
+    "file": "props/bush5.png",
+    "w": 29,
+    "h": 34,
+    "anchorX": 15,
+    "anchorY": 34
+   },
+   {
+    "file": "props/bush6.png",
+    "w": 30,
+    "h": 33,
+    "anchorX": 15,
+    "anchorY": 29
+   }
+  ],
+  "boulder": [
+   {
+    "file": "props/boulder1.png",
+    "w": 25,
+    "h": 27,
+    "anchorX": 13,
+    "anchorY": 24
+   },
+   {
+    "file": "props/boulder2.png",
+    "w": 29,
+    "h": 27,
+    "anchorX": 15,
+    "anchorY": 24
+   },
+   {
+    "file": "props/boulder3.png",
+    "w": 29,
+    "h": 27,
+    "anchorX": 15,
+    "anchorY": 27
+   },
+   {
+    "file": "props/boulder4.png",
+    "w": 18,
+    "h": 27,
+    "anchorX": 9,
+    "anchorY": 23
+   },
+   {
+    "file": "props/boulder5.png",
+    "w": 19,
+    "h": 27,
+    "anchorX": 10,
+    "anchorY": 22
+   },
+   {
+    "file": "props/boulder6.png",
+    "w": 31,
+    "h": 27,
+    "anchorX": 16,
+    "anchorY": 23
+   }
+  ],
+  "tuft": [
+   {
+    "file": "props/tuft1.png",
+    "w": 5,
+    "h": 6,
+    "anchorX": 3,
+    "anchorY": 6
+   },
+   {
+    "file": "props/tuft2.png",
+    "w": 9,
+    "h": 6,
+    "anchorX": 5,
+    "anchorY": 6
+   },
+   {
+    "file": "props/tuft3.png",
+    "w": 5,
+    "h": 7,
+    "anchorX": 3,
+    "anchorY": 7
+   },
+   {
+    "file": "props/tuft4.png",
+    "w": 8,
+    "h": 5,
+    "anchorX": 4,
+    "anchorY": 5
+   },
+   {
+    "file": "props/tuft5.png",
+    "w": 6,
+    "h": 10,
+    "anchorX": 3,
+    "anchorY": 10
+   },
+   {
+    "file": "props/tuft6.png",
+    "w": 5,
+    "h": 8,
+    "anchorX": 3,
+    "anchorY": 8
+   }
+  ],
+  "pebble": [
+   {
+    "file": "props/pebble1.png",
+    "w": 10,
+    "h": 9,
+    "anchorX": 5,
+    "anchorY": 9
+   },
+   {
+    "file": "props/pebble2.png",
+    "w": 9,
+    "h": 7,
+    "anchorX": 5,
+    "anchorY": 7
+   },
+   {
+    "file": "props/pebble3.png",
+    "w": 6,
+    "h": 5,
+    "anchorX": 3,
+    "anchorY": 5
+   },
+   {
+    "file": "props/pebble4.png",
+    "w": 4,
+    "h": 3,
+    "anchorX": 2,
+    "anchorY": 3
+   },
+   {
+    "file": "props/pebble5.png",
+    "w": 9,
+    "h": 8,
+    "anchorX": 5,
+    "anchorY": 8
+   },
+   {
+    "file": "props/pebble6.png",
+    "w": 11,
+    "h": 9,
+    "anchorX": 6,
+    "anchorY": 9
+   }
+  ]
+ },
+ "units": {
+  "human": {
+   "dirMode": "4dir",
+   "dirRows": {
+    "down": 0,
+    "up": 1,
+    "left": 2,
+    "right": 3
+   },
+   "fps": {
+    "idle": 5,
+    "walk": 10,
+    "attack": 9
+   },
+   "variants": {
+    "swordsman": {
+     "frameW": 32,
+     "frameH": 32,
+     "anchorX": 16,
+     "anchorY": 28,
+     "anims": {
+      "idle": {
+       "file": "units/human/swordsman/idle.png",
+       "frames": 1
+      },
+      "walk": {
+       "file": "units/human/swordsman/walk.png",
+       "frames": 5
+      },
+      "attack": {
+       "file": "units/human/swordsman/attack.png",
+       "frames": 4
+      }
+     }
+    },
+    "knight": {
+     "frameW": 64,
+     "frameH": 64,
+     "anchorX": 31,
+     "anchorY": 50,
+     "anims": {
+      "idle": {
+       "file": "units/human/knight/idle.png",
+       "frames": 4
+      },
+      "walk": {
+       "file": "units/human/knight/walk.png",
+       "frames": 4
+      },
+      "attack": {
+       "file": "units/human/knight/attack.png",
+       "frames": 4
+      }
+     }
+    },
+    "catapult": {
+     "frameW": 32,
+     "frameH": 32,
+     "anchorX": 16,
+     "anchorY": 30,
+     "anims": {
+      "idle": {
+       "file": "units/human/catapult/idle.png",
+       "frames": 1
+      },
+      "walk": {
+       "file": "units/human/catapult/walk.png",
+       "frames": 3
+      },
+      "attack": {
+       "file": "units/human/catapult/attack.png",
+       "frames": 4
+      }
+     }
+    }
+   }
+  },
+  "elf": {
+   "dirMode": "4dir",
+   "dirRows": {
+    "down": 0,
+    "up": 1,
+    "left": 2,
+    "right": 3
+   },
+   "fps": {
+    "idle": 5,
+    "walk": 10,
+    "attack": 9
+   },
+   "variants": {
+    "swordsman": {
+     "frameW": 32,
+     "frameH": 32,
+     "anchorX": 16,
+     "anchorY": 28,
+     "anims": {
+      "idle": {
+       "file": "units/elf/swordsman/idle.png",
+       "frames": 1
+      },
+      "walk": {
+       "file": "units/elf/swordsman/walk.png",
+       "frames": 5
+      },
+      "attack": {
+       "file": "units/elf/swordsman/attack.png",
+       "frames": 4
+      }
+     }
+    },
+    "knight": {
+     "frameW": 64,
+     "frameH": 64,
+     "anchorX": 31,
+     "anchorY": 50,
+     "anims": {
+      "idle": {
+       "file": "units/elf/knight/idle.png",
+       "frames": 4
+      },
+      "walk": {
+       "file": "units/elf/knight/walk.png",
+       "frames": 4
+      },
+      "attack": {
+       "file": "units/elf/knight/attack.png",
+       "frames": 4
+      }
+     }
+    },
+    "catapult": {
+     "frameW": 32,
+     "frameH": 32,
+     "anchorX": 16,
+     "anchorY": 30,
+     "anims": {
+      "idle": {
+       "file": "units/elf/catapult/idle.png",
+       "frames": 1
+      },
+      "walk": {
+       "file": "units/elf/catapult/walk.png",
+       "frames": 3
+      },
+      "attack": {
+       "file": "units/elf/catapult/attack.png",
+       "frames": 4
+      }
+     }
+    }
+   }
+  },
+  "orc": {
+   "dirMode": "4dir",
+   "dirRows": {
+    "down": 0,
+    "up": 1,
+    "left": 2,
+    "right": 3
+   },
+   "fps": {
+    "idle": 5,
+    "walk": 10,
+    "attack": 9
+   },
+   "variants": {
+    "swordsman": {
+     "frameW": 32,
+     "frameH": 32,
+     "anchorX": 16,
+     "anchorY": 30,
+     "anims": {
+      "idle": {
+       "file": "units/orc/swordsman/idle.png",
+       "frames": 1
+      },
+      "walk": {
+       "file": "units/orc/swordsman/walk.png",
+       "frames": 5
+      },
+      "attack": {
+       "file": "units/orc/swordsman/attack.png",
+       "frames": 6
+      }
+     }
+    },
+    "knight": {
+     "frameW": 64,
+     "frameH": 64,
+     "anchorX": 31,
+     "anchorY": 50,
+     "anims": {
+      "idle": {
+       "file": "units/orc/knight/idle.png",
+       "frames": 4
+      },
+      "walk": {
+       "file": "units/orc/knight/walk.png",
+       "frames": 4
+      },
+      "attack": {
+       "file": "units/orc/knight/attack.png",
+       "frames": 4
+      }
+     }
+    },
+    "catapult": {
+     "frameW": 32,
+     "frameH": 32,
+     "anchorX": 16,
+     "anchorY": 30,
+     "anims": {
+      "idle": {
+       "file": "units/orc/catapult/idle.png",
+       "frames": 1
+      },
+      "walk": {
+       "file": "units/orc/catapult/walk.png",
+       "frames": 3
+      },
+      "attack": {
+       "file": "units/orc/catapult/attack.png",
+       "frames": 4
+      }
+     }
+    }
+   }
+  },
+  "undead": {
+   "dirMode": "4dir",
+   "dirRows": {
+    "down": 0,
+    "up": 1,
+    "left": 2,
+    "right": 3
+   },
+   "fps": {
+    "idle": 5,
+    "walk": 10,
+    "attack": 9
+   },
+   "variants": {
+    "swordsman": {
+     "frameW": 32,
+     "frameH": 32,
+     "anchorX": 16,
+     "anchorY": 28,
+     "anims": {
+      "idle": {
+       "file": "units/undead/swordsman/idle.png",
+       "frames": 1
+      },
+      "walk": {
+       "file": "units/undead/swordsman/walk.png",
+       "frames": 5
+      },
+      "attack": {
+       "file": "units/undead/swordsman/attack.png",
+       "frames": 4
+      }
+     }
+    },
+    "knight": {
+     "frameW": 64,
+     "frameH": 64,
+     "anchorX": 31,
+     "anchorY": 50,
+     "anims": {
+      "idle": {
+       "file": "units/undead/knight/idle.png",
+       "frames": 4
+      },
+      "walk": {
+       "file": "units/undead/knight/walk.png",
+       "frames": 4
+      },
+      "attack": {
+       "file": "units/undead/knight/attack.png",
+       "frames": 4
+      }
+     }
+    },
+    "catapult": {
+     "frameW": 32,
+     "frameH": 32,
+     "anchorX": 16,
+     "anchorY": 30,
+     "anims": {
+      "idle": {
+       "file": "units/undead/catapult/idle.png",
+       "frames": 1
+      },
+      "walk": {
+       "file": "units/undead/catapult/walk.png",
+       "frames": 3
+      },
+      "attack": {
+       "file": "units/undead/catapult/attack.png",
+       "frames": 4
+      }
+     }
+    }
+   }
+  },
+  "bandit": {
+   "dirMode": "4dir",
+   "dirRows": {
+    "down": 0,
+    "up": 1,
+    "left": 2,
+    "right": 3
+   },
+   "fps": {
+    "idle": 5,
+    "walk": 10,
+    "attack": 9
+   },
+   "variants": {
+    "swordsman": {
+     "frameW": 32,
+     "frameH": 32,
+     "anchorX": 14,
+     "anchorY": 30,
+     "anims": {
+      "idle": {
+       "file": "units/bandit/swordsman/idle.png",
+       "frames": 1
+      },
+      "walk": {
+       "file": "units/bandit/swordsman/walk.png",
+       "frames": 5
+      },
+      "attack": {
+       "file": "units/bandit/swordsman/attack.png",
+       "frames": 3
+      }
+     }
+    }
+   }
+  }
+ },
+ "fx": {
+  "smoke": {
+   "file": "fx/smoke.png",
+   "frames": 10,
+   "size": 64,
+   "fps": 20
+  },
+  "arrow": {
+   "file": "fx/arrow.png",
+   "size": 20,
+   "frames": 9,
+   "degs": [
+    87,
+    77,
+    63,
+    57,
+    45,
+    33,
+    27,
+    13,
+    -3
+   ]
+  }
+ },
+ "ui": {
+  "panel": {
+   "file": "ui/panel.png",
+   "size": 96,
+   "slice": 16
+  },
+  "panelPressed": {
+   "file": "ui/panelPressed.png",
+   "size": 96,
+   "slice": 16
+  },
+  "button": {
+   "file": "ui/button.png",
+   "size": 96,
+   "slice": 16
+  },
+  "buttonPressed": {
+   "file": "ui/buttonPressed.png",
+   "size": 96,
+   "slice": 16
+  },
+  "card": {
+   "file": "ui/card.png",
+   "size": 96,
+   "slice": 16
+  },
+  "inset": {
+   "file": "ui/inset.png",
+   "size": 96,
+   "slice": 16
+  },
+  "disabled": {
+   "file": "ui/disabled.png",
+   "size": 96,
+   "slice": 16
+  },
+  "primary": {
+   "file": "ui/primary.png",
+   "size": 96,
+   "slice": 16
+  },
+  "primaryPressed": {
+   "file": "ui/primaryPressed.png",
+   "size": 96,
+   "slice": 16
+  },
+  "danger": {
+   "file": "ui/danger.png",
+   "size": 96,
+   "slice": 16
+  }
+ },
+ "cards": {
+  "prosperity": {
+   "file": "cards/prosperity.png",
+   "w": 153,
+   "h": 237,
+   "small": {
+    "file": "cards/prosperity-sm.png",
+    "w": 51,
+    "h": 79
+   }
+  },
+  "warChest": {
+   "file": "cards/warChest.png",
+   "w": 153,
+   "h": 237,
+   "small": {
+    "file": "cards/warChest-sm.png",
+    "w": 51,
+    "h": 79
+   }
+  },
+  "drillmaster": {
+   "file": "cards/drillmaster.png",
+   "w": 153,
+   "h": 237,
+   "small": {
+    "file": "cards/drillmaster-sm.png",
+    "w": 51,
+    "h": 79
+   }
+  },
+  "forgeFires": {
+   "file": "cards/forgeFires.png",
+   "w": 153,
+   "h": 237,
+   "small": {
+    "file": "cards/forgeFires-sm.png",
+    "w": 51,
+    "h": 79
+   }
+  },
+  "ironhide": {
+   "file": "cards/ironhide.png",
+   "w": 153,
+   "h": 237,
+   "small": {
+    "file": "cards/ironhide-sm.png",
+    "w": 51,
+    "h": 79
+   }
+  },
+  "thrift": {
+   "file": "cards/thrift.png",
+   "w": 153,
+   "h": 237,
+   "small": {
+    "file": "cards/thrift-sm.png",
+    "w": 51,
+    "h": 79
+   }
+  },
+  "surveyors": {
+   "file": "cards/surveyors.png",
+   "w": 153,
+   "h": 237,
+   "small": {
+    "file": "cards/surveyors-sm.png",
+    "w": 51,
+    "h": 79
+   }
+  },
+  "masonry": {
+   "file": "cards/masonry.png",
+   "w": 153,
+   "h": 237,
+   "small": {
+    "file": "cards/masonry-sm.png",
+    "w": 51,
+    "h": 79
+   }
+  },
+  "meteor": {
+   "file": "cards/meteor.png",
+   "w": 138,
+   "h": 180,
+   "small": {
+    "file": "cards/meteor-sm.png",
+    "w": 46,
+    "h": 60
+   }
+  },
+  "terraform": {
+   "file": "cards/terraform.png",
+   "w": 132,
+   "h": 180,
+   "small": {
+    "file": "cards/terraform-sm.png",
+    "w": 44,
+    "h": 60
+   }
+  },
+  "bulwark": {
+   "file": "cards/bulwark.png",
+   "w": 144,
+   "h": 180,
+   "small": {
+    "file": "cards/bulwark-sm.png",
+    "w": 48,
+    "h": 60
+   }
+  },
+  "back": {
+   "file": "cards/back.png",
+   "w": 153,
+   "h": 237,
+   "small": {
+    "file": "cards/back-sm.png",
+    "w": 51,
+    "h": 79
+   }
+  }
+ }
+}

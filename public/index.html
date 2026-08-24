@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Empire</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="menu">
+  <div id="menu-scrim"></div>
+
+  <button id="sound-btn" class="btn btn-sm" title="Toggle music">MUSIC ON</button>
+
+  <div id="menu-inner">
+    <h1>EMPIRE</h1>
+    <p class="tagline">Build your keep. Raise an army. Conquer the map.</p>
+
+    <div class="menu-cols">
+      <!-- Left: who you are -->
+      <div class="frame frame-panel menu-box">
+        <h2>Commander</h2>
+        <input type="text" id="name-input" maxlength="16" placeholder="Your name" autocomplete="off">
+        <h2>Empire</h2>
+        <div class="race-grid" id="race-grid"></div>
+      </div>
+
+      <!-- Right: which game -->
+      <div class="frame frame-panel menu-box">
+        <h2>Play</h2>
+        <div class="card">
+          <div class="sub" id="menu-hint">Host a game and share the code, or join a friend with theirs.</div>
+        </div>
+        <button id="host-btn" class="btn btn-primary btn-lg">Host a Game</button>
+
+        <h2>Join a Friend</h2>
+        <div class="join-row">
+          <input type="text" id="code-input" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false">
+          <button id="join-btn" class="btn">Join</button>
+        </div>
+
+        <div class="card" id="server-row">
+          <label class="sub" for="server-input">Server (leave blank for this one)</label>
+          <input type="text" id="server-input" placeholder="friend-host:3000" autocomplete="off" spellcheck="false">
+        </div>
+
+        <h2>Open Games</h2>
+        <div class="frame frame-inset" id="room-list"><div class="sub">Not connected yet.</div></div>
+        <button id="refresh-btn" class="btn btn-sm">Refresh List</button>
+
+        <div id="menu-error" class="card hidden"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="game-ui" class="hidden">
+  <div id="map-wrap">
+    <canvas id="map"></canvas>
+    <!-- Floating over the map so the side panel doesn't have to carry it. -->
+    <div id="conn-notice" class="hidden"></div>
+    <div id="hud" class="frame frame-panel">
+      <div class="hud-stat"><span class="hud-label">Gold</span><span class="gold" id="gold-val">0</span></div>
+      <div class="hud-stat"><span class="hud-label">Income</span><span id="income-val">0</span>/s</div>
+      <div class="hud-stat"><span class="hud-label">Troops</span><span id="troops-val">0</span></div>
+      <div class="hud-stat"><span class="hud-label">Code</span><span class="gold" id="room-code">—</span></div>
+    </div>
+
+    <!-- Leaving is destructive, so it asks first and says what it will do. -->
+    <div id="exit-wrap">
+      <button id="exit-btn" class="btn btn-sm">Exit</button>
+      <div id="exit-confirm" class="frame frame-panel hidden">
+        <div class="sub" id="exit-note"></div>
+        <div class="btn-row">
+          <button id="exit-yes" class="btn btn-sm">Leave</button>
+          <button id="exit-no" class="btn btn-sm">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <!-- The log is a running commentary you glance at, not something you
+         work in, so it sits in the corner of the map instead of taking a
+         fifth of the side panel and pushing the rest below the fold. -->
+    <div id="log" class="frame frame-panel"></div>
+    <!-- The troop roster lives over the map rather than in the panel: it is
+         what you look at while deciding where to click, so it belongs where
+         you are already looking. -->
+    <div id="troop-bar" class="frame frame-panel">
+      <div id="unit-inputs"></div>
+      <div class="troop-actions">
+        <div id="deploy-hint">Pick troops below, then Deploy them onto the map.</div>
+        <div class="btn-row">
+          <button class="btn btn-sm" id="max-all-btn">All</button>
+          <button class="btn btn-sm" id="clear-all-btn">Clear</button>
+          <button class="btn btn-primary btn-sm" id="deploy-btn" disabled>Deploy</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="panel" class="frame frame-panel">
+    <h2>Town Center</h2>
+    <div class="card" id="castle-card"></div>
+
+    <h2>Build</h2>
+    <div id="build-palette"></div>
+    <button class="btn" id="wall-tool-btn">Wall Tool<span class="btn-note">click-drag</span></button>
+    <div class="card" id="build-menu"><div class="sub">Drag a building onto your ground.</div></div>
+
+    <!-- The race ability: one button, always the same one, above the drafted
+         hand because it is the thing you never have to check whether you own. -->
+    <h2>Ability</h2>
+    <div class="card" id="ability-card"></div>
+
+    <h2>Cards</h2>
+    <div class="card" id="card-list"></div>
+
+    <h2>Buildings</h2>
+    <div id="plots-list"></div>
+
+    <h2>Selected Army</h2>
+    <div class="card" id="army-cmd"></div>
+
+    <h2>Empires</h2>
+    <div class="card" id="player-list"></div>
+  </div>
+</div>
+
+<!-- The lobby. Sits over the map like the draft does, because the empire is
+     already standing behind it — the match is simply held until the host says
+     go, so that everyone's draft starts on the same second. -->
+<div id="lobby" class="hidden">
+  <div id="lobby-inner">
+    <h1>GAME LOBBY</h1>
+    <p class="lobby-sub">Share this code with your friends.</p>
+    <div id="lobby-code">————</div>
+    <div class="frame frame-panel lobby-box">
+      <h2>Players <span id="lobby-count" class="sub"></span></h2>
+      <div id="lobby-players"></div>
+    </div>
+    <div id="lobby-hint" class="sub"></div>
+    <div class="btn-row lobby-actions">
+      <button class="btn btn-primary btn-lg" id="lobby-start">Start Match</button>
+      <button class="btn btn-lg" id="lobby-leave">Leave</button>
+    </div>
+  </div>
+</div>
+
+<!-- The opening draft. Sits over the map because the empire is already
+     standing and ticking behind it. -->
+<div id="draft" class="hidden">
+  <div id="draft-inner">
+    <h1>CHOOSE YOUR HAND</h1>
+    <p class="draft-sub">Keep <span id="draft-pick">3</span> of these.
+      <span id="draft-timer">30</span>s</p>
+    <div id="draft-cards"></div>
+  </div>
+</div>
+
+<div id="game-over-banner">
+  <div class="frame frame-panel game-over-box">
+    <h1 id="game-over-text"></h1>
+    <p class="sub" id="game-over-sub"></p>
+    <div class="btn-row">
+      <button class="btn btn-primary btn-lg" id="restart-btn">Start New Match</button>
+      <button class="btn btn-lg" id="quit-btn">Exit to Menu</button>
+    </div>
+  </div>
+</div>
+
+<!-- Menu theme. Browsers block autoplay until the page has been interacted
+     with, so client.js starts it on the first click or keypress. -->
+<audio id="menu-music" src="media/menu-theme.mp3" loop preload="auto"></audio>
+
+<script src="artdefs.js"></script>
+<script src="sprites.js"></script>
+<script src="client.js"></script>
+</body>
+</html>
