@@ -30,6 +30,7 @@ const check = (label, ok, detail) => {
   solo.send(JSON.stringify({ type: 'create', playerName: 'Solo', race: 'human', roomName: 'solo game' }));
   const soloInit = await next(solo, 'init');
   const soloCode = soloInit.room.code;
+  solo.send(JSON.stringify({ type: 'startMatch' }));   // a lobby broadcasts nothing
   await next(solo, 'state');
   check('the solo game is listed', (await lobby(solo)).some(r => r.code === soloCode));
 
@@ -59,6 +60,11 @@ const check = (label, ok, detail) => {
   const guest = await open();
   guest.send(JSON.stringify({ type: 'join', code, playerName: 'Guest', race: 'orc' }));
   const guestInit = await next(guest, 'init');
+
+  // A room opens in its lobby now, and a lobby broadcasts no state at all —
+  // so nothing below happens until the host starts the match.
+  host.send(JSON.stringify({ type: 'startMatch' }));
+
   let state = await next(host, 'state');
   check('both empires are seated', state.players.length === 2);
 
@@ -74,15 +80,24 @@ const check = (label, ok, detail) => {
   check('the remaining empire is untouched',
     state.players.some(p => p.id === hostInit.playerId && p.alive));
 
-  // A leaver's seat is free again straight away, unlike a dropped one.
+  // The only opponent walking out hands the match to whoever is left — see
+  // Match.contested. It used to leave the survivor in a game that could never
+  // end.
+  check('and the survivor is handed the match', state.gameOver === true,
+    `gameOver=${state.gameOver}`);
+
+  // A leaver's seat is free again straight away, unlike a dropped one. Joining
+  // a room whose game has finished opens a fresh lobby, carrying the player
+  // still sitting in it across.
   const newcomer = await open();
   newcomer.send(JSON.stringify({ type: 'join', code, playerName: 'New', race: 'undead' }));
   const newInit = await next(newcomer, 'init');
   check('the freed seat can be taken immediately', newInit.room.code === code);
-
-  // ---- a razed camp goes back to being a camp --------------------------
-  state = await next(host, 'state');
-  check('the match keeps running for whoever is left', state.players.length === 2);
+  check('and the finished room reopens as a lobby', newInit.started === false);
+  const carried = await next(newcomer, 'lobbyState');
+  check('with the player who was already there carried into it',
+    carried.players.some(p => p.id === hostInit.playerId),
+    carried.players.map(p => p.name).join(','));
 
   for (const s of [solo, ghost, host, guest, newcomer]) s.close();
   console.log(failures ? `\n${failures} FAILURES` : '\nall exit checks pass');

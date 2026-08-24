@@ -4,7 +4,9 @@
 
 const {
   MAP, OUTPOST, RACES, RACE_ABILITIES, CASTLE, BUILDING_TYPES, UNIT_TYPES,
-  AI_CAMP, COMBAT, CARD_DRAFT, CARDS, TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA,
+  AI_CAMP, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
+  TOWER_REDUCTION_CAP, TERRAIN_CLEAR_COST,
+  TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA,
 } = require('./config');
 
 function tileKey(x, y) { return `${x},${y}`; }
@@ -189,6 +191,12 @@ class Match {
     // by getting the second one wrong, leaving the survivor in a match that can
     // never end.
     this.contested = false;
+    // "a|b" for every pair of groups whose exchange has already been resolved
+    // this tick. Lives for one tick; see the top of tick().
+    this.resolvedPairs = new Set();
+    // "x,y" -> seconds of rubble left on a tile whose wall or tower was broken.
+    // Nothing may be built there until it clears. See razeBuilding.
+    this.rubble = new Map();
     // Things that happened this tick and are worth telling a player about
     // (raid payouts, battles won and lost). Broadcast, then cleared next tick.
     this.events = [];
@@ -423,6 +431,9 @@ class Match {
       outposts: [],
       cards: [],                 // ids of everything drafted, in pick order
       spells: {},                // cardId -> charges left
+      // cardId -> seconds until the next charge returns. Only holds an entry
+      // while a spell is actually short of its cap; see stepSpellRecharge.
+      spellRecharge: {},
       // The race ability: ready at spawn, then on its own cooldown. Both
       // halves are seconds and both are counted down by stepAbility.
       ability: { cooldownRemaining: 0, activeRemaining: 0 },
@@ -595,8 +606,12 @@ class Match {
   homeDefense(player) {
     const race = player.mods;
     let power = totalAttack(player.idleUnits, race);
-    let hp = standingHp(player, player.idleUnits, race);
+    // The garrison's own health, and nothing else's. A tower's hp used to be
+    // added in here, which is what made three of them a thousand-point buffer
+    // an attacker ground off before reaching a single defender.
+    const hp = standingHp(player, player.idleUnits, race);
     const structures = [];
+    let reduction = 0;
     for (const b of Object.values(player.buildings)) {
       if (b.underConstruction) continue;
       if (b.type === 'wall') continue;          // fought at the wall, not here
@@ -604,9 +619,9 @@ class Match {
       if (!def || !def.defensePower) continue;   // towers
       structures.push(b);
       power += def.defensePower;
-      hp += b.hp;
+      reduction += def.damageReduction || 0;
     }
-    return { power, hp, structures };
+    return { power, hp, structures, reduction: Math.min(TOWER_REDUCTION_CAP, reduction) };
   }
 
   // Every finished tower looses an arrow at the nearest enemy army in range on
@@ -655,7 +670,19 @@ class Match {
   // Fortifications soak an assault before the garrison does — that is what
   // they are for — and only once they are rubble do the defenders themselves
   // start dying. Building health is kept fractional so a slow grind lands.
+  // The garrison is cut down first and the towers fall after it — the opposite
+  // of the old order, where fortifications were chewed through before a single
+  // defender was touched. A tower earns its keep by cutting down what arrives
+  // (see homeDefense) and by shooting on its own account, not by being a wall
+  // of health standing in front of the people it is meant to be helping.
   applyDefenderLosses(player, pool, damage) {
+    if (damage <= 0) return;
+    const garrison = standingHp(player, player.idleUnits, player.mods);
+    const onGarrison = Math.min(garrison, damage);
+    if (onGarrison > 0) {
+      damageUnits(player, player.idleUnits, player.mods, onGarrison);
+      damage -= onGarrison;
+    }
     for (const b of pool.structures) {
       if (damage <= 0) return;
       const take = Math.min(b.hp, damage);
@@ -663,7 +690,6 @@ class Match {
       damage -= take;
       if (b.hp <= 0.5) this.razeBuilding(player, b);
     }
-    if (damage > 0) damageUnits(player, player.idleUnits, player.mods, damage);
   }
 
   // Every building that appears or disappears goes through these two, so that
@@ -676,22 +702,80 @@ class Match {
     return building;
   }
 
-  razeBuilding(player, building) {
+  // `demolished` is set when the owner pulled it down themselves, which leaves
+  // clear ground — rubble is what a fight leaves behind.
+  razeBuilding(player, building, demolished) {
     delete player.buildings[tileKey(building.x, building.y)];
     if (building.type === 'wall') this.wallVersion++;
+    if (!demolished && (building.type === 'wall' || building.type === 'tower')) {
+      this.rubble.set(tileKey(building.x, building.y), RUBBLE_SEC);
+    }
+  }
+
+  // Rubble clears on its own. One pass for the whole match rather than one per
+  // player, because a tile is a tile whoever's wall was standing on it.
+  stepRubble(dt) {
+    if (!this.rubble.size) return;
+    for (const [key, left] of this.rubble) {
+      if (left <= dt) this.rubble.delete(key);
+      else this.rubble.set(key, left - dt);
+    }
   }
 
   // ---- Commands (called from server.js on incoming messages) ----
 
+  // A wall may not complete a 2x2 block of your own walls. That is exactly
+  // "no second layer": a parallel run alongside an existing one closes a
+  // square, while an L-corner only ever fills three of the four and is still
+  // allowed — so a wall can turn, but it cannot be thickened into a slab that
+  // takes four times as long to break through.
+  //
+  // Only your own walls count. Otherwise an enemy could build alongside your
+  // line to deny you your own ground.
+  wouldThickenWall(player, x, y) {
+    const has = (tx, ty) => {
+      const b = player.buildings[tileKey(tx, ty)];
+      return !!b && b.type === 'wall';
+    };
+    // A wall may not complete a 2x2 block of walls — which is exactly what "one
+    // tile thick" means on a grid. A parallel run laid alongside an existing one
+    // closes squares and is refused; an L-corner only ever fills three of the four
+    // and is allowed, so a wall can still turn, branch and be extended.
+    //
+    // A tighter "you may not build alongside the middle of a run" was tried and
+    // thrown out: it also refused extending a run past its own corner, because
+    // the corner tile has walls on two opposite sides of it. Thickness is about
+    // squares, not about neighbours.
+    for (const [ox, oy] of [[0, 0], [-1, 0], [0, -1], [-1, -1]]) {
+      let filled = 0;
+      for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+        const tx = x + ox + dx, ty = y + oy + dy;
+        if (tx === x && ty === y) { filled++; continue; }   // the one being placed
+        if (has(tx, ty)) filled++;
+      }
+      if (filled === 4) return true;
+    }
+    return false;
+  }
+
   // Is (x,y) a legal tile for `player` to place a building on right now?
   // (Shared by cmdBuild so the same rules are enforced server-side only.)
+  // The ground the town center's sprite stands on. Bigger than the one tile it
+  // occupies, because the art is: see CASTLE.footprint.
+  inCastleFootprint(player, x, y) {
+    const f = CASTLE.footprint;
+    const dx = x - player.baseX, dy = y - player.baseY;
+    return dx >= -f.left && dx <= f.right && dy >= -f.up && dy <= f.down;
+  }
+
   canBuildAt(player, x, y) {
     if (!Number.isInteger(x) || !Number.isInteger(y)) return false;
     if (x < 0 || y < 0 || x >= MAP.width || y >= MAP.height) return false;
     if (!isPassable(this.terrain[y][x])) return false;         // not on rock or water
-    if (Math.hypot(x - player.baseX, y - player.baseY) < 0.5) return false;  // the castle's own tile
+    if (this.inCastleFootprint(player, x, y)) return false;    // under the keep's own art
     if (!this.inTerritory(player, x, y)) return false;
     if (this.tileOccupied(x, y)) return false;                 // nothing already there
+    if (this.rubble.has(tileKey(x, y))) return false;           // still choked with rubble
     return true;
   }
 
@@ -766,6 +850,7 @@ class Match {
       seen.add(key);
       if (player.gold < cost) break;            // out of gold -> stop
       if (!this.canBuildAt(player, x, y)) continue;
+      if (this.wouldThickenWall(player, x, y)) continue;   // no second layer
       player.gold -= cost;
       const buildTime = def.buildTimeSec * race.buildTimeMult;
       const hp = Math.round(def.hp * race.structureHpMult);
@@ -776,6 +861,61 @@ class Match {
       });
       placed++;
     }
+  }
+
+  // Pull down one of your own buildings and get part of the cost back. The
+  // refund is on what you actually paid — the same costMult the build was
+  // charged at — so a Thrift empire is not quietly refunded more than it spent.
+  //
+  // Demolishing leaves clear ground rather than rubble: rubble is what a fight
+  // leaves behind, and being able to tidy your own layout is the point of this.
+  cmdDemolish(playerId, x, y) {
+    const player = this.players.get(playerId);
+    if (!player || !player.alive) return;
+    x = Math.round(x); y = Math.round(y);
+    if (!Number.isInteger(x) || !Number.isInteger(y)) return;
+    const b = player.buildings[tileKey(x, y)];
+    if (!b) return;
+    if (b.type === 'castle') {
+      this.emit(playerId, 'The town center cannot be pulled down.');
+      return;
+    }
+    const def = BUILDING_TYPES[b.type];
+    const paid = def ? Math.round(def.cost * player.mods.costMult) : 0;
+    const refund = Math.floor(paid * DEMOLISH_REFUND);
+    player.gold += refund;
+    this.razeBuilding(player, b, true);
+    this.emit(playerId, `${def ? def.name : 'Building'} pulled down — ${refund}g back.`);
+  }
+
+  // Turn one tile of rock or water inside your own border into ground you can
+  // build on. The Reshape the Land card does this free over a whole disc; this
+  // is the version anyone can buy, a tile at a time, priced so the card stays
+  // worth drafting.
+  cmdClearTerrain(playerId, x, y) {
+    const player = this.players.get(playerId);
+    if (!player || !player.alive) return;
+    x = Math.round(x); y = Math.round(y);
+    if (!Number.isInteger(x) || !Number.isInteger(y)) return;
+    if (x < 0 || y < 0 || x >= MAP.width || y >= MAP.height) return;
+    if (this.terrain[y][x] === TILE_LAND) {
+      this.emit(playerId, 'That ground is already clear.');
+      return;
+    }
+    if (!this.inTerritory(player, x, y)) {
+      this.emit(playerId, 'You can only clear ground inside your own territory.');
+      return;
+    }
+    const cost = Math.round(TERRAIN_CLEAR_COST * player.mods.costMult);
+    if (player.gold < cost) { this.emit(playerId, 'Clearing that costs ' + cost + 'g.'); return; }
+    player.gold -= cost;
+    const was = this.terrain[y][x];
+    this.terrain[y][x] = TILE_LAND;
+    this.terrainEdits.push({ x, y, tile: TILE_LAND });
+    this.effects.push({ kind: 'terraform', x, y, radius: 1 });
+    this.emit(playerId, was === TILE_WATER
+      ? 'Drained a tile of water — ' + cost + 'g.'
+      : 'Levelled a tile of rock — ' + cost + 'g.');
   }
 
   cmdUpgradeCastle(playerId) {
@@ -918,13 +1058,13 @@ class Match {
       const damage = this.mitigate(other.id, spec.damage, player.race, true);
       for (const b of Object.values(other.buildings)) {
         if (Math.hypot(b.x - x, b.y - y) > spec.radius) continue;
+        // A town center cannot be cracked from the sky. Losing an empire to a
+        // card somebody happened to draft — without an army ever marching on
+        // it — is the one outcome a spell should not be able to produce.
+        if (b.type === 'castle') continue;
         b.hp -= damage;
         hits++;
-        if (b.type === 'castle') {
-          if (b.hp <= 0) this.eliminate(other, 'Your town center was destroyed from the sky.');
-        } else if (b.hp <= 0.5) {
-          this.razeBuilding(other, b);
-        }
+        if (b.hp <= 0.5) this.razeBuilding(other, b);
       }
       if (Math.hypot(other.baseX - x, other.baseY - y) <= spec.radius + 4) {
         this.emit(other.id, `${player.name} called a meteor down on your lands.`);
@@ -1023,6 +1163,45 @@ class Match {
     }
     if (use.call(this, player, ab, x, y) === false) return;   // declined: no cooldown spent
     player.ability.cooldownRemaining = ab.cooldownSec;
+  }
+
+  // A keep nobody has touched for a while starts repairing itself. The clock is
+  // driven off the health actually changing rather than off the places that
+  // deal damage, so there is no damage source to remember to wire up — an
+  // arrow, an assault, a spell and anything added later all reset it for free.
+  stepCastleRepair(player, dt) {
+    const castle = this.getCastle(player);
+    if (!castle) return;
+    if (castle.hp < (castle.lastHp === undefined ? castle.hp : castle.lastHp)) {
+      castle.quietFor = 0;                       // something just hit it
+    } else {
+      castle.quietFor = (castle.quietFor || 0) + dt;
+    }
+    if (castle.hp < castle.maxHp && castle.quietFor >= CASTLE.regenAfterSec && !castle.upgrading) {
+      castle.hp = Math.min(castle.maxHp, castle.hp + CASTLE.regenPerSec * dt);
+    }
+    castle.lastHp = castle.hp;
+  }
+
+  // Spent charges come back on a timer, one at a time, up to whatever the card
+  // was drafted with. A spell that never returns is one you hold rather than
+  // use, so `charges` is now the most you can have banked and not the most you
+  // will ever get.
+  stepSpellRecharge(player, dt) {
+    for (const cardId of player.cards) {
+      const card = CARDS[cardId];
+      if (!card || !card.spell) continue;
+      const max = card.spell.charges;
+      if ((player.spells[cardId] || 0) >= max) { delete player.spellRecharge[cardId]; continue; }
+      const left = (player.spellRecharge[cardId] === undefined)
+        ? SPELL_RECHARGE_SEC : player.spellRecharge[cardId] - dt;
+      if (left > 0) { player.spellRecharge[cardId] = left; continue; }
+      player.spells[cardId] = (player.spells[cardId] || 0) + 1;
+      // Straight into the next one if there is still room to bank it.
+      if (player.spells[cardId] < max) player.spellRecharge[cardId] = SPELL_RECHARGE_SEC;
+      else delete player.spellRecharge[cardId];
+      this.emit(player.id, `${card.name} is ready again.`);
+    }
   }
 
   // The ability a player is currently under the effect of, or null. Only the
@@ -1286,6 +1465,14 @@ class Match {
       if (!c || c.defeated) return null;
       return { x: c.x, y: c.y };
     }
+    // A group in the field. Unlike a keep or a camp this one moves, so the
+    // destination is refreshed every tick while the order stands — see the
+    // chase in tick().
+    if (targetType === 'army') {
+      const a = this.armies.get(targetId);
+      if (!a || a.ownerId === playerId || armyCount(a) === 0) return null;
+      return { x: Math.round(a.x), y: Math.round(a.y) };
+    }
     return null;
   }
 
@@ -1516,6 +1703,11 @@ class Match {
 
   tick(dt) {
     if (!this.started || this.gameOver) return;
+    // Two groups fighting each other are both in 'fight' and both stepped, so
+    // without this the exchange would land twice a tick. Cleared here and
+    // written by stepArmyBattle, which resolves a pair once whichever of the
+    // two the loop reaches first.
+    this.resolvedPairs.clear();
 
     for (const player of this.players.values()) {
       if (!player.alive) continue;
@@ -1528,7 +1720,10 @@ class Match {
       // for the rest of the match.
       if (player.woundCarry > 0) player.woundCarry = Math.max(0, player.woundCarry - COMBAT.woundHealPerSec * dt);
       this.stepAbility(player, dt);
+      this.stepSpellRecharge(player, dt);
       player.gold += this.incomePerSec(player) * dt;
+
+      this.stepCastleRepair(player, dt);
 
       for (const plot of Object.values(player.buildings)) {
         if (plot.type === 'castle' && plot.upgrading) {
@@ -1559,6 +1754,8 @@ class Match {
       this.stepTowers(player, dt);
     }
 
+    this.stepRubble(dt);
+
     for (const camp of this.aiCamps) {
       if (camp.defeated && !camp.capturedBy) {
         camp.respawnRemaining -= dt;
@@ -1575,6 +1772,13 @@ class Match {
       if (armyCount(army) === 0) { this.armies.delete(army.id); continue; }
       if (army.order === 'hold') continue; // parked in the field, awaiting orders
       if (army.order === 'fight') { this.stepBattle(army, dt); continue; }
+      // Marching at an enemy group follows it: unlike a keep or a camp, it can
+      // walk away while you are crossing the map to reach it.
+      if (army.order === 'attack' && army.targetType === 'army') {
+        const prey = this.armies.get(army.targetId);
+        if (!prey || armyCount(prey) === 0) { this.holdPosition(army); continue; }
+        army.destX = Math.round(prey.x); army.destY = Math.round(prey.y);
+      }
       // A group on its way to join another follows it: the target may still be
       // marching, and may have been wiped out by the time this one arrives.
       if (army.order === 'merge') {
@@ -1660,7 +1864,62 @@ class Match {
   stepBattle(army, dt) {
     this.stepProjectiles(army, dt);
     if (army.targetType === 'camp') this.stepCampBattle(army, dt);
+    else if (army.targetType === 'army') this.stepArmyBattle(army, dt);
     else this.stepPlayerBattle(army, dt);
+  }
+
+  // Two groups in the field. Both sides trade, whether or not the one being
+  // attacked ever asked for a fight — a group that stood still while it was cut
+  // down would make attacking a parked army free, and free is not a tactic.
+  //
+  // The exchange is resolved once per pair per tick, by whichever of the two
+  // the army loop reaches first. If they are attacking each other they are both
+  // in 'fight' and both stepped, and paying twice would make a mutual fight
+  // resolve at double speed.
+  stepArmyBattle(army, dt) {
+    const foe = this.armies.get(army.targetId);
+    if (!foe || armyCount(foe) === 0) { this.holdPosition(army); return; }
+
+    // It walked off while we were swinging: take up the chase again rather than
+    // fighting something that is no longer there.
+    if (Math.hypot(foe.x - army.x, foe.y - army.y) > Math.max(COMBAT.engageRange, armyRange(army)) + 0.75) {
+      army.order = 'attack';
+      army.destX = Math.round(foe.x); army.destY = Math.round(foe.y);
+      return;
+    }
+
+    const pair = army.id < foe.id ? `${army.id}|${foe.id}` : `${foe.id}|${army.id}`;
+    if (this.resolvedPairs.has(pair)) return;
+    this.resolvedPairs.add(pair);
+
+    // Both blows are computed before either lands, so neither side gets the
+    // advantage of striking a weakened opponent within the same tick.
+    const onFoe = this.mitigate(foe.ownerId, this.attackOutput(army, dt), army.race, false);
+    const onUs  = this.mitigate(army.ownerId, this.attackOutput(foe, dt), foe.race, false);
+
+    const foeOwner = this.players.get(foe.ownerId);
+    const ourOwner = this.players.get(army.ownerId);
+    const foeName = foeOwner ? foeOwner.name : 'An enemy';
+    const ourName = ourOwner ? ourOwner.name : 'An enemy';
+
+    const foeLives = this.damageArmy(foe, onFoe);
+    const weLive = this.damageArmy(army, onUs);
+
+    if (!foeLives) {
+      this.armies.delete(foe.id);
+      this.emit(foe.ownerId, `${ourName} wiped out one of your groups.`);
+      this.emit(army.ownerId, `You destroyed one of ${foeName}'s groups.`);
+    }
+    if (!weLive) {
+      this.armies.delete(army.id);
+      this.emit(army.ownerId, `${foeName} wiped out one of your groups.`);
+      this.emit(foe.ownerId, `You destroyed one of ${ourName}'s groups.`);
+    }
+    // Whoever is left has nothing more to fight here.
+    if (!foeLives && weLive) this.holdPosition(army);
+    if (!weLive && foeLives && foe.targetType === 'army' && foe.targetId === army.id) {
+      this.holdPosition(foe);
+    }
   }
 
   // Troops that shoot are seen to shoot. Purely a flourish: the exchange itself
@@ -1757,12 +2016,16 @@ class Match {
     if (!defender || !defender.alive) { this.finishAssault(army); return; }
     // Mitigated once, at the top: what the defender soaks is the same number
     // whether it lands on their walls, their garrison or their town center.
-    const outgoing = this.mitigate(defender.id, this.attackOutput(army, dt), army.race, true);
     const pool = this.homeDefense(defender);
+    // Towers cut the blow down; they no longer stand in front of it.
+    const outgoing = this.mitigate(defender.id, this.attackOutput(army, dt), army.race, true)
+      * (1 - pool.reduction);
 
-    if (pool.hp > 0) {
+    // Defenders first, towers after them, the keep last. The old order put the
+    // buildings in front and turned a tower line into a health bar.
+    if (pool.hp > 0 || pool.structures.length) {
       const incoming = this.mitigate(army.ownerId, pool.power * COMBAT.tempo * dt, defender.race, false);
-      this.applyDefenderLosses(defender, pool, Math.min(outgoing, pool.hp));
+      this.applyDefenderLosses(defender, pool, outgoing);
       if (!this.absorb(army, incoming, 'Your army broke against their defences.')) {
         this.emit(defender.id, 'You repelled an attack.');
       }
@@ -1852,6 +2115,9 @@ class Match {
         outposts: p.outposts,
         cards: p.cards,
         spells: p.spells,
+        // Seconds until the next charge of each spell that is short of its cap.
+        spellRecharge: Object.fromEntries(
+          Object.entries(p.spellRecharge).map(([id, s]) => [id, Math.ceil(s)])),
         // The ability itself never changes, so only its two clocks are sent;
         // the client already has the definition from init.
         ability: {
@@ -1880,6 +2146,11 @@ class Match {
         destX: a.destX, destY: a.destY,
         breach: a.breach ? { x: a.breach.x, y: a.breach.y } : null,
       })),
+      // Tiles nothing can be built on yet, so the client can show why.
+      rubble: Array.from(this.rubble, ([key, left]) => {
+        const [x, y] = key.split(',').map(Number);
+        return { x, y, sec: Math.ceil(left) };
+      }),
       aiCamps: this.aiCamps.map(c => ({
         id: c.id, x: c.x, y: c.y, hp: Math.max(0, Math.round(c.hp)), maxHp: c.maxHp,
         defeated: c.defeated, capturedBy: c.capturedBy || null,

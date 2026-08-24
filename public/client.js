@@ -729,15 +729,18 @@ function renderCards(me) {
     const charges = me.spells[id] || 0;
     const art = cardArt(id, 'small');
     const spent = def.spell && charges <= 0;
+    // Seconds until the next charge returns, when it is short of its cap.
+    const recharge = (me.spellRecharge && me.spellRecharge[id]) || 0;
     if (def.spell) anySpell = true;
     // A spell's whole face is the button — it is already card-shaped and the
     // panel has no room for a card and a button beside it.
     return `<div class="owned-card card-${def.kind}${armedSpell === id ? ' spell-armed' : ''}${spent ? ' spell-spent' : ''}"` +
       (def.spell && !spent ? ` role="button" tabindex="0" data-spell="${id}"` : '') +
-      ` title="${def.name} — ${def.desc}${def.spell ? ` (${charges} left)` : ''}">` +
+      ` title="${def.name} — ${def.desc}${def.spell ? ` (${charges} left${recharge ? `, next in ${recharge}s` : ''})` : ''}">` +
       `<span class="card-sigil">${def.sigil}</span>` +
       (art ? `<img src="assets/${art.file}" alt="" onerror="this.remove()">` : '') +
       (def.spell ? `<span class="charge-badge">×${charges}</span>` : '') +
+      (recharge ? `<span class="recharge-badge">${recharge}s</span>` : '') +
       (armedSpell === id ? '<span class="aiming">Aiming…</span>' : '') +
       '</div>';
   }).join('');
@@ -745,7 +748,8 @@ function renderCards(me) {
     ? `<div class="sub hand-hint">${armedSpell ? 'Click the map to aim, or the card again to cancel.' : 'Click a spell card to aim it.'}</div>`
     : '';
   const html = `<div class="card-hand">${faces}</div>${hint}`;
-  const sig = me.cards.map(id => `${id}:${me.spells[id] || 0}`).join('|') + '|' + armedSpell;
+  const sig = me.cards.map(id =>
+    `${id}:${me.spells[id] || 0}:${(me.spellRecharge && me.spellRecharge[id]) || 0}`).join('|') + '|' + armedSpell;
   if (syncSection(holder, sig, html)) {
     holder.querySelectorAll('[data-spell]').forEach(el => {
       el.addEventListener('click', () => armSpell(el.dataset.spell));
@@ -1044,6 +1048,14 @@ function isMarchable(tx, ty) {
   return terrain[ty][tx] === 0;
 }
 
+// A tile whose wall or tower was broken on it, still choked with rubble. The
+// server decides; this only stops the UI from offering ground it would refuse.
+function isRubble(tx, ty) {
+  if (!latestState || !latestState.rubble) return false;
+  for (const r of latestState.rubble) if (r.x === tx && r.y === ty) return true;
+  return false;
+}
+
 // Client-side echo of Match.inTerritory (UX only; the server is
 // authoritative). Ground you hold: inside your border, or inside an outpost you
 // have taken.
@@ -1063,7 +1075,14 @@ function isMyBuildable(tx, ty, occupied) {
   if (!me || !me.alive || !buildCfg || !terrain) return false;
   if (tx < 0 || ty < 0 || tx >= mapCfg.width || ty >= mapCfg.height) return false;
   if (terrain[ty][tx] !== 0) return false;
-  if (Math.hypot(tx - me.baseX, ty - me.baseY) < 0.5) return false;   // the castle's own tile
+  if (isRubble(tx, ty)) return false;              // still choked from a breach
+  // The keep covers more ground than the tile it stands on — the same
+  // footprint the server enforces, so the hover highlight never offers a tile
+  // the drop would be refused on.
+  if (castleCfg && castleCfg.footprint) {
+    const f = castleCfg.footprint, dx = tx - me.baseX, dy = ty - me.baseY;
+    if (dx >= -f.left && dx <= f.right && dy >= -f.up && dy <= f.down) return false;
+  } else if (Math.hypot(tx - me.baseX, ty - me.baseY) < 0.5) return false;
   let inside = Math.hypot(tx - me.baseX, ty - me.baseY) <= borderRadius(me);
   for (const o of me.outposts || []) {
     if (inside) break;
@@ -1131,6 +1150,27 @@ function render() {
     ctx.fill(); ctx.stroke();
     ctx.restore();
   }
+  // Rubble left where something was broken. Drawn under the hover highlight so
+  // a player dragging a wall back across a fresh breach can see why it will not
+  // take, rather than clicking at it.
+  if (latestState.rubble && latestState.rubble.length) {
+    ctx.save();
+    for (const r of latestState.rubble) {
+      const px = r.x * ts - ts / 2, py = r.y * ts - ts / 2;
+      ctx.fillStyle = 'rgba(40, 28, 20, 0.55)';
+      ctx.fillRect(px + 2, py + 2, ts - 4, ts - 4);
+      ctx.strokeStyle = 'rgba(120, 90, 60, 0.75)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(px + 2.5, py + 2.5, ts - 5, ts - 5);
+      // A few chips of stone so it reads as debris and not a UI overlay.
+      ctx.fillStyle = 'rgba(150, 120, 92, 0.85)';
+      for (const [ox, oy, w] of [[0.28, 0.34, 4], [0.58, 0.5, 5], [0.4, 0.68, 3]]) {
+        ctx.fillRect(Math.round(px + ts * ox), Math.round(py + ts * oy), w, 3);
+      }
+    }
+    ctx.restore();
+  }
+
   if (hoverTile && !armedBuild) {
     ctx.save();
     ctx.strokeStyle = 'rgba(255,235,150,0.45)'; ctx.lineWidth = 2;
@@ -1436,7 +1476,7 @@ function onCanvasMouseDown(e) {
   const { ix, iy } = tileFromEvent(e);
   wallDrag = new Set();
   wallLast = { x: ix, y: iy };
-  if (isMyBuildable(ix, iy)) wallDrag.add(`${ix},${iy}`);
+  if (isMyBuildable(ix, iy) && !wouldThicken(ix, iy)) wallDrag.add(`${ix},${iy}`);
   render();
 }
 
@@ -1449,10 +1489,51 @@ function onCanvasMouseMove(e) {
   const { ix, iy } = tileFromEvent(e);
   if (ix === wallLast.x && iy === wallLast.y) return;
   for (const t of tilesBetween(wallLast.x, wallLast.y, ix, iy)) {
-    if (isMyBuildable(t.x, t.y)) wallDrag.add(`${t.x},${t.y}`);
+    if (isMyBuildable(t.x, t.y) && !wouldThicken(t.x, t.y)) wallDrag.add(`${t.x},${t.y}`);
   }
   wallLast = { x: ix, y: iy };
   render();
+}
+
+// Client-side echo of Match.wouldThickenWall, counting the tiles already in
+// this drag as well as the walls already standing — a single drag must not be
+// able to paint a slab either.
+function wouldThicken(x, y) {
+  const me = myPlayer();
+  if (!me) return false;
+  const standing = new Set(me.buildings.filter(b => b.type === 'wall').map(b => `${b.x},${b.y}`));
+  const has = (tx, ty) => standing.has(`${tx},${ty}`) || (wallDrag && wallDrag.has(`${tx},${ty}`));
+  // A wall may not complete a 2x2 block of walls — which is exactly what "one
+  // tile thick" means on a grid. A parallel run laid alongside an existing one
+  // closes squares and is refused; an L-corner only ever fills three of the four
+  // and is allowed, so a wall can still turn, branch and be extended.
+  //
+  // A tighter "you may not build alongside the middle of a run" was tried and
+  // thrown out: it also refused extending a run past its own corner, because
+  // the corner tile has walls on two opposite sides of it. Thickness is about
+  // squares, not about neighbours.
+  for (const [ox, oy] of [[0, 0], [-1, 0], [0, -1], [-1, -1]]) {
+    let filled = 0;
+    for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+      const tx = x + ox + dx, ty = y + oy + dy;
+      if (tx === x && ty === y) { filled++; continue; }   // the one being placed
+      if (has(tx, ty)) filled++;
+    }
+    if (filled === 4) return true;
+  }
+  return false;
+}
+
+// Abandon whatever is being dragged or carried. A drag that has gone wrong —
+// the wrong line, the wrong building — used to have to be finished and then
+// undone, and a carried building has no undo at all.
+function cancelDrag() {
+  let had = false;
+  if (wallDrag) { wallDrag = null; wallLast = null; had = true; }
+  if (armedBuild) { armBuild(null); had = true; }
+  if (armedDeploy) { armDeploy(false); had = true; }
+  if (had) { log('Cancelled.'); render(); }
+  return had;
 }
 
 function onCanvasMouseUp() {
@@ -1478,6 +1559,13 @@ function nearestTarget(fx, fy, maxDist = 1.6) {
     if (p.id === myId || !p.alive) continue;
     const d = Math.hypot(p.baseX - fx, p.baseY - fy);
     if (d < bestDist) { bestDist = d; best = { type: 'player', id: p.id }; }
+  }
+  // Somebody else's troops in the field. Checked last so a keep or a camp with
+  // an army parked on it is still the thing you meant to attack.
+  for (const a of latestState.armies) {
+    if (a.ownerId === myId) continue;
+    const d = Math.hypot(a.x - fx, a.y - fy);
+    if (d < bestDist) { bestDist = d; best = { type: 'army', id: a.id }; }
   }
   return best;
 }
@@ -1582,6 +1670,10 @@ window.addEventListener('pointermove', (e) => {
 // Right-click issues movement orders (classic RTS command button).
 function onCanvasRightClick(e) {
   e.preventDefault();
+  // A right-click while something is being dragged or carried throws it away
+  // rather than issuing an order with it — that is what right-click means
+  // everywhere else that has a drag.
+  if (cancelDrag()) return;
   if (wallMode || !latestState) return;
   const { ix, iy } = tileFromEvent(e);
   const fx = ix, fy = iy;
@@ -1627,6 +1719,7 @@ function onKeyDown(e) {
     return;
   }
   if (k === 'escape') {
+    if (cancelDrag()) return;
     if (!document.getElementById('exit-confirm').classList.contains('hidden')) { showExitConfirm(false); return; }
     if (armedBuild) { armBuild(null); return; }
     if (armedSpell) { armSpell(null); return; }
@@ -1923,6 +2016,11 @@ function renderPanel() {
   // The palette is static; only its prices, what you can afford, and whether
   // there is any room left for it move. The server owns the rule either way —
   // this only saves the player a click that was never going to be accepted.
+  const wallCost = priceFor(buildingTypes.wall.cost);
+  const wallNote = document.getElementById('wall-cost');
+  const wallText = `${wallCost}g per tile`;
+  if (wallNote.textContent !== wallText) wallNote.textContent = wallText;
+
   const atLimit = me.buildingsUsed >= me.buildLimit;
   const buildMenu = document.getElementById('build-menu');
   document.querySelectorAll('[data-price]').forEach(el => {
@@ -1932,6 +2030,19 @@ function renderPanel() {
     item.classList.toggle('unaffordable', me.gold < price);
     item.classList.toggle('at-limit', atLimit);
   });
+  // Prices move with the empire's costMult — its race, and any boon drafted for
+  // it — so the number on a palette cell is rarely the number in the rules.
+  // Watching every price change the moment the draft ends, with nothing saying
+  // why, reads as a bug. This says why.
+  const costMult = modOf('costMult');
+  const costNote = document.getElementById('cost-note');
+  const off = Math.round((1 - costMult) * 100);
+  const costText = off === 0 ? ''
+    : off > 0 ? `Your empire builds and trains ${off}% cheaper.`
+              : `Your empire builds and trains ${-off}% dearer.`;
+  if (costNote.textContent !== costText) costNote.textContent = costText;
+  costNote.classList.toggle('hidden', !costText);
+
   syncSection(buildMenu, wallMode ? 'wall' : (armedBuild || (atLimit ? 'full' : 'idle')),
     wallMode ? '<div class="sub">Click-drag across your border to lay a wall. Click the button again to exit.</div>'
       : armedBuild ? `<div class="sub">Carrying a ${buildingTypes[armedBuild].name} — drop it inside your border, or press Escape.</div>`
@@ -1960,9 +2071,13 @@ function renderPanel() {
     } else if (def.incomePerSec) {
       extra = `<div class="sub">+${trim(def.incomePerSec * modOf('incomeMult'))} gold/sec</div>`;
     }
+    // What you would get back for pulling it down: a third of what it cost at
+    // this empire's own prices, which is what the server will actually pay.
+    const refund = Math.floor(priceFor(def.cost) / 3);
     rows.push(`<div class="card"><div class="row"><span class="label">${def.name} <span class="sub">(${b.x},${b.y})</span></span>` +
-      `<span class="sub">HP <span data-live="h${b.x}_${b.y}">${b.hp}</span>/${b.maxHp}</span></div>${extra}</div>`);
-    sig.push(`${b.type}${b.x},${b.y}:${b.underConstruction ? 'c' : 'd'}:${b.maxHp}:${me.cards.length}`);
+      `<span class="sub">HP <span data-live="h${b.x}_${b.y}">${b.hp}</span>/${b.maxHp}</span></div>${extra}` +
+      `<div class="btn-row"><button class="btn btn-sm raze-btn" data-raze="${b.x},${b.y}">Pull down (+${refund}g)</button></div></div>`);
+    sig.push(`${b.type}${b.x},${b.y}:${b.underConstruction ? 'c' : 'd'}:${b.maxHp}:${me.cards.length}:${refund}`);
   });
   if (walls.length) {
     // Not a defence number any more: a wall is ground an enemy has to go round
@@ -1973,7 +2088,16 @@ function renderPanel() {
     sig.push(`walls:${walls.length}:${hurt}`);
   }
   if (!rows.length) rows.push('<div class="card"><div class="sub">No buildings yet — click inside your border to build.</div></div>');
-  syncSection(plotsList, sig.join('|'), rows.join(''));
+  if (syncSection(plotsList, sig.join('|'), rows.join(''))) {
+    // Re-attached whenever the list is rebuilt, which is the same contract the
+    // train buttons had before orders moved to the roster.
+    plotsList.querySelectorAll('[data-raze]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const [x, y] = btn.dataset.raze.split(',').map(Number);
+        send({ type: 'demolish', x, y });
+      });
+    });
+  }
   {
     const live = {};
     for (const b of me.buildings) {

@@ -3,16 +3,43 @@ const WebSocket = require('../../node_modules/ws');
 
 const open = () => new Promise((res) => {
   const ws = new WebSocket('ws://localhost:3000');
+  // Attached before anything else listens, so every state is merged on the way
+  // in and a later read sees a whole empire however long ago it changed.
+  ws.on('message', (raw) => {
+    const msg = JSON.parse(raw);
+    if (msg.type === 'state') recordBuildings(msg);
+  });
   ws.on('open', () => res(ws));
 });
 const next = (ws, type, timeoutMs = 6000) => new Promise((res, rej) => {
   const timer = setTimeout(() => { ws.off('message', on); rej(new Error('timeout waiting for ' + type)); }, timeoutMs);
   const on = (raw) => {
     const msg = JSON.parse(raw);
-    if (msg.type === type) { clearTimeout(timer); ws.off('message', on); res(msg); }
+    if (msg.type === type) {
+      clearTimeout(timer); ws.off('message', on);
+      res(msg.type === 'state' ? fillBuildings(msg) : msg);
+    }
   };
   ws.on('message', on);
 });
+
+// The server leaves a player's buildings out of a broadcast when they have not
+// changed since the last one. The browser client copes because it processes
+// every message; a test that waits for "the next state" processes only the ones
+// it happens to be listening for, and would miss the single broadcast that
+// carried a change. So the merge is attached to the socket in open(), where it
+// sees all of them, rather than to the reads.
+// Two halves, because every listener parses the raw frame into its own object:
+// recordBuildings runs on EVERY message so no change is missed, and fillBuildings
+// is applied to whichever object a reader ended up with.
+const lastBuildings = new Map();
+function recordBuildings(state) {
+  for (const p of state.players) if (p.buildings) lastBuildings.set(p.id, p.buildings);
+}
+function fillBuildings(state) {
+  for (const p of state.players) if (!p.buildings) p.buildings = lastBuildings.get(p.id) || [];
+  return state;
+}
 
 let failures = 0;
 const check = (label, ok, detail) => {
@@ -31,6 +58,11 @@ const check = (label, ok, detail) => {
   const guest = await open();
   guest.send(JSON.stringify({ type: 'join', code, playerName: 'Mira', race: 'orc' }));
   const initGuest = await next(guest, 'init');
+
+  // A room opens in its lobby now, and a lobby broadcasts no state at all —
+  // so nothing below happens until the host starts the match.
+  host.send(JSON.stringify({ type: 'startMatch' }));
+
 
   let state = await next(host, 'state');
   const guestBase = state.players.find(p => p.id === initGuest.playerId);

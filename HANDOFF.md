@@ -258,6 +258,66 @@ tower's tile to where the target stood at that moment. The client flies it
 across that gap; it does not chase, because chasing would mean streaming the
 shot every frame and the flight is a third of a second.
 
+### Playtest pass
+
+#### Groups fight each other in the field
+
+`stepArmyBattle` is the third branch of `stepBattle`, alongside camps and keeps.
+Both sides trade, whether or not the one being attacked ever asked for a fight —
+a group that stood still while it was cut down would make attacking a parked
+army free, and free is not a tactic.
+
+The exchange is resolved **once per pair per tick**, by whichever of the two the
+army loop reaches first (`Match.resolvedPairs`, cleared at the top of `tick`).
+Two groups attacking each other are both in `'fight'` and both stepped, so
+paying twice would make a mutual fight resolve at double speed. Both blows are
+computed before either lands, so neither side gets the advantage of striking a
+weakened opponent inside the same tick.
+
+An enemy group moves, unlike a keep or a camp, so `'attack'` with
+`targetType: 'army'` refreshes its destination every tick — and a target that
+walks out of reach mid-fight puts the attacker back to `'attack'` rather than
+leaving it swinging at nothing.
+
+#### Meteor
+
+300 damage took a bank *and* most of a keep off the map in one cast, which let
+the draft rather than the war decide games. Now 150 — still one-shots a basic
+building and a wall segment — and `cast_meteor` skips town centers entirely.
+Losing an empire to a card somebody happened to draft, with no army ever
+marching, is the one outcome a spell must not be able to produce.
+
+#### Spells recharge
+
+`SPELL_RECHARGE_SEC` (100s) brings one spent charge back at a time, up to the
+card's `charges`, which is now the most you can *bank* rather than the most you
+will ever get. A spell that never returned was one you held rather than used.
+`player.spellRecharge` holds the countdown only while a spell is short of its
+cap, and ships to the client so the card can show it.
+
+#### The keep reserves the ground its art stands on
+
+The castle sprite is 96x96 with a 77px foot — about two and a half tiles wide
+and three tall, anchored at its feet — but it only ever *blocked* the single
+tile underneath, so a bank could be dropped into the corner of the castle and
+drawn straight through the wall of it. `CASTLE.footprint` states what the art
+covers (one either side, two above, none below where the gate is) and
+`Match.inCastleFootprint` is the one place that decides. The client echoes it in
+`isMyBuildable` so the hover highlight never offers a tile the drop would refuse.
+
+Note for anyone touching the map generator: `spawns.test.js` deliberately skips
+the footprint, because that ground is *reserved*, not obstructed.
+
+#### Costs say why they moved
+
+A price is `base * costMult`, and costMult comes from the empire's race and any
+boon it drafted — so every number in the palette changes the moment the draft
+ends, with nothing saying why. That reads as a bug and was reported as one. The
+build panel now carries a line ("Your empire builds and trains 20% cheaper")
+whenever costMult is not 1, and the Wall Tool shows its per-tile price, which
+was the one build cost nowhere on screen because walls have a tool rather than
+a palette cell.
+
 ### Deploying it, and what the multiplayer layer assumes
 
 **One instance, and only one.** Rooms, matches and resume tokens all live in

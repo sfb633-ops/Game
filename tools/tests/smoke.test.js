@@ -29,7 +29,7 @@ for (const [id, p] of [['a', a], ['b', b]]) {
   m.cmdBuild(id, p.baseX + 2, p.baseY, 'tower');
   m.cmdBuild(id, p.baseX - 2, p.baseY, 'tower');
   m.cmdBuild(id, p.baseX, p.baseY + 2, 'barracks');
-  m.cmdBuild(id, p.baseX, p.baseY - 2, 'bank');
+  m.cmdBuild(id, p.baseX, p.baseY + 2, 'bank');
   m.cmdUpgradeCastle(id);
 }
 // A ring of wall round each of them, so armies spend the run routing round

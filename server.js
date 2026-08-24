@@ -462,6 +462,12 @@ wss.on('connection', (ws) => {
       case 'buildWall':
         match.cmdBuildWall(playerId, msg.tiles);
         break;
+      case 'clearTerrain':
+        match.cmdClearTerrain(playerId, msg.x, msg.y);
+        break;
+      case 'demolish':
+        match.cmdDemolish(playerId, msg.x, msg.y);
+        break;
       case 'upgradeCastle':
         match.cmdUpgradeCastle(playerId);
         break;

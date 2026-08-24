@@ -105,6 +105,12 @@ const CASTLE = {
   // The level-1 disc is cleared of mountains and water when the map is built,
   // so an empire's opening ground is always fully buildable.
   buildRadius:   [7, 11, 15],
+  // A keep left alone long enough starts putting itself back together. Slow,
+  // and only after a good while undisturbed, so it undoes the scratches from a
+  // raid that was driven off without healing a keep that is under siege — any
+  // damage at all resets the clock.
+  regenAfterSec: 90,
+  regenPerSec:   3,
   // How many buildings the empire can run at once. Levelling the town center
   // is now two things at once — more ground, and the right to fill more of it
   // — which is what stops a level-1 empire simply sprawling to the horizon.
@@ -114,6 +120,15 @@ const CASTLE = {
   // and counting a 40-segment enclosure against a limit of 10 would delete the
   // wall tool. See Match.buildingsUsed, which is the one place that decides.
   buildLimit:    [10, 15, 20],
+  // The keep's sprite is 96x96 with a 77px foot — about two and a half tiles
+  // wide and three tall, anchored at its feet — but it only ever *blocked* the
+  // single tile underneath it, so a bank could be dropped into the corner of
+  // the castle and drawn straight through the wall of it.
+  //
+  // These are the tiles the art actually covers, measured from the base tile:
+  // one either side, two above (the sprite grows upward from its feet), none
+  // below, where the gate is. Read by Match.inCastleFootprint.
+  footprint:     { left: 1, right: 1, up: 2, down: 0 },
 };
 
 // buildTimeSec is 0 across the board: buildings finish instantly on placement
@@ -130,7 +145,14 @@ const BUILDING_TYPES = {
   // headed for the town center. 12 every 3s is 4 damage a second — a tower
   // harasses a passing army and wears a besieging one down, but three of them
   // still take the better part of a minute to break a real assault.
+  // `damageReduction` is what a tower is worth to a last stand now. It used to
+  // pour its own 220hp into the garrison's pool and be chewed through *before*
+  // the defenders were touched, so three towers were about a thousand extra
+  // health an attacker had to grind off before reaching a single defender. Now
+  // the towers cut down what gets through and the garrison takes the blow, with
+  // the towers falling last — the same buildings, a much less spongy job.
   tower:    { name: 'Archer Tower',  cost: 120, buildTimeSec: 0, hp: 220, defensePower: 15,
+              damageReduction: 0.08,
               range: 5, shotSec: 3, shotDamage: 12 },
   // Walls are placed by click-and-drag (one building per dragged tile). Cheap
   // per tile; cost scales with how many tiles you drag across.
@@ -207,6 +229,13 @@ const COMBAT = {
 // them, and has `seconds` to decide before the rest are chosen for it.
 const CARD_DRAFT = { offer: 6, pick: 3, seconds: 30 };
 
+// How long a spent spell charge takes to come back, in seconds. A spell used to
+// be a hand of two casts for the whole match, which made holding them the
+// correct play right up until the game was already decided. Recharging turns
+// them into something you spend, and `charges` becomes the most you can bank
+// rather than the most you will ever get.
+const SPELL_RECHARGE_SEC = 100;
+
 // A card is either a boon — permanent multipliers folded into the player's
 // stats — or a spell, which grants charges of something aimed at the map.
 //
@@ -261,8 +290,13 @@ const CARDS = {
   // ---- spells ----
   meteor: {
     name: 'Meteor', kind: 'spell', sigil: '☄',
-    desc: 'Call a burning rock down anywhere on the map. Wrecks enemy buildings and armies caught in the blast.',
-    spell: { charges: 2, radius: 2.6, damage: 300, range: 'anywhere' },
+    desc: 'Call a burning rock down anywhere on the map. Wrecks enemy buildings and scatters armies caught in the blast. Town centers are too solid to crack from the sky.',
+    // 300 took a bank *and* most of a keep off the map in one cast, which let
+    // the draft rather than the war decide games. 150 still takes a basic
+    // building off the map in one go and kills a wall segment outright, but it
+    // is half of what it was, and with the keep immune (see cast_meteor) a
+    // meteor now opens an attack instead of being one.
+    spell: { charges: 2, radius: 2.6, damage: 150, range: 'anywhere' },
   },
   terraform: {
     name: 'Reshape the Land', kind: 'spell', sigil: '▲',
@@ -281,11 +315,36 @@ const CARDS = {
 // TRAIN_QUEUE_PER_EXTRA on top, so a second barracks is worth building and a
 // fifth is not — which matters now that BUILD limits how many you may have at
 // all. A single building still never holds more than TRAIN_QUEUE_MAX itself.
+// How long a tile stays choked with rubble after a wall or a tower is broken
+// on it. Without this, a besieged player simply re-drags the wall the instant
+// it falls and an attacker can never actually get in — the gold cost is far too
+// small to be the limit. Rubble makes a breach worth something for a while.
+//
+// Walls and towers only: they are the two things that are broken *in place* as
+// part of an assault. A bank you demolish yourself leaves the ground clear.
+// However many towers are crammed in, they can never cut more than this off an
+// assault. Without a ceiling, twelve towers is simply immunity.
+const TOWER_REDUCTION_CAP = 0.5;
+
+// Paying to make ground buildable. Deliberately dear next to a building: the
+// Reshape the Land card does the same job for free over a whole disc, and a
+// card you drafted should stay worth more than a cheque anyone can write.
+const TERRAIN_CLEAR_COST = 140;
+
+const RUBBLE_SEC = 25;
+
+// What you get back for pulling your own building down. A third: enough that a
+// misplaced bank is not a permanent mistake, little enough that shuffling the
+// layout every time the border grows is a real cost rather than free.
+const DEMOLISH_REFUND = 1 / 3;
+
 const TRAIN_QUEUE_MAX = 5;
 const TRAIN_QUEUE_PER_EXTRA = 2;
 const TICK_MS = 200;
 
 module.exports = {
   MAP, BUILD, OUTPOST, RACES, RACE_ABILITIES, CASTLE, BUILDING_TYPES, UNIT_TYPES,
-  AI_CAMP, COMBAT, CARD_DRAFT, CARDS, TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA, TICK_MS,
+  AI_CAMP, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
+  TOWER_REDUCTION_CAP, TERRAIN_CLEAR_COST,
+  TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA, TICK_MS,
 };

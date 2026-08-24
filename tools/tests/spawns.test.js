@@ -28,7 +28,11 @@ for (let trial = 0; trial < 8; trial++) {
         if (d > r) continue;
         if (m.terrain[y][x] !== 0) blocked++;
         // The real test: would the server let a wall go here?
-        if (d >= 0.5 && !m.canBuildAt(p, x, y) && !m.tileOccupied(x, y)) unbuildable++;
+        // The ground under the keep's own art is deliberately reserved, not
+        // obstructed — this check is about terrain the map generator should
+        // have cleared, so skip the footprint the way it always skipped the
+        // base tile itself.
+        if (!m.inCastleFootprint(p, x, y) && !m.canBuildAt(p, x, y) && !m.tileOccupied(x, y)) unbuildable++;
       }
     }
     for (const c of m.aiCamps) if (Math.hypot(c.x - p.baseX, c.y - p.baseY) <= r) campsInside++;

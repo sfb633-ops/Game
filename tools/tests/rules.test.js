@@ -32,8 +32,8 @@ const check = (label, ok, detail) => {
   caster.draft = victim.draft = null;
   caster.gold = victim.gold = 99999;
   m.takeCard(caster, 'meteor');
-  m.cmdBuild('v', victim.baseX + 1, victim.baseY, 'bank');
-  const key = `${victim.baseX + 1},${victim.baseY}`;
+  m.cmdBuild('v', victim.baseX + 2, victim.baseY, 'bank');
+  const key = `${victim.baseX + 2},${victim.baseY}`;
   const before = !!victim.buildings[key];
   m.cmdCastSpell('c', 'meteor', NaN, NaN);
   m.cmdCastSpell('c', 'meteor', 'x', 'y');
@@ -55,32 +55,54 @@ const check = (label, ok, detail) => {
   check('a 200k-tile wall drag returns promptly', Date.now() - t0 < 250, `${Date.now() - t0}ms`);
 }
 
-// --- 3. elimination by meteor releases outposts, same as by army ----------
-for (const how of ['meteor', 'army']) {
+// --- 3. however an empire dies, its camps go back ------------------------
+// A meteor used to be one of the ways. It no longer is — see the check below —
+// so the shared release path is exercised through the two that remain: an army
+// breaking the keep, and eliminate() called directly, which is what every other
+// route ends in.
+for (const how of ['army', 'direct']) {
   const m = new Match();
   const killer = m.addPlayer('k', 'human', 'K');
   const doomed = m.addPlayer('d', 'orc', 'D');
   killer.draft = doomed.draft = null;
   killer.gold = doomed.gold = 999999;
-  m.takeCard(killer, 'meteor');
-  // Hand the doomed empire a captured camp.
   const camp = m.aiCamps[0];
   camp.defeated = true; camp.capturedBy = doomed.id; camp.respawnRemaining = 0;
   doomed.outposts.push({ x: camp.x, y: camp.y });
 
-  if (how === 'meteor') {
-    const castle = m.getCastle(doomed);
-    castle.hp = 10;
-    m.cmdCastSpell('k', 'meteor', doomed.baseX, doomed.baseY);
-  } else {
+  if (how === 'army') {
     m.getCastle(doomed).hp = 1;
     killer.idleUnits.swordsman = 60;
     sendAt(m, 'k', { swordsman: 60 }, 'player', doomed.id);
     for (let i = 0; i < 8000 && doomed.alive; i++) m.tick(0.2);
+  } else {
+    m.eliminate(doomed, 'test');
   }
   check(`elimination by ${how} releases the dead empire's camps`,
     !doomed.alive && doomed.outposts.length === 0 && !camp.capturedBy,
     `alive=${doomed.alive} outposts=${doomed.outposts.length} capturedBy=${camp.capturedBy}`);
+}
+
+// A meteor wrecks what an empire built; it does not decapitate one. Losing a
+// game to a card somebody happened to draft, with no army ever marching, is the
+// one outcome a spell must not be able to produce.
+{
+  const m = new Match();
+  const caster = m.addPlayer('c', 'human', 'C');
+  const victim = m.addPlayer('v', 'orc', 'V');
+  caster.draft = victim.draft = null;
+  caster.gold = victim.gold = 999999;
+  m.takeCard(caster, 'meteor');
+  const castle = m.getCastle(victim);
+  castle.hp = 5;                                  // one point from falling
+  const key = `${victim.baseX + 2},${victim.baseY}`;
+  m.cmdBuild('v', victim.baseX + 2, victim.baseY, 'bank');
+  m.cmdCastSpell('c', 'meteor', victim.baseX, victim.baseY);
+  check('a meteor cannot destroy a town center',
+    victim.alive && m.getCastle(victim).hp === 5,
+    `alive=${victim.alive} keep=${m.getCastle(victim).hp}`);
+  check('but it still takes what was built around it off the map',
+    !victim.buildings[key], 'the bank survived');
 }
 
 // --- 4. a player who leaves gives their camps back ------------------------
@@ -869,6 +891,12 @@ function farTile(m, p, want) {
   m.cmdDeployUnits('p', { swordsman: 5 }, p.baseX + 6, p.baseY);
   m.cmdDeployUnits('p', { swordsman: 5 }, p.baseX - 6, p.baseY);
   const a = [...m.armies.values()][0], b = [...m.armies.values()][1];
+  // Both were raised at the keep and are standing on each other until they
+  // march, and a merge ordered now would finish on the first tick. Let them
+  // reach opposite sides first.
+  for (let t = 0; t < 400 && (a.order !== 'hold' || b.order !== 'hold'); t++) m.tick(0.2);
+  check('two groups sent opposite ways end up apart',
+    Math.hypot(a.x - b.x, a.y - b.y) > 4, `${Math.hypot(a.x - b.x, a.y - b.y).toFixed(1)} tiles`);
   m.cmdMergeArmy('p', b.id, a.id);
   m.tick(0.2);
   m.armies.delete(a.id);                          // the target is wiped out
@@ -1119,6 +1147,265 @@ function farTile(m, p, want) {
   m.eliminate(a, 'test'); m.eliminate(b, 'test');
   for (let t = 0; t < 10; t++) m.tick(0.2);
   check('a match with nobody left still ends', m.gameOver, `over=${m.gameOver}`);
+}
+
+// --- groups fight each other in the field ---------------------------------
+
+// Two groups, a fixed distance apart, so the exchange can be measured without
+// travel time getting into it.
+function facingOff(aCount, bCount) {
+  const m = new Match({ started: false });
+  const a = m.addPlayer('a', 'human', 'A'), b = m.addPlayer('b', 'human', 'B');
+  m.start();
+  a.draft = b.draft = null;
+  a.idleUnits.swordsman = aCount; b.idleUnits.swordsman = bCount;
+  m.cmdDeployUnits('a', { swordsman: aCount }, a.baseX, a.baseY);
+  m.cmdDeployUnits('b', { swordsman: bCount }, b.baseX, b.baseY);
+  const A = [...m.armies.values()].find(x => x.ownerId === 'a');
+  const B = [...m.armies.values()].find(x => x.ownerId === 'b');
+  A.x = 50; A.y = 40; A.order = 'hold';
+  B.x = 50; B.y = 40; B.order = 'hold';
+  return { m, A, B };
+}
+
+{
+  const { m, A, B } = facingOff(20, 8);
+  m.cmdAttackArmy('a', A.id, 'army', B.id);
+  check('an enemy group is a legal target', A.order === 'attack' && A.targetType === 'army');
+  let t = 0;
+  for (; t < 9000 && m.armies.has(A.id) && m.armies.has(B.id); t++) m.tick(0.2);
+  check('the stronger group wins and keeps survivors',
+    m.armies.has(A.id) && !m.armies.has(B.id) && armyCount(A) > 0,
+    `A ${m.armies.has(A.id) ? armyCount(A) : 0} left, B ${m.armies.has(B.id) ? armyCount(B) : 0}`);
+  check('and holds the ground afterwards rather than marching home',
+    A.order === 'hold', A.order);
+  check('both sides were told what happened',
+    m.events.some(e => e.playerId === 'b' && /wiped out one of your groups/.test(e.text)) &&
+    m.events.some(e => e.playerId === 'a' && /You destroyed/.test(e.text)));
+}
+
+// A group that was never given an attack order still fights back — otherwise
+// hitting a parked army would be free damage, and free is not a tactic.
+{
+  const { m, A, B } = facingOff(12, 12);
+  m.cmdAttackArmy('a', A.id, 'army', B.id);
+  for (let t = 0; t < 60; t++) m.tick(0.2);
+  check('a group that was only defending still hurts the attacker',
+    armyCount(A) < 12, `${armyCount(A)} of 12 left`);
+  check('while B was never ordered to do anything', B.order === 'hold');
+}
+
+// Both attacking each other must not resolve the exchange twice a tick.
+{
+  const one = facingOff(20, 20), both = facingOff(20, 20);
+  one.m.cmdAttackArmy('a', one.A.id, 'army', one.B.id);
+  both.m.cmdAttackArmy('a', both.A.id, 'army', both.B.id);
+  both.m.cmdAttackArmy('b', both.B.id, 'army', both.A.id);
+  const run = (s) => { let n = 0;
+    for (let t = 0; t < 9000 && s.m.armies.has(s.A.id) && s.m.armies.has(s.B.id); t++) {
+      s.m.tick(0.2); if (s.A.order === 'fight' || s.B.order === 'fight') n++; }
+    return n; };
+  const oneWay = run(one), twoWay = run(both);
+  check('a mutual fight resolves at the same rate as a one-sided one',
+    oneWay === twoWay, `${oneWay} vs ${twoWay} ticks of fighting`);
+}
+
+// The target can walk away, and can die on the way to being reached.
+{
+  const { m, A, B } = facingOff(12, 12);
+  B.x = 70; B.y = 40;                              // well out of reach
+  m.cmdAttackArmy('a', A.id, 'army', B.id);
+  m.tick(0.2);
+  const firstDest = { x: A.destX, y: A.destY };
+  B.x = 30; B.y = 60;                              // it moves
+  m.tick(0.2);
+  check('an attacking group follows a target that moves',
+    A.destX !== firstDest.x || A.destY !== firstDest.y,
+    `${firstDest.x},${firstDest.y} -> ${A.destX},${A.destY}`);
+  m.armies.delete(B.id);
+  for (let t = 0; t < 40; t++) m.tick(0.2);
+  check('and holds where it stands if the target is gone before it arrives',
+    m.armies.has(A.id) && A.order === 'hold', A.order);
+}
+
+// Your own troops are never a target.
+{
+  const m = new Match({ started: false });
+  const p = m.addPlayer('p', 'human', 'P');
+  m.start(); p.draft = null;
+  p.idleUnits.swordsman = 10;
+  m.cmdDeployUnits('p', { swordsman: 5 }, p.baseX + 2, p.baseY);
+  m.cmdDeployUnits('p', { swordsman: 5 }, p.baseX - 2, p.baseY);
+  const [x, y] = [...m.armies.values()];
+  m.cmdAttackArmy('p', x.id, 'army', y.id);
+  check('you cannot order your own groups to attack each other',
+    x.order !== 'attack' || x.targetType !== 'army', `${x.order}/${x.targetType}`);
+}
+
+// --- the keep reserves the ground its art stands on ------------------------
+{
+  const m = new Match({ started: false });
+  const p = m.addPlayer('p', 'human', 'P');
+  m.start(); p.draft = null; p.gold = 999999;
+  const f = cfg.CASTLE.footprint;
+  check('a tile beside the keep is refused', !m.canBuildAt(p, p.baseX + 1, p.baseY));
+  check('and one above it', !m.canBuildAt(p, p.baseX, p.baseY - 1));
+  check('and two above it, which the sprite still covers',
+    !m.canBuildAt(p, p.baseX, p.baseY - 2));
+  check('but the tile below is free — that is where the gate is',
+    m.canBuildAt(p, p.baseX, p.baseY + 1));
+  check('and clear of the footprint everything is buildable again',
+    m.canBuildAt(p, p.baseX + f.right + 1, p.baseY) &&
+    m.canBuildAt(p, p.baseX, p.baseY - f.up - 1));
+  // The rule has to actually stop a build, not merely report it.
+  m.cmdBuild('p', p.baseX + 1, p.baseY, 'bank');
+  check('and a build order into it does nothing', m.buildingsUsed(p) === 0);
+}
+
+// --- spent spells come back ------------------------------------------------
+{
+  const m = new Match({ started: false });
+  const p = m.addPlayer('p', 'human', 'P');
+  m.start(); p.draft = null; p.gold = 999999;
+  m.takeCard(p, 'meteor');
+  const max = cfg.CARDS.meteor.spell.charges;
+  check('a drafted spell starts at its cap', p.spells.meteor === max);
+  check('and a full spell is not counting anything down',
+    p.spellRecharge.meteor === undefined);
+
+  m.cmdCastSpell('p', 'meteor', p.baseX + 20, p.baseY);
+  check('casting spends a charge', p.spells.meteor === max - 1);
+  m.tick(0.2);
+  check('and starts it recharging', p.spellRecharge.meteor > 0,
+    `${p.spellRecharge.meteor}s`);
+
+  // Not a tick before it is due.
+  for (let t = 0; t < (cfg.SPELL_RECHARGE_SEC - 2) / 0.2; t++) m.tick(0.2);
+  check('the charge does not arrive early', p.spells.meteor === max - 1);
+  for (let t = 0; t < 4 / 0.2; t++) m.tick(0.2);
+  check('but it does arrive', p.spells.meteor === max, `${p.spells.meteor}`);
+  check('and the player is told', m.events.some(e => /ready again/.test(e.text)));
+
+  // And it never banks past the cap, however long you leave it.
+  for (let t = 0; t < 3000; t++) m.tick(0.2);
+  check('a full spell never banks past its cap', p.spells.meteor === max, `${p.spells.meteor}`);
+  check('and stops counting once it is full', p.spellRecharge.meteor === undefined);
+}
+
+// Two spent charges come back one at a time, not together.
+{
+  const m = new Match({ started: false });
+  const p = m.addPlayer('p', 'human', 'P');
+  m.start(); p.draft = null; p.gold = 999999;
+  m.takeCard(p, 'meteor');
+  m.cmdCastSpell('p', 'meteor', p.baseX + 20, p.baseY);
+  m.cmdCastSpell('p', 'meteor', p.baseX + 20, p.baseY + 4);
+  check('both charges spent', p.spells.meteor === 0);
+  for (let t = 0; t < (cfg.SPELL_RECHARGE_SEC + 1) / 0.2; t++) m.tick(0.2);
+  check('the first comes back alone', p.spells.meteor === 1, `${p.spells.meteor}`);
+  check('and the second is already on its way', p.spellRecharge.meteor > 0);
+  for (let t = 0; t < (cfg.SPELL_RECHARGE_SEC + 1) / 0.2; t++) m.tick(0.2);
+  check('then the second', p.spells.meteor === 2, `${p.spells.meteor}`);
+}
+
+// A boon has no charges, so it must never appear in the recharge table.
+{
+  const m = new Match({ started: false });
+  const p = m.addPlayer('p', 'human', 'P');
+  m.start(); p.draft = null;
+  m.takeCard(p, 'prosperity');
+  for (let t = 0; t < 600; t++) m.tick(0.2);
+  check('a boon never recharges anything',
+    Object.keys(p.spellRecharge).length === 0 && p.spells.prosperity === undefined);
+  check('and the client is sent the timers it needs', (() => {
+    const sp = m.serialize().players[0];
+    return sp.spellRecharge && typeof sp.spellRecharge === 'object';
+  })());
+}
+
+// --- rubble: a breach is worth something for a while ----------------------
+{
+  const m = new Match({ started: false });
+  const p = m.addPlayer('p', 'human', 'P');
+  m.start(); p.draft = null; p.gold = 999999;
+  const wx = p.baseX + 3, wy = p.baseY;
+  m.cmdBuildWall('p', [{ x: wx, y: wy }]);
+  const wall = p.buildings[`${wx},${wy}`];
+  check('a wall goes up', !!wall);
+
+  m.razeBuilding(p, wall);                        // broken in a fight
+  check('breaking it leaves rubble', m.rubble.get(`${wx},${wy}`) === cfg.RUBBLE_SEC);
+  check('and nothing can be built there', !m.canBuildAt(p, wx, wy));
+  m.cmdBuildWall('p', [{ x: wx, y: wy }]);
+  check('so it cannot be re-dragged the instant it falls', !p.buildings[`${wx},${wy}`]);
+
+  for (let t = 0; t < (cfg.RUBBLE_SEC - 2) / 0.2; t++) m.tick(0.2);
+  check('the rubble does not clear early', !m.canBuildAt(p, wx, wy));
+  for (let t = 0; t < 4 / 0.2; t++) m.tick(0.2);
+  check('but it does clear', m.canBuildAt(p, wx, wy) && !m.rubble.has(`${wx},${wy}`));
+  m.cmdBuildWall('p', [{ x: wx, y: wy }]);
+  check('and the wall can go back up', !!p.buildings[`${wx},${wy}`]);
+}
+
+// A tower leaves the same as a wall; a building you pull down yourself does not.
+{
+  const m = new Match({ started: false });
+  const p = m.addPlayer('p', 'human', 'P');
+  m.start(); p.draft = null; p.gold = 999999;
+  const tx = p.baseX + 3, ty = p.baseY;
+  m.cmdBuild('p', tx, ty, 'tower');
+  m.razeBuilding(p, p.buildings[`${tx},${ty}`]);
+  check('a broken tower leaves rubble too', m.rubble.has(`${tx},${ty}`));
+
+  const bx = p.baseX - 3;
+  m.cmdBuild('p', bx, ty, 'bank');
+  m.razeBuilding(p, p.buildings[`${bx},${ty}`]);
+  check('an ordinary building does not', !m.rubble.has(`${bx},${ty}`));
+
+  const cx = p.baseX, cy = p.baseY + 3;
+  m.cmdBuild('p', cx, cy, 'tower');
+  m.razeBuilding(p, p.buildings[`${cx},${cy}`], true);   // pulled down on purpose
+  check('and neither does one you pull down yourself', !m.rubble.has(`${cx},${cy}`));
+  check('the client is sent the tiles so it can say why',
+    m.serialize().rubble.some(r => r.x === tx && r.y === ty));
+}
+
+// --- walls stay one tile thick --------------------------------------------
+{
+  const m = new Match({ started: false });
+  const p = m.addPlayer('p', 'human', 'P');
+  m.start(); p.draft = null; p.gold = 999999;
+  const bx = p.baseX, by = p.baseY + 4;
+  const walls = () => Object.values(p.buildings).filter(b => b.type === 'wall');
+  const at = (x, y) => walls().some(w => w.x === x && w.y === y);
+
+  const run = []; for (let i = -3; i <= 3; i++) run.push({ x: bx + i, y: by });
+  m.cmdBuildWall('p', run);
+  check('a straight run goes up whole', walls().length === 7, `${walls().length}`);
+
+  // A solid layer alongside it must be impossible — every tile of it would
+  // close a square against the run.
+  const layer = []; for (let i = -3; i <= 3; i++) layer.push({ x: bx + i, y: by + 1 });
+  m.cmdBuildWall('p', layer);
+  let solid = true;
+  for (let i = -3; i < 3; i++) if (!(at(bx + i, by + 1) && at(bx + i + 1, by + 1))) solid = false;
+  check('a solid second layer cannot be laid', !solid,
+    `row: ${walls().filter(w => w.y === by + 1).map(w => w.x).sort((a, b) => a - b).join(' ')}`);
+  check('and no 2x2 block of wall exists anywhere', (() => {
+    for (const w of walls()) {
+      if (at(w.x + 1, w.y) && at(w.x, w.y + 1) && at(w.x + 1, w.y + 1)) return false;
+    }
+    return true;
+  })());
+
+  // Turning and extending both still work.
+  const before = walls().length;
+  m.cmdBuildWall('p', [{ x: bx + 3, y: by - 1 }, { x: bx + 3, y: by - 2 }]);
+  check('a wall can still turn a corner', walls().length === before + 2,
+    `${walls().length - before} placed`);
+  const before2 = walls().length;
+  m.cmdBuildWall('p', [{ x: bx + 4, y: by }]);
+  check('and a run can still be extended', walls().length === before2 + 1);
 }
 
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');

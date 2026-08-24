@@ -633,3 +633,21 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 /* Whether a listed game can still be joined at the start line. */
 .room-row .room-live { color: #e08a6a; font-size: 0.62rem; letter-spacing: 1px; }
 .room-row .room-open { color: #7fd07f; font-size: 0.62rem; letter-spacing: 1px; }
+
+/* Seconds until a spent spell charge comes back. Sits opposite the charge
+   count so a card can show "none left" and "back shortly" at once. */
+.recharge-badge {
+  position: absolute; left: 0; bottom: 0; z-index: 2;
+  padding: 0 3px;
+  background: #000000bb; color: #8fd0ff;
+  font-size: 0.55rem; line-height: 1.5;
+}
+
+/* Why the palette prices are not the numbers in the rules: the empire's own
+   cost multiplier, from its race and whatever it drafted. */
+#cost-note { margin: 0.25rem 0 0.1rem; font-size: 0.66rem; color: var(--gold); }
+#cost-note.hidden { display: none; }
+
+/* Pulling your own building down. Deliberately plain rather than a warning
+   colour — it refunds gold, it is not a mistake. */
+.raze-btn { width: 100%; font-size: 0.64rem; }
