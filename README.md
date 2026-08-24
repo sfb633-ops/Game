@@ -214,6 +214,9 @@ sprite anchors and layering can be eyeballed as a PNG.
   The Divide has a mountain ridge down the middle with three passes through it;
   Four Corners bunches everyone into the corners; Open Field has almost nothing
   in the way. Changing the map in the lobby regenerates the world for everybody.
+- **Knights are the fast option, not the strong one.** A stable and a barracks
+  now come out level in a straight fight for the same minutes of training; what
+  a knight buys is crossing the map in 48 seconds instead of 80.
 - **Teams.** The host splits the lobby into two, three or four sides and
   everyone picks one. Teammates start next to each other — west and east for
   two, thirds for three, corners for four — share what they have scouted, are

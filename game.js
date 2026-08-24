@@ -1109,8 +1109,12 @@ class Match {
   // defender was touched. A tower earns its keep by cutting down what arrives
   // (see homeDefense) and by shooting on its own account, not by being a wall
   // of health standing in front of the people it is meant to be helping.
+  // Returns whatever the defence could not absorb, for the caller to pass on to
+  // the keep behind it. Returning it rather than dropping it on the floor is
+  // the point: a blow that finished the last defender used to do nothing else,
+  // however big it was.
   applyDefenderLosses(player, pool, damage) {
-    if (damage <= 0) return;
+    if (damage <= 0) return 0;
     const garrison = standingHp(player, player.idleUnits, player.mods);
     const onGarrison = Math.min(garrison, damage);
     if (onGarrison > 0) {
@@ -1118,12 +1122,13 @@ class Match {
       damage -= onGarrison;
     }
     for (const b of pool.structures) {
-      if (damage <= 0) return;
+      if (damage <= 0) return 0;
       const take = Math.min(b.hp, damage);
       b.hp -= take;
       damage -= take;
       if (b.hp <= 0.5) this.razeBuilding(player, b);
     }
+    return damage;
   }
 
   // Every building that appears or disappears goes through these two, so that
@@ -2721,7 +2726,7 @@ class Match {
     // whether it lands on their walls, their garrison or their town center.
     const pool = this.homeDefense(defender);
     // Towers cut the blow down; they no longer stand in front of it.
-    const outgoing = this.mitigate(defender.id, this.attackOutput(army, dt), army.race, true)
+    let outgoing = this.mitigate(defender.id, this.attackOutput(army, dt), army.race, true)
       * (1 - pool.reduction);
 
     // Defenders first, towers after them, the keep last. The old order put the
@@ -2730,11 +2735,20 @@ class Match {
       const incoming = this.defendersCanReach(army, defender.baseX, defender.baseY)
         ? this.mitigate(army.ownerId, pool.power * COMBAT.tempo * dt, defender.race, false)
         : 0;
-      this.applyDefenderLosses(defender, pool, outgoing);
+      // Whatever gets past the defence carries on into the keep, in the same
+      // tick. That reads as two health bars dropping at once and is right — but
+      // it used to depend on how the attacker had split their troops, which is
+      // not. A single group could never touch the town centre in the tick the
+      // garrison fell, because its overflow was thrown away; a second group in
+      // that same tick recomputed the defence, found it empty, and went
+      // straight for the keep. Same army, same damage, different outcome
+      // depending only on whether it marched as one block or three.
+      outgoing = this.applyDefenderLosses(defender, pool, outgoing);
       if (!this.absorb(army, incoming, 'Your army broke against their defences.')) {
         this.emit(defender.id, 'You repelled an attack.');
+        return;                      // they died on the defences; nothing got through
       }
-      return;
+      if (outgoing <= 0) return;     // the defence swallowed all of it
     }
 
     const castle = this.getCastle(defender);

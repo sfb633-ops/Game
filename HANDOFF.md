@@ -1567,6 +1567,51 @@ quarter does not: every 2x2 or 4x4 block of source pixels becomes one,
 uniformly, which is as even as magnifying by three. At 1:1 a full-screen window
 shows about a fifth of the map's width; a quarter shows nearly all of it.
 
+### Knights, and an assault that depended on formation
+
+Two things from the same playtest, and they are unrelated except that knights
+were what made both visible.
+
+**Damage past the defence was thrown away.** `applyDefenderLosses` spilled
+whatever the garrison could not absorb into the towers, and if there were no
+towers left it simply returned — so a blow that finished the last defender did
+nothing else, however big it was. Worse, it made the shape of an assault depend
+on how the attacker had split their troops: one group could never touch the town
+center in the tick the garrison fell, because its overflow evaporated, while a
+second group in that same tick recomputed `homeDefense`, found it empty, and
+went straight for the keep. Same troops, same damage, different outcome.
+
+That is what "knights damaged units and the town center at one time" was. The
+simultaneous damage is not the bug and has not been removed — a blow that
+finishes the last defender *should* carry on into what it was defending, and
+both bars dropping in one tick is what that looks like. The bug was that it only
+happened when you attacked in more than one group. `applyDefenderLosses` now
+returns the remainder and `stepPlayerBattle` puts it into the keep, so twelve
+knights break through on the same tick and leave the keep on the same health
+whether they marched as one block or three.
+
+**Knights were the better unit, full stop.** Per gold they were slightly worse
+than swordsmen — 0.225 attack and 1.38 health per gold against 0.250 and 1.50 —
+which is why they lost a fight at equal cost and why this took a playtest rather
+than a spreadsheet to notice. But gold is not the constraint that binds. The
+town center caps how many buildings an empire may run, and each building carries
+its own training queue, so the scarce resource is **building slots**, and per
+slot knights won on both axes at once: a stable running flat out for three
+minutes produced 189 attack and 1155 health against a barracks' 175 and 1050.
+Twenty-one knights beat thirty-five swordsmen with nine still standing.
+
+`trainTimeSec` 8.5 → 9.4. That is where the two buildings come out level in a
+straight fight, give or take a couple of bodies, with the knights costing about
+9% more gold to get there. Small change, large effect — combat compounds an
+edge, so 8.5s wins by nine bodies and 9.6s loses by eleven, and the interesting
+range is about a second wide.
+
+Nerfed on the clock rather than on attack or health deliberately: a knight
+should still feel like a knight when it arrives, there should just be fewer of
+them. What they keep is the thing worth paying for — 5.0 crosses this map in 48
+seconds against a swordsman's 80, which is what makes them the unit for raiding
+camps, reinforcing a side under pressure, and leaving before the answer arrives.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

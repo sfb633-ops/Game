@@ -271,7 +271,21 @@ const BUILDING_TYPES = {
 // "Swordsmans" is not a thing.
 const UNIT_TYPES = {
   swordsman: { name: 'Swordsman', plural: 'Swordsmen', cost: 20, trainTimeSec: 5.1,  attack: 5,  hp: 30, speed: 3.0 },
-  knight:    { name: 'Knight',    plural: 'Knights',   cost: 40, trainTimeSec: 8.5,  attack: 9,  hp: 55, speed: 5.0 },
+  // Knights buy speed, and that is all they buy. At 8.5s they were simply the
+  // better unit: a stable running flat out out-produced a barracks on attack
+  // *and* on health (189/1155 against 175/1050 over three minutes), and since
+  // the town center caps how many buildings an empire may run at all, the
+  // scarce resource is building slots rather than gold — so the unit that wins
+  // per slot wins outright. Twenty-one knights beat thirty-five swordsmen with
+  // nine still standing.
+  //
+  // 9.4s is where a stable and a barracks come out level in a straight fight,
+  // give or take a couple of bodies, with the knights costing about 9% more
+  // gold to get there. What they keep is the thing worth having: 5.0 crosses
+  // this map in 48 seconds against a swordsman's 80. Nerfed on the clock rather
+  // than on attack or health deliberately — a knight should still feel like a
+  // knight when it arrives, there should just be fewer of them.
+  knight:    { name: 'Knight',    plural: 'Knights',   cost: 40, trainTimeSec: 9.4,  attack: 9,  hp: 55, speed: 5.0 },
   // `projectile` is what this unit is seen to loose while it fights, on its own
   // `shotSec` clock. It is presentation only — the damage is the same
   // per-second exchange every other unit fights, and nothing reads these two

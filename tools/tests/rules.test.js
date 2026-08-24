@@ -2068,5 +2068,88 @@ function facingOff(aCount, bCount) {
   check('and anyone may be attacked', army.order === 'attack');
 }
 
+// --- an assault lands the same however it is split up ---------------------
+// Damage that got past the defence used to be dropped on the floor, so a blow
+// that finished the last defender did nothing else however big it was. That
+// also made the shape of an assault depend on the attacker's formation: one
+// group could never touch the town center in the tick the garrison fell, while
+// a second group in that same tick recomputed the defence, found it empty and
+// went straight for the keep. Same troops, same damage, different outcome.
+{
+  const run = (groups, perGroup) => {
+    const m = new Match({ started: false, map: 'openfield' });
+    const a = m.addPlayer('a', 'human', 'A'), d = m.addPlayer('d', 'human', 'D');
+    m.start(); a.draft = null; d.draft = null;
+    d.idleUnits = { swordsman: 6, knight: 0, catapult: 0 };
+    a.idleUnits.knight = groups * perGroup;
+    for (let g = 0; g < groups; g++) m.cmdDeployUnits('a', { knight: perGroup }, a.baseX, a.baseY);
+    for (const ar of m.armies.values()) {
+      ar.x = d.baseX + 2; ar.y = d.baseY;
+      m.cmdAttackArmy('a', ar.id, 'player', 'd');
+    }
+    const castle = m.getCastle(d);
+    let firstBreach = -1;
+    for (let t = 0; t < 400 && d.alive; t++) {
+      const before = castle.hp;
+      m.tick(0.2);
+      if (firstBreach < 0 && castle.hp < before) firstBreach = t;
+    }
+    return { tick: firstBreach, hp: Math.round(castle.hp) };
+  };
+  const one = run(1, 12), three = run(3, 4);
+  check('the same twelve knights break through at the same moment either way',
+    one.tick === three.tick, `one block on tick ${one.tick}, three on tick ${three.tick}`);
+  check('and leave the keep on the same health',
+    Math.abs(one.hp - three.hp) <= 1, `${one.hp} vs ${three.hp}`);
+
+  // Nothing is thrown away: the overflow past a dying garrison reaches the keep
+  // in that same tick rather than evaporating.
+  const m = new Match({ started: false, map: 'openfield' });
+  const a = m.addPlayer('a', 'human', 'A'), d = m.addPlayer('d', 'human', 'D');
+  m.start(); a.draft = null; d.draft = null;
+  d.idleUnits = { swordsman: 1, knight: 0, catapult: 0 };
+  d.woundCarry = 25;                       // one swordsman, all but dead
+  const pool = m.homeDefense(d);
+  const left = m.applyDefenderLosses(d, pool, 500);
+  check('damage the defence cannot absorb is handed back, not discarded',
+    left > 400, `${Math.round(left)} of 500 passed through`);
+}
+
+// --- knights buy speed, not a free win ------------------------------------
+// At 8.5s a stable running flat out beat a barracks running flat out on attack
+// and on health at once, and since the town center caps how many buildings an
+// empire may run, building slots are the scarce resource rather than gold — so
+// the unit that wins per slot wins outright. Twenty-one knights beat
+// thirty-five swordsmen with nine still standing.
+{
+  const produced = (unit, secs) => Math.floor(secs / cfg.UNIT_TYPES[unit].trainTimeSec);
+  const fight = (nK, nS) => {
+    const m = new Match({ started: false, map: 'openfield' });
+    const p1 = m.addPlayer('p1', 'human', 'P1'), p2 = m.addPlayer('p2', 'human', 'P2');
+    m.start(); p1.draft = null; p2.draft = null;
+    p1.idleUnits.knight = nK; p2.idleUnits.swordsman = nS;
+    m.cmdDeployUnits('p1', { knight: nK }, p1.baseX, p1.baseY);
+    m.cmdDeployUnits('p2', { swordsman: nS }, p2.baseX, p2.baseY);
+    const [A, B] = [...m.armies.values()];
+    A.x = 60; A.y = 60; B.x = 62; B.y = 60;
+    m.cmdAttackArmy('p1', A.id, 'army', B.id);
+    m.cmdAttackArmy('p2', B.id, 'army', A.id);
+    for (let t = 0; t < 1500 && m.armies.has(A.id) && m.armies.has(B.id); t++) m.tick(0.2);
+    return { k: m.armies.has(A.id) ? A.roster.length : 0, s: m.armies.has(B.id) ? B.roster.length : 0 };
+  };
+  for (const mins of [3, 6]) {
+    const nK = produced('knight', mins * 60), nS = produced('swordsman', mins * 60);
+    const r = fight(nK, nS);
+    check(`${mins} min of one stable does not simply beat one barracks`,
+      r.k <= r.s, `${nK} knights -> ${r.k} left, ${nS} swordsmen -> ${r.s} left`);
+  }
+  // What they keep is the reason to build them at all.
+  const k = cfg.UNIT_TYPES.knight, s = cfg.UNIT_TYPES.swordsman;
+  check('but a knight still crosses the map far faster than a swordsman',
+    k.speed >= s.speed * 1.5, `${k.speed} vs ${s.speed}`);
+  check('and still hits harder and lives longer body for body',
+    k.attack > s.attack && k.hp > s.hp, `${k.attack}atk/${k.hp}hp vs ${s.attack}atk/${s.hp}hp`);
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');
 process.exit(failures ? 1 : 0);
