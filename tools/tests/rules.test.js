@@ -2538,5 +2538,52 @@ function facingOff(aCount, bCount) {
   check('and nothing trains them', !Object.values(cfg.BUILDING_TYPES).some(b => b.trains === 'golem'));
 }
 
+// --- empires start a sensible distance apart ------------------------------
+// LAID_OUT_SPACING used to be buildRadius[0] * 2 + 8, which only promises the
+// *opening* borders do not overlap — and a border does not stay at level 1. In
+// a free-for-all on The Divide or Four Corners that put your nearest enemy 22
+// tiles away, a third of what the same twelve players get on The Wilds.
+{
+  const level2 = cfg.CASTLE.buildRadius[1] * 2;
+  const bad = [];
+  for (const mapId of ['wilds', 'lakelands', 'highlands', 'divide', 'fourcorners', 'openfield']) {
+    const m = new Match({ started: false, map: mapId });
+    let closest = Infinity;
+    for (let i = 0; i < m.spawns.length; i++) {
+      for (let j = i + 1; j < m.spawns.length; j++) {
+        closest = Math.min(closest, Math.hypot(m.spawns[i].x - m.spawns[j].x, m.spawns[i].y - m.spawns[j].y));
+      }
+    }
+    if (m.spawns.length < cfg.MAP.maxPlayers) bad.push(`${mapId}: only ${m.spawns.length} seats`);
+    if (closest < level2) bad.push(`${mapId}: ${closest.toFixed(0)} < ${level2}`);
+  }
+  check('every map seats a full game with level-2 borders clear of each other',
+    bad.length === 0, bad.join('  ') || `all at least ${level2} tiles apart`);
+}
+
+// In a team game the close pair should be teammates, never enemies — that is
+// the entire point of seating a side together.
+{
+  const bad = [];
+  for (const mapId of ['divide', 'fourcorners', 'lakelands', 'wilds']) {
+    for (const teams of [2, 3, 4]) {
+      const m = new Match({ started: false, map: mapId, teams });
+      let foe = Infinity, mate = Infinity;
+      const sp = m.spawns;
+      for (let i = 0; i < sp.length; i++) {
+        for (let j = i + 1; j < sp.length; j++) {
+          const d = Math.hypot(sp[i].x - sp[j].x, sp[i].y - sp[j].y);
+          if (sp[i].group === sp[j].group) mate = Math.min(mate, d);
+          else foe = Math.min(foe, d);
+        }
+      }
+      if (!(foe > mate)) bad.push(`${mapId}/${teams}: enemy ${foe.toFixed(0)} <= teammate ${mate.toFixed(0)}`);
+      if (sp.length < cfg.MAP.maxPlayers) bad.push(`${mapId}/${teams}: only ${sp.length} seats`);
+    }
+  }
+  check('and in a team game your nearest neighbour is always a teammate',
+    bad.length === 0, bad.join('  ') || 'every map and team count');
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');
 process.exit(failures ? 1 : 0);

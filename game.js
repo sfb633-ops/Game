@@ -179,7 +179,27 @@ function computeMods(player) {
 
 // The least a laid-out map will put between two seats: enough that two opening
 // borders (radius CASTLE.buildRadius[0] each) cannot overlap, plus a little.
-const LAID_OUT_SPACING = CASTLE.buildRadius[0] * 2 + 8;
+// The floor a laid-out map may squeeze seats to. It used to be
+// buildRadius[0] * 2 + 8 = 22, which only promises that two *opening* borders
+// do not overlap — and a border does not stay at level 1. By level 2 it is 11
+// and two keeps 22 apart are touching; by level 3 it is 15 and they overlap by
+// eight tiles each. In a free-for-all on The Divide or Four Corners that meant
+// your nearest enemy was a third of the distance away that the same twelve
+// players get on The Wilds.
+//
+// Level 2 is the honest floor: far enough that an empire can grow into its
+// second ring before it is sharing ground with a neighbour. It cannot be level
+// 3 and still fit six seats down one side of The Divide, which is the layout
+// that binds — see SEAT_MARGIN_Y for the other half of that.
+const LAID_OUT_SPACING = CASTLE.buildRadius[1] * 2 + 4;
+
+// Laid-out seats spread along the short axis, so they get a smaller inset than
+// the map's general spawn margin. At the general 24 a column of six on The
+// Divide has 112 tiles to share and can manage 22 between them; at 12 it has
+// 136 and can manage 27, which is what lets the floor above actually be met
+// rather than merely asked for. nearestOpenSpot still keeps every seat a full
+// opening border clear of the map edge, so this cannot push one off the map.
+const SEAT_MARGIN_Y = 12;
 
 let nextArmyId = 1;
 
@@ -409,6 +429,7 @@ class Match {
   seatTargets(layout) {
     const n = MAP.maxPlayers;
     const m = MAP.spawnMargin;
+    const my = SEAT_MARGIN_Y;          // the axis seats spread along
     const w = MAP.width, h = MAP.height;
     const out = [];
     if (layout === 'sides') {
@@ -419,9 +440,15 @@ class Match {
         const west = i < per;
         const slot = west ? i : i - per;
         const count = west ? per : n - per;
+        // Staggered rather than in a dead straight line. Six seats down 136
+        // tiles of column can only be 27 apart; nudging every other one ten
+        // tiles inwards makes the gap diagonal and worth 29 instead, for no
+        // cost — a seat ten tiles further from the map edge is still
+        // unmistakably on its own side of the ridge.
+        const zig = (slot % 2) ? 10 : 0;
         out.push({
-          x: west ? m : w - 1 - m,
-          y: Math.round(m + (h - 1 - 2 * m) * (count === 1 ? 0.5 : slot / (count - 1))),
+          x: west ? m + zig : w - 1 - m - zig,
+          y: Math.round(my + (h - 1 - 2 * my) * (count === 1 ? 0.5 : slot / (count - 1))),
           group: west ? 0 : 1,
         });
       }
@@ -435,8 +462,12 @@ class Match {
         const [bx, by] = spots[i % 4];
         const ring = Math.floor(i / 4);
         out.push({
-          x: bx + (bx < w / 2 ? 1 : -1) * ring * 9,
-          y: by + (by < h / 2 ? 1 : -1) * ring * 9,
+          // 9 tiles between cluster members put them inside each other's
+          // opening border and left the spacing floor to shove them apart,
+          // which it did in whatever direction the ground allowed. Asking for
+          // the floor directly keeps the corner a corner and the seats apart.
+          x: bx + (bx < w / 2 ? 1 : -1) * ring * LAID_OUT_SPACING,
+          y: by + (by < h / 2 ? 1 : -1) * ring * LAID_OUT_SPACING,
           group: i % 4,
         });
       }
@@ -446,7 +477,11 @@ class Match {
       // Evenly around the edge, so nobody is cornered and everybody has two
       // neighbours. Each seat is its own group.
       const cx = (w - 1) / 2, cy = (h - 1) / 2;
-      const rx = cx - m, ry = cy - m;
+      // The short axis gets the smaller inset, which rounds the ellipse out.
+      // At the general margin on both axes this was 96 by 56 — squashed enough
+      // that the seats near the top and bottom crowded each other while the
+      // ones on the flanks had room to spare.
+      const rx = cx - m, ry = cy - SEAT_MARGIN_Y;
       for (let i = 0; i < n; i++) {
         const a = (i / n) * Math.PI * 2 - Math.PI / 2;
         out.push({ x: Math.round(cx + Math.cos(a) * rx), y: Math.round(cy + Math.sin(a) * ry), group: i });
@@ -490,7 +525,7 @@ class Match {
           // partner, which is the one thing this layout exists to prevent. The
           // cluster is only as tall as it has to be to keep their borders
           // apart, centred in the band.
-          const span = Math.min(h - 1 - 2 * m, (per - 1) * LAID_OUT_SPACING);
+          const span = Math.min(h - 1 - 2 * SEAT_MARGIN_Y, (per - 1) * LAID_OUT_SPACING);
           const top = Math.round((h - 1) / 2 - span / 2);
           out.push({
             x: spread(t, teams, m, w - 1 - m),
