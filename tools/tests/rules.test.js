@@ -2416,21 +2416,23 @@ function facingOff(aCount, bCount) {
     `${meteorBack}s vs ${cfg.CARDS.meteor.spell.rechargeSec}s`);
 }
 
-// The undead knight comes off a different art pack, so its frames are a
-// different size from every other unit's. The manifest has to say so, and the
-// sprite has to be anchored at its feet like everything else.
+// Every race fields the same three units at the same size. This is here
+// because an experiment briefly broke it — see the skeleton note in HANDOFF —
+// and a unit that is a different size from its counterparts reads as a bug
+// long before anybody works out which pack it came from.
 {
   const manifest = require('../../public/assets/manifest.json');
-  const undead = manifest.units.undead.variants.knight;
-  const human = manifest.units.human.variants.knight;
-  check('the undead knight has its own frame size', undead.frameH !== human.frameH,
-    `${undead.frameW}x${undead.frameH} vs ${human.frameW}x${human.frameH}`);
-  check('  with all three animations built',
-    !!(undead.anims.idle && undead.anims.walk && undead.anims.attack));
-  check('  anchored at the feet, inside the frame',
-    undead.anchorY > 0 && undead.anchorY <= undead.frameH, `anchorY ${undead.anchorY}`);
-  check('  and centred, near enough',
-    Math.abs(undead.anchorX - undead.frameW / 2) < undead.frameW / 4, `anchorX ${undead.anchorX}`);
+  const races = Object.keys(manifest.units).filter(r => r !== 'bandit');
+  const odd = [];
+  for (const unit of ['swordsman', 'knight', 'catapult']) {
+    const sizes = new Set(races.map(r => {
+      const v = manifest.units[r].variants[unit];
+      return v ? `${v.frameW}x${v.frameH}` : 'missing';
+    }));
+    if (sizes.size !== 1) odd.push(`${unit}: ${[...sizes].join('/')}`);
+  }
+  check('every race fields each unit at the same frame size', odd.length === 0,
+    odd.join('  ') || 'all in step');
 }
 
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');

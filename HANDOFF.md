@@ -1796,20 +1796,11 @@ rather than shuffling the pool flat.
 
 Looked at all of them against what the game actually draws.
 
-**Skeletons** — the near miss, and worth recording so nobody re-derives it.
-Top-down, four facings, 4-frame idle and 6-frame walk per facing, and the
-weapon sheets are 40 frames of 32x40 that overlay the bodies' 40 used cells
-one-for-one — they composite perfectly, first try, with the body at +8. It is
-genuinely nicer art than what the undead field today.
-
-It is still wrong for this game, for the reason the tower already taught us:
-**the two packs are drawing at different pixel sizes.** MiniWorldSprites is 16px
-art magnified by two, so its pixels are 2x2 blocks. The skeletons are 32px
-native — 1x1 pixels, half the size — and their figures sit noticeably smaller
-and thinner in the frame than units drawn to fill a tile. Stood next to a human
-swordsman on the same ground it reads as a sprite from another game. The archer
-tower gets away with exactly this because it is a building that nothing stands
-beside; a footman does not.
+**Skeletons** — the near miss. Rejected here on pixel size, which turned out to
+be the wrong reason: scaling the pack fixes that, and it was tried properly a
+day later and reverted for two better ones. The full account, and what should
+have caught it, is under "The skeletons: tried twice, reverted" below. Do not
+re-derive this from the paragraph above it.
 
 **Environment 1** — a byte-for-byte duplicate of `Pixel Art Top Down - Basic`,
 which the pipeline already reads in full. Every one of its eleven textures has
@@ -1822,40 +1813,50 @@ camera; there is no up or down to take.
 9-slice the stylesheet is built around; swapping would be a restyle rather than
 an improvement.
 
-### The skeletons went in after all — as the undead knight
+### The skeletons: tried twice, reverted, do not try again
 
-The earlier note said the Skeletons pack could not be used because its pixels
-are half the size of everything else's. That was right about the problem and
-wrong about the conclusion: **scaling it by `MINI_SCALE` like every other pack
-fixes the density**, and the reason it looked absurd in the first comparison is
-that it was being measured against a *footman*.
+Recorded in full because the pack is genuinely attractive and the temptation
+will come back.
 
-The numbers that settle it: a mounted knight's body is 28x48 inside a 64x64
-frame. The skeleton doubled is 22x44 inside 64x80. Those are the same unit size.
-Against a 28x24 swordsman it is a giant; against a knight it is a knight. So it
-went in as the undead knight, which is also the better sprite by some way — a
-towering armoured skeleton beats a purple recolour of a human on a horse.
+**The pack.** `assets/Skeletons` is 32px top-down art: four bodies of rising
+grandeur, eight rows each — four facings in idle/walk pairs, in the order down,
+up, then the two sides. Weapons are separate sheets of forty 32x40 frames, one
+for every used body cell in row-major order, eight pixels taller for the
+headroom a raised sword needs. They composite cleanly with `ops.drawOver`.
+Rows 4-7 look like attack animations the moment a weapon is on them, because a
+side-facing skeleton holds its sword straight out; the bodies alone make it
+obvious they are just facings.
 
-Three things about the pack worth writing down, because working them out took
-several wrong turns:
+**First rejection, for the wrong reason.** The pixels are half the size of
+MiniWorldSprites doubled, so at 1:1 it reads as a different game. That is true
+and it is also fixable — scaling by `MINI_SCALE` like every other pack solves it
+completely, which is what the second attempt did.
 
-- **Eight rows are four facings, not four animations.** Rows go in pairs — an
-  idle of four frames then a walk of six — in the order down, up, and the two
-  sides. Rows 4-7 look like attack animations the moment you composite a weapon
-  onto them, because a side-facing skeleton holds its sword straight out; the
-  bodies alone make it obvious they are just facings.
-- **There is no attack animation in the pack.** The walk stands in for it. That
-  swing is the one thing given up by not using MiniWorldSprites here.
-- **Weapons are a separate sheet and correspond one-for-one.** Forty frames of
-  32x40 in a single row, against the bodies' forty used cells (4+6+4+6+4+6+4+6)
-  in row-major order. They are eight pixels taller because a raised sword needs
-  the headroom, so the body sits at +8 and the weapon at 0.
+**Second attempt, shipped as the undead knight, reverted after one playtest.**
+Two things went wrong and both are worth keeping:
 
-`imageops` already had `drawOver`, which composites against the destination
-alpha properly — `blit` is a straight copy on purpose, because slicing must not
-blend a transparent frame edge into what is already there. Layering a weapon
-needs the former; I added a near-duplicate of it before noticing and removed it
-again.
+- **It was too big, and the measurement that said otherwise was of the wrong
+  thing.** The claim was 22x44 against a mounted knight's 28x48. But 22x44 is
+  the *bare body* doubled — put the sword on and Skeleton_5 is 22x60, and the
+  one actually shipped, Skeleton_8 with the two-handed sword, is **38x74**. That
+  is half again as tall as the knight it replaced and a third wider. One
+  composite was measured and a different one was built; nothing re-checked the
+  thing that actually went out.
+- **It appeared to swing its weapon constantly.** The pack has no attack
+  animation, so the walk was mapped to attack — noted at the time as "the one
+  thing given up". In play that is not a small trade: a group in a fight plays a
+  six-frame walk with a sword overlaid on it, which reads as endless swinging,
+  and the idle is animated too, so it never settles.
+
+**What would have caught both.** Measuring the composed sprite that is actually
+shipped, and looking at it moving rather than at one frame. A still comparison
+answered "is it the right size" with the wrong sprite and could not answer "what
+does it do when it fights" at all. `rules.test.js` now pins that every race
+fields each unit at the same frame size, which would have failed this outright.
+
+The packs remain unused, and the reason is no longer aesthetic: for a top-down
+game on this grid they need an attack animation and a silhouette that matches
+the units already on the field, and this one has neither.
 
 ### Meteor recharges on its own clock
 

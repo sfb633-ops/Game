@@ -2297,9 +2297,9 @@
     },
     "knight": {
      "frameW": 64,
-     "frameH": 80,
-     "anchorX": 30,
-     "anchorY": 80,
+     "frameH": 64,
+     "anchorX": 31,
+     "anchorY": 50,
      "anims": {
       "idle": {
        "file": "units/undead/knight/idle.png",
@@ -2307,11 +2307,11 @@
       },
       "walk": {
        "file": "units/undead/knight/walk.png",
-       "frames": 6
+       "frames": 4
       },
       "attack": {
        "file": "units/undead/knight/attack.png",
-       "frames": 6
+       "frames": 4
       }
      }
     },
