@@ -232,9 +232,19 @@ soundBtn.addEventListener('click', () => {
 for (const evt of ['pointerdown', 'keydown']) {
   window.addEventListener(evt, syncSound, { once: false, passive: true });
 }
-// A backgrounded tab is not allowed to start media at all, so try again the
-// moment it comes back to the front.
-document.addEventListener('visibilitychange', () => { if (!document.hidden) syncSound(); });
+// A backgrounded tab is not allowed to *start* media, so try again the moment
+// it comes back to the front — and stop when it goes away, which it did not
+// used to do. Nothing here paused the theme when the page was hidden or
+// unloaded, so a browser that keeps its process alive after the window is
+// closed carried on playing it with nothing on screen to turn it off.
+//
+// pagehide rather than beforeunload: it fires for a tab going into the back/
+// forward cache as well, which beforeunload does not.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) music.pause();
+  else syncSound();
+});
+window.addEventListener('pagehide', () => music.pause());
 syncSound();
 
 // ---------- Connection ----------
@@ -802,6 +812,30 @@ function escapeText(raw) {
   return String(raw == null ? '' : raw).replace(/[&<>"']/g,
     ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 }
+
+// The code exists to be passed on, so clicking it copies it. The clipboard API
+// needs a gesture and can still be refused outright, so a failure falls back to
+// selecting the text — which is what somebody would have done by hand anyway.
+document.getElementById('lobby-code').addEventListener('click', async (e) => {
+  const el = e.currentTarget;
+  const code = myRoom && myRoom.code;
+  if (!code) return;
+  let ok = false;
+  try {
+    await navigator.clipboard.writeText(code);
+    ok = true;
+  } catch {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  if (!ok) return;
+  el.classList.add('copied');
+  el.title = 'Copied';
+  setTimeout(() => { el.classList.remove('copied'); el.title = 'Click to copy'; }, 1200);
+});
 
 document.getElementById('lobby-start').addEventListener('click', () => send({ type: 'startMatch' }));
 document.getElementById('lobby-leave').addEventListener('click', () => {

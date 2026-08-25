@@ -588,14 +588,20 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 /* ---- The lobby -----------------------------------------------------------
    Same full-bleed overlay as the draft, because it is the same kind of moment:
    the map is already behind it and the match is simply held. */
+/* flex-start plus auto margins, not align-items:center. Centring a child that
+   is taller than the scroll container puts its top edge above the scroll
+   origin, and the browser will not scroll up to reach it — so once the map
+   preview and the sides box made this screen tall enough to overflow, the room
+   code went off the top and could not be scrolled back to. Auto margins centre
+   it when it fits and let it scroll properly when it does not. */
 #lobby {
   position: fixed; inset: 0; z-index: 16;
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: flex-start; justify-content: center;
   background: radial-gradient(ellipse at 50% 45%, rgba(20, 12, 6, 0.86) 0%, rgba(8, 5, 3, 0.96) 75%);
   overflow-y: auto;
 }
 #lobby.hidden { display: none; }
-#lobby-inner { text-align: center; width: 440px; max-width: 94vw; padding: 1rem; }
+#lobby-inner { text-align: center; width: 440px; max-width: 94vw; padding: 1rem; margin: auto; }
 #lobby h1 {
   color: var(--gold); letter-spacing: 10px; font-size: 1.8rem; margin: 0 0 0.3rem;
   text-shadow: 0 0 20px #ff9a3c55, 0 3px 0 #000;
@@ -603,11 +609,25 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 .lobby-sub { color: var(--ink); margin: 0 0 0.6rem; letter-spacing: 1px; font-size: 0.8rem; }
 /* The code is the whole reason this screen exists — somebody is reading it out
    loud to somebody else, so it is the biggest thing on it. */
-#lobby-code {
-  color: var(--gold); font-size: 3rem; letter-spacing: 14px; font-weight: bold;
-  margin: 0 0 1.1rem; text-indent: 14px;      /* re-centre against the trailing space */
-  text-shadow: 0 0 26px #ff9a3c66, 0 3px 0 #000;
+/* Stuck to the top of the lobby, because the code is the one thing on this
+   screen somebody is reading out loud to a friend, and it is the thing the
+   panels below push out of view. */
+#lobby-code-bar {
+  position: sticky; top: 0; z-index: 3;
+  padding: 0.4rem 0 0.7rem;
+  background: linear-gradient(to bottom,
+    rgba(9, 6, 3, 0.97) 0%, rgba(9, 6, 3, 0.97) 72%, rgba(9, 6, 3, 0) 100%);
 }
+#lobby-code {
+  display: block; width: 100%;
+  background: none; border: 0; font-family: inherit; cursor: pointer;
+  color: var(--gold); font-size: 3rem; letter-spacing: 14px; font-weight: bold;
+  margin: 0; padding: 0; text-indent: 14px;   /* re-centre against the trailing space */
+  text-shadow: 0 0 26px #ff9a3c66, 0 3px 0 #000;
+  transition: color 120ms;
+}
+#lobby-code:hover { color: #fff3c4; }
+#lobby-code.copied { color: #9ce07a; }
 .lobby-box { text-align: left; margin-bottom: 0.8rem; }
 .lobby-box h2 { margin-top: 0; }
 #lobby-players { display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow-y: auto; }

@@ -1724,6 +1724,39 @@ Also checked and found sound: the offline art preview still renders a full
 vision costs about twice a free-for-all's tick — 1.08ms against a 200ms budget,
 so no concern.
 
+### The room code went off the top of the lobby
+
+Reported as "the join code is hard to locate", and it was a regression from the
+map preview and the sides box: those made the lobby taller than the screen, and
+`#lobby` centred its contents with `align-items: center` inside an
+`overflow-y: auto` box. Centring a child taller than its scroll container puts
+the child's top edge *above* the scroll origin, and a browser will not scroll up
+to reach it — so the code was not merely below the fold, it was unreachable.
+`align-items: flex-start` with `margin: auto` on the inner block centres it when
+it fits and scrolls properly when it does not, which is the standard fix and
+worth knowing because any panel added to this screen would have hit it again.
+
+The code is then stuck to the top of the lobby with `position: sticky`, because
+it is the one thing on that screen somebody is reading out loud, and it is a
+button now: clicking it copies. The clipboard needs a gesture and can be refused
+outright, so a failure falls back to selecting the text, which is what somebody
+would have done by hand.
+
+### The theme kept playing after the window closed
+
+Reported with an honest "idk if it was my side" — and it is partly the browser's:
+Chrome will not freeze a tab that is playing audio, and depending on its
+settings can outlive its own window. But nothing here was helping. `syncSound`
+paused the theme when the menu was left or the mute button was pressed and at no
+other time; there was no `pagehide` handler, and `visibilitychange` only ever
+*resumed* it, on the reasoning that a backgrounded tab is not allowed to start
+media. It was never told to stop.
+
+Both directions now: paused when the page is hidden, paused on `pagehide`.
+`pagehide` rather than `beforeunload` because it also fires for a tab going into
+the back/forward cache, which is exactly the case where a page stops running but
+is not thrown away.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no
