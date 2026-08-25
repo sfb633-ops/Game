@@ -228,6 +228,10 @@ sprite anchors and layering can be eyeballed as a PNG.
   empire's garrison, buildings untouched), Sunder (shatters walls and towers and
   nothing else), Forced March (your groups move half again as fast) and Entangle
   (enemy groups crawl).
+- **A shrine sits somewhere on the map.** Storm it and three golems rise for
+  you on the spot — no gold, no outpost, just the golems, and they beat more
+  than their weight in anything you could have bought. Then it goes quiet for a
+  while and wakes with a fresh guard, so it stays worth fighting over.
 - **Teams.** The host splits the lobby into two, three or four sides and
   everyone picks one. Teammates start next to each other — west and east for
   two, thirds for three, corners for four — share what they have scouted, are

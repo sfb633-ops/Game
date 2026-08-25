@@ -1873,6 +1873,73 @@ about — the same fix as the water-routing pin that searched for a hard-coded
 lake. It is worth being suspicious of any test that names a constant it does not
 actually care about.
 
+### The cliff tileset, and why the mountain still is not one
+
+Asked for directly, tried four ways, shipped none. Writing it up because the
+file looks exactly like the answer and the next person to open the Ground folder
+will think so too.
+
+`MiniWorldSprites/Ground/Cliff.png` is a **plateau** set, not a mountain. Three
+variants of a 3x3, and the middle cell of each measures 100% grass and 0% rock —
+that is the *top* of the cliff. The stone is only the rim around it, drawn to
+sit at the boundary of a raised area whose interior comes from some other ground
+tileset. There is no such stone-ground tileset in any pack; the only complete
+blob set anywhere is FieldsTileset, which is what the mountain already recolours.
+
+What was tried:
+
+1. **Straight swap.** Mountain interior becomes the plateau top, so a mountain's
+   middle is grass — indistinguishable from the field around it. Ground you
+   cannot walk on has to look like it.
+2. **Cliff face as the fill.** The face cell is 73% rock, but it is a face: one
+   row meant to sit at the bottom of a plateau. Tiled over an area it repeats
+   into horizontal bands, a layer cake.
+3. **Rim over the existing rock.** Keeps the good interior and edges it. The rim
+   cells are drawn to *be* a tile — the left rim alone is 84% opaque — so laid
+   whole they bury the interior and the mass comes out a patchwork. Their own
+   plateau grass also shows as bright green bands inside the mountain until it
+   is stripped out.
+4. **Rim trimmed to an eleven-pixel edge band.** Closest, and still wrong: the
+   bands read as vertical streaks stuck to the sides rather than a continuous
+   lip, because the art inside them was never drawn to tile along an edge.
+
+What it would take: a stone-ground fill to put inside the rim, and rim art drawn
+as edge strips rather than whole tiles. Both mean drawing, not compositing. The
+existing recoloured field is a decent rocky ground and stays until then.
+
+### Empires start further apart
+
+`LAID_OUT_SPACING` was `buildRadius[0] * 2 + 8` = 22, which promises only that
+two *opening* borders do not overlap. A border does not stay at level 1: at
+level 2 it is 11, so two keeps 22 apart are touching, and at level 3 it is 15
+and they overlap by eight tiles each side. The floor is level 2 now.
+
+Raising the number is not enough on its own — six seats down one side of The
+Divide have to fit in whatever the column allows — so three things give the
+floor room to be met:
+
+- **Seats get a smaller inset on the axis they spread along** (`SEAT_MARGIN_Y`)
+  than the map's general `spawnMargin`. A column of six goes from 112 tiles to
+  share to 136.
+- **The sides layout zig-zags.** Every other seat is nudged ten tiles inwards,
+  which turns a 27-tile vertical gap into a 29-tile diagonal one for nothing —
+  a seat ten tiles further from the edge is still plainly on its own side.
+- **The ring uses the smaller inset for its short radius**, rounding out an
+  ellipse that was squashed enough to crowd the seats at its top and bottom
+  while the ones on the flanks had room to spare.
+
+Free-for-all, closest pair, measured: wilds 40 (already right — it is the one
+scattered map and uses `spawnSpacing`), lakelands/highlands/openfield 30 -> 35,
+divide 22 -> 29, fourcorners 22 -> 26. Four Corners stays tightest on purpose;
+its whole blurb is empires bunched into the corners.
+
+The pin worth keeping is the second one: **in a team game your nearest
+neighbour must always be a teammate.** The first measurement of this looked
+alarming — 22 tiles on every laid-out map at every team count — until it was
+split by side, at which point the 22 turned out to be teammates and the enemies
+were 50 to 191 tiles away. A spacing number that does not say whose seat it is
+measuring is not worth reading.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no
