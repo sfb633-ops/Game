@@ -337,6 +337,44 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   for (const x of [a, b]) { x.send({ type: 'leave' }); x.ws.close(); }
 }
 
+// The static file server must survive anything anybody types in the address
+// bar. `GET /%` used to kill the process: an invalid percent escape makes
+// decodeURIComponent throw, the exception escaped the request handler, and the
+// server went down taking every room in memory with it — from one anonymous
+// request that never touched the game.
+{
+  const http = require('http');
+  const get = (path) => new Promise((resolve) => {
+    const req = http.request({ host: 'localhost', port: 3000, path, method: 'GET' },
+      (res) => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
+    req.on('error', () => resolve(0));      // 0 means the socket died on us
+    req.end();
+  });
+
+  const malformed = [];
+  for (const path of ['/%', '/%zz', '/%E0%A4%A', '/%%%']) {
+    const code = await get(path);
+    if (code !== 400) malformed.push(`${path}=${code}`);
+  }
+  check('a malformed percent escape is refused, not fatal', malformed.length === 0,
+    malformed.join(' ') || 'all 400');
+
+  // And the process is still there afterwards, which is the actual point.
+  check('the server is still up after all of that', await get('/health') === 200);
+
+  // While we are here: nothing outside public/ is reachable.
+  const leaked = [];
+  for (const path of ['/../server.js', '/..%2f..%2fserver.js', '/%2e%2e/%2e%2e/game.js',
+                      '/../../config.js', '/..\..\server.js']) {
+    const code = await get(path);
+    if (code === 200) leaked.push(path);
+  }
+  check('and nothing outside public/ can be fetched', leaked.length === 0,
+    leaked.join(' ') || 'all refused');
+
+  check('while the client itself still serves', await get('/client.js') === 200);
+}
+
   for (const c of [host, guest, late, h2, g2]) { c.send({ type: 'leave' }); c.ws.close(); }
   await sleep(200);
   console.log(failures ? `\n${failures} FAILURES` : '\nall lobby checks pass');

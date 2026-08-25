@@ -1955,6 +1955,11 @@ function onCanvasMouseDown(e) {
   // armed owns the click instead — dragging a box while holding a building
   // would be two gestures fighting over one drag.
   if (armedBuild || armedClear || armedDeploy || armedAbility || armedSpell) return;
+  // Cleared on the way in rather than on the way out. It is set when a drag
+  // finishes so the click that follows is ignored — but a drag released over
+  // the side panel or off the window never produces a click on the canvas at
+  // all, and the flag then sat there and swallowed the next real one.
+  suppressNextClick = false;
   const { fx, fy } = tileFromEvent(e);
   selectStart = { x: fx, y: fy };
   selectBox = null;
@@ -2017,6 +2022,7 @@ function wouldThicken(x, y) {
 // undone, and a carried building has no undo at all.
 function cancelDrag() {
   let had = false;
+  if (selectStart || selectBox) { selectStart = null; selectBox = null; had = true; }
   if (wallDrag) { wallDrag = null; wallLast = null; had = true; }
   if (armedBuild) { armBuild(null); had = true; }
   if (armedDeploy) { armDeploy(false); had = true; }
@@ -3137,10 +3143,16 @@ function towerOwnerAt(x, y) {
   return null;
 }
 
+// Kept to the last LOG_LINES. The box scrolls, so an unbounded list never
+// looked wrong on screen — it just grew a DOM node per battle report for the
+// whole match, and a long game produces thousands.
+const LOG_LINES = 80;
+
 function log(text) {
   const el = document.getElementById('log');
   const div = document.createElement('div');
   div.textContent = text;
   el.appendChild(div);
+  while (el.childElementCount > LOG_LINES) el.removeChild(el.firstElementChild);
   el.scrollTop = el.scrollHeight;
 }

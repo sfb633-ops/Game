@@ -531,11 +531,15 @@ class Match {
   // Everyone whose eyes and orders this empire shares, itself included.
   alliesOf(player) {
     if (!this.teamCount || player.team == null) return [player];
-    const out = [];
+    // Only the living. An eliminated ally still owns their buildings — nothing
+    // clears them, the empire is simply marked dead — so leaving them in here
+    // meant a knocked-out teammate went on scouting for the rest of the side
+    // out of their own ruins for the rest of the match.
+    const out = [player];
     for (const other of this.players.values()) {
-      if (other.team === player.team) out.push(other);
+      if (other !== player && other.alive && other.team === player.team) out.push(other);
     }
-    return out.length ? out : [player];
+    return out;
   }
 
   // The closest usable ground to where a layout asked for a seat. Spirals

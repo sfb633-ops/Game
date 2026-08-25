@@ -1666,6 +1666,64 @@ left alone, where a right-click on the room-code box should still offer paste,
 and so are the boxes you type troop counts into, where selecting the value to
 overwrite it is the whole interaction.
 
+### The all-round bug check
+
+Two halves: a hostile fuzz against the rules, and reading the parts of the code
+nothing had exercised.
+
+**The fuzz** (`48 matches x 1500 ticks`, every team count against four maps)
+fires random commands with deliberately garbage arguments — NaN and Infinity
+coordinates, orders at things that do not exist, spells with no charges,
+building types that were never defined — and asserts after every tick that gold
+is finite and non-negative, unit counts are whole and non-negative, buildings
+are on the map, no group is standing on water or rock, rosters match their
+counts, no group is under orders against an ally, and `serialize()` both runs
+and produces something `JSON.stringify` will take. Nothing broke, which is worth
+recording: the command layer's validation holds up under abuse.
+
+What it could not find is anything about *arrangement* — a rule can be wrong in
+a perfectly consistent way — so the rest came from reading.
+
+**`GET /%` killed the server.** An invalid percent escape makes
+`decodeURIComponent` throw, the exception escaped the request handler, and Node
+took the process down with it — every room on the box, every match in progress,
+from one anonymous request that never touched the game. This is the one that
+mattered. The handler is wrapped now, a malformed path is a 400, and file reads
+have an `error` listener because an unhandled `'error'` on a stream is the same
+class of accident. Pinned in `lobby.test.js` along with a check that nothing
+outside `public/` can be fetched.
+
+A related papercut: `EADDRINUSE` exited with a stack trace and no explanation.
+`ws` forwards the http server's errors onto the `WebSocketServer` as well, so
+both need an `error` listener or the throw happens anyway — which is why the
+first attempt at this fix did not work.
+
+**An eliminated ally went on scouting.** `eyesOf` never checked `alive`, and
+nothing clears a dead empire's buildings — the empire is just marked dead. In a
+free-for-all that is invisible, because nobody reads a dead player's vision. With
+teams it meant a knocked-out teammate kept revealing the map for the rest of the
+side, out of their own ruins, for the rest of the match. `alliesOf` now returns
+the living, plus the player themselves.
+
+**A drag released off the canvas ate the next click.** `suppressNextClick` is
+set when a box-drag finishes, so the click that follows a mouseup does not
+immediately re-select whatever is under the cursor. But a drag released over the
+side panel — or off the window — never produces a click on the canvas at all, so
+the flag sat there and swallowed the next real one. Cleared on mousedown now
+rather than on the click that may never come.
+
+**Escape and right-click left the selection box open.** `cancelDrag` abandoned
+every other thing being dragged and not that one.
+
+**The log grew a DOM node per line, for ever.** The box scrolls, so it never
+looked wrong; it just accumulated a node per battle report for the whole match.
+Capped at the last 80.
+
+Also checked and found sound: the offline art preview still renders a full
+7680x5120 match, path traversal is refused in every form tried, and shared
+vision costs about twice a free-for-all's tick — 1.08ms against a 200ms budget,
+so no concern.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

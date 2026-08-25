@@ -172,3 +172,11 @@ It also pins two things nothing else covers: that a tower actually fires at
 some point during a real match (an `arrow` effect is emitted), and that no
 living empire ends the run with water inside its border, at whatever radius
 its upgrades and boons left it.
+
+`fuzz.test.js` is the odd one out: it does not test a rule, it tries to break
+the state. Forty-eight matches across every team count and four maps, fed random
+commands with deliberately garbage arguments — NaN coordinates, orders at things
+that do not exist, building types nobody defined — asserting after every tick
+that gold is finite, counts are whole, nothing stands on water, no group is under
+orders against an ally, and the wire format still serialises. It finds crashes and
+corruption, not wrong rules; those need the pins in rules.test.js.

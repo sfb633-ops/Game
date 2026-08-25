@@ -26,10 +26,30 @@ const MIME = {
 // Static files are streamed with a Content-Length and byte-range support.
 // Chunked responses are fine for scripts and images, but a browser's media
 // element will not start an <audio> source it cannot measure or seek in.
+// Wrapped, because this process is holding every live match in memory and a
+// throw in a request handler takes the whole thing down with it. `GET /%` was
+// enough to do it: an invalid percent escape makes decodeURIComponent throw,
+// the exception escaped into the event loop, and the server died — every room
+// on the box gone, from one anonymous request that never touched the game.
 const server = http.createServer((req, res) => {
+  try {
+    serveStatic(req, res);
+  } catch (err) {
+    console.error('[http] ' + req.method + ' ' + req.url + ' failed: ' + err.message);
+    if (!res.headersSent) res.writeHead(500);
+    res.end('server error');
+  }
+});
+
+function serveStatic(req, res) {
   if (req.url === '/health') { res.writeHead(200); res.end('ok'); return; }
   const url = req.url.split('?')[0];
-  let filePath = url === '/' ? '/index.html' : decodeURIComponent(url);
+  let filePath;
+  try {
+    filePath = url === '/' ? '/index.html' : decodeURIComponent(url);
+  } catch {
+    res.writeHead(400); res.end('bad request'); return;   // a malformed escape
+  }
   filePath = path.join(__dirname, 'public', filePath);
   if (!filePath.startsWith(path.join(__dirname, 'public'))) { res.writeHead(403); res.end(); return; }
 
@@ -58,15 +78,28 @@ const server = http.createServer((req, res) => {
       headers['Content-Range'] = `bytes ${start}-${end}/${stat.size}`;
       headers['Content-Length'] = end - start + 1;
       res.writeHead(206, headers);
-      fs.createReadStream(filePath, { start, end }).pipe(res);
+      pipeFile(fs.createReadStream(filePath, { start, end }), res);
       return;
     }
     headers['Content-Length'] = stat.size;
     res.writeHead(200, headers);
     if (req.method === 'HEAD') { res.end(); return; }
-    fs.createReadStream(filePath).pipe(res);
+    pipeFile(fs.createReadStream(filePath), res);
   });
-});
+}
+
+// The stat succeeded, so the read almost always will — but "almost" is not good
+// enough here: an unhandled 'error' on a stream is another way to lose every
+// match in the process, and the file could have been replaced by a deploy in
+// between. Headers are already out by this point, so all that is left is to
+// stop talking.
+function pipeFile(stream, res) {
+  stream.on('error', (err) => {
+    console.error('[http] read failed: ' + err.message);
+    res.destroy();
+  });
+  stream.pipe(res);
+}
 
 // A public server has to assume the worst of anything on the wire.
 const MAX_MESSAGE_BYTES = 64 * 1024;
@@ -706,6 +739,23 @@ function shutdown(signal) {
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+
+// Without this, a port already in use exits on an unhandled 'error' with a
+// stack trace and no explanation — which is a confusing way to be told that the
+// last copy of the server is still running.
+function fatal(err) {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use — is another copy of the server running?`);
+  } else {
+    console.error('Server error: ' + err.message);
+  }
+  process.exit(1);
+}
+server.on('error', fatal);
+// ws forwards the http server's errors onto the WebSocketServer as well, and an
+// 'error' with no listener there throws regardless of what the http server has
+// been told to do — so both need telling.
+wss.on('error', fatal);
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server listening on 0.0.0.0:${PORT}`);
