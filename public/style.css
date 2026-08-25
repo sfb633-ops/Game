@@ -759,3 +759,9 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
   -webkit-user-select: text;
   user-select: text;
 }
+
+/* ---- Golem slot ---- */
+/* A unit nobody trains: the slot exists so a golem that marched home can be
+   sent out again, but it stays out of the row until you actually have one. */
+.troop-slot.special.hidden { display: none; }
+.troop-slot.special .build-cost, .troop-slot.special .troop-queue { display: none; }

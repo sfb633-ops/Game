@@ -5,7 +5,7 @@
 const {
   MAP, MAPS, DEFAULT_MAP, VISION, OUTPOST, RACES, RACE_ABILITIES, CASTLE, MAX_TEAMS,
   BUILDING_TYPES, UNIT_TYPES,
-  AI_CAMP, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
+  AI_CAMP, SHRINE, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
   TOWER_REDUCTION_CAP, TERRAIN_CLEAR_COST,
   TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA,
 } = require('./config');
@@ -18,7 +18,7 @@ const TILE_WATER = 2;
 // Neither mountains nor lakes can be built on, marched to, or garrisoned.
 const isPassable = (tile) => tile === TILE_LAND;
 
-function emptyUnits() { return { swordsman: 0, knight: 0, catapult: 0 }; }
+function emptyUnits() { return { swordsman: 0, knight: 0, catapult: 0, golem: 0 }; }
 
 function totalAttack(units, race) {
   let sum = 0;
@@ -205,6 +205,10 @@ class Match {
     // them. It also caps how many empires this map can seat.
     this.spawns = this.prepareSpawns();
     this.aiCamps = this.generateCamps();
+    // Appended to the same list as the camps, because everything that already
+    // knows how to find, target, fight and draw a camp then handles a shrine
+    // for free — see generateShrine.
+    this.generateShrine();
     this.gameOver = false;
     this.winnerId = null;
     this.winnerTeam = null;
@@ -562,6 +566,17 @@ class Match {
         if (x < clear || y < clear || x >= MAP.width - clear || y >= MAP.height - clear) continue;
         if (taken.some(t => Math.hypot(t.x - x, t.y - y) < spacing)) continue;
         if (this.aiCamps && this.aiCamps.some(c => Math.hypot(c.x - x, c.y - y) < spacing)) continue;
+        // Reserved, exactly as findOpenSpot does. Both finders hand out a spot
+        // and both must remember it, or everything placed afterwards is spaced
+        // against a map with holes in it.
+        //
+        // This was the bug: only findOpenSpot recorded, so on every laid-out
+        // map — which is five of the six, and every team game — the starting
+        // seats were invisible to generateCamps. Its comment claimed
+        // "usedSpawns already holds every starting position"; that was only
+        // ever true of the one scattered map. Camps were landing a single tile
+        // from a keep on The Divide.
+        this.usedSpawns.push({ x, y });
         return { x, y };
       }
     }
@@ -652,6 +667,26 @@ class Match {
       return { x, y };
     }
     return null;
+  }
+
+  // The shrine rides in aiCamps deliberately. It is targeted with the same
+  // 'camp' target type, resolved by the same resolveTarget, fought by the same
+  // stepCampBattle and drawn by the same client path; the only things that
+  // differ are how hard it hits back and what it pays out, both of which are
+  // one branch each. A separate entity would have meant a second copy of all
+  // of that.
+  generateShrine() {
+    const spot = this.findOpenSpot(SHRINE.spacing) || this.findOpenSpot(AI_CAMP.spacing);
+    if (!spot) return;                      // a map with nowhere for it simply has none
+    this.aiCamps.push({
+      id: 'shrine',
+      shrine: true,
+      x: spot.x, y: spot.y,
+      hp: SHRINE.hp, maxHp: SHRINE.hp,
+      garrison: { ...SHRINE.guardian },
+      defeated: false,
+      respawnRemaining: 0,
+    });
   }
 
   generateCamps() {
@@ -2443,9 +2478,12 @@ class Match {
         camp.respawnRemaining -= dt;
         if (camp.respawnRemaining <= 0) {
           camp.defeated = false;
-          camp.hp = AI_CAMP.hp;
-          camp.garrison = { ...AI_CAMP.garrison };
+          camp.hp = camp.shrine ? SHRINE.hp : AI_CAMP.hp;
+          camp.garrison = { ...(camp.shrine ? SHRINE.guardian : AI_CAMP.garrison) };
           camp.woundCarry = 0;
+          if (camp.shrine) {
+            for (const p of this.players.values()) this.emit(p.id, 'The shrine stirs again.');
+          }
         }
       }
     }
@@ -2821,6 +2859,15 @@ class Match {
     army.plunder += dealt * AI_CAMP.plunderPerDamage;
     if (camp.hp <= 0) {
       camp.defeated = true;
+      if (camp.shrine) {
+        // No gold and no outpost: the prize is what walks out of it. And it is
+        // not claimed — it goes quiet and wakes up again, so the shrine stays a
+        // thing to fight over rather than a thing somebody owns.
+        camp.respawnRemaining = SHRINE.dormantSec;
+        this.awakenGolems(army.ownerId, camp);
+        this.finishRaid(army, true);
+        return;
+      }
       camp.capturedBy = army.ownerId;      // claimed, so it never comes back
       camp.respawnRemaining = 0;
       const owner = this.players.get(army.ownerId);
@@ -2828,6 +2875,26 @@ class Match {
       army.plunder += AI_CAMP.lootGold + AI_CAMP.clearBonusGold;
       this.finishRaid(army, true);
     }
+  }
+
+  // What a taken shrine hands over: golems, standing at the shrine itself
+  // rather than back at the keep, because they are the reward for being there.
+  // Everybody is told, because a golem on the map is everybody's problem.
+  awakenGolems(playerId, shrine) {
+    const player = this.players.get(playerId);
+    if (!player) return;
+    for (const [type, count] of Object.entries(SHRINE.reward)) {
+      if (!(count > 0) || !UNIT_TYPES[type]) continue;
+      const id = this.spawnArmy(player, type, count, 'hold',
+        { x: shrine.x, y: shrine.y });
+      const army = this.armies.get(id);
+      if (army) { army.x = shrine.x; army.y = shrine.y; this.holdPosition(army); }
+    }
+    for (const other of this.players.values()) {
+      if (other.id === playerId) continue;
+      this.emit(other.id, `${player.name} has woken the shrine.`);
+    }
+    this.emit(playerId, 'The shrine answers — golems rise at your command.');
   }
 
   finishRaid(army, razed) {
@@ -3013,6 +3080,7 @@ class Match {
       aiCamps: this.aiCamps.map(c => ({
         id: c.id, x: c.x, y: c.y, hp: Math.max(0, Math.round(c.hp)), maxHp: c.maxHp,
         defeated: c.defeated, capturedBy: c.capturedBy || null,
+        shrine: !!c.shrine,
       })),
       events,
       terrainEdits,

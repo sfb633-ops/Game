@@ -1671,19 +1671,37 @@ function drawFlyingArrow(a) {
 // A bandit camp: a tent with its garrison milling around outside.
 function drawCamp(camp, ts) {
   const px = camp.x * ts, py = camp.y * ts;
-  Sprites.drawBuilding(ctx, 'camp', px, py);
+  Sprites.drawBuilding(ctx, camp.shrine ? 'shrine' : 'camp', px, py);
   // A captured camp keeps its fort but loses its garrison, and flies the
-  // banner of whoever took it.
+  // banner of whoever took it. A shrine is never captured — it goes quiet and
+  // comes back — so this only ever runs for camps.
   if (camp.capturedBy) {
     Sprites.drawBanner(ctx, 'camp', px, py, colorForPlayer(camp.capturedBy));
     return;
   }
-  const guards = [{ x: -13, y: 5 }, { x: 12, y: 8 }];
+  // A spent shrine is drawn dim and unguarded, so you can see from across the
+  // map that there is nothing there to take yet.
+  if (camp.defeated) {
+    if (camp.shrine) {
+      ctx.save();
+      ctx.globalAlpha = 0.4;
+      Sprites.drawBuilding(ctx, 'shrine', px, py);
+      ctx.restore();
+    }
+    return;
+  }
+  // Stood wider at a shrine than at a camp: the mausoleum is a doorway with
+  // something lit behind it, and that glow is the whole reason it reads as a
+  // different sort of place — two guards planted in front of it hide exactly
+  // the part worth seeing.
+  const guards = camp.shrine
+    ? [{ x: -26, y: 12 }, { x: 25, y: 14 }]
+    : [{ x: -13, y: 5 }, { x: 12, y: 8 }];
   guards.forEach((g, i) => {
     Sprites.drawUnit(ctx, 'bandit', 'swordsman', 'idle', i ? 'left' : 'down', clock,
       px + g.x, py + g.y, { phase: i * 2.5 });
   });
-  drawHpBar(px - ts / 2, py - ts * 0.9, ts, camp.hp, camp.maxHp, '#a33');
+  drawHpBar(px - ts / 2, py - ts * 0.9, ts, camp.hp, camp.maxHp, camp.shrine ? '#7a5cc4' : '#a33');
 }
 
 function drawPlayerBuilding(b, p, ts, hasWall) {
@@ -2615,7 +2633,11 @@ function buildUnitInputs() {
   troopIcons.length = 0;
   for (const type in unitTypes) {
     const slot = document.createElement('div');
-    slot.className = 'troop-slot';
+    // A unit nobody trains still needs a slot, or a golem that was recalled
+    // home could never be sent out again — but the slot is hidden until you
+    // actually have one, so the row is not carrying a permanently empty cell
+    // with a price nobody can pay. See the per-tick update below.
+    slot.className = 'troop-slot' + (unitTypes[type].special ? ' special' : '');
     slot.dataset.slot = type;
     slot.innerHTML =
       `<div class="troop-portrait">` +
@@ -2937,6 +2959,7 @@ function renderPanel() {
     const queueText = waiting ? `+${waiting}` : '';
     if (icon.queue.textContent !== queueText) icon.queue.textContent = queueText;
 
+    if (unitTypes[type].special) slot.classList.toggle('hidden', have === 0);
     slot.classList.toggle('empty', have === 0 && !t.queued);
     slot.classList.toggle('untrainable', !t.canTrain);
     slot.classList.toggle('unaffordable', t.canTrain && !t.full && me.gold < price);

@@ -304,6 +304,37 @@ const UNIT_TYPES = {
   // wall almost on top of the keep.
   catapult:  { name: 'Catapult',  plural: 'Catapults', cost: 70, trainTimeSec: 13.6, attack: 20, hp: 25, speed: 1.8,
                range: 4, projectile: 'arrow', shotSec: 1.4 },
+  // Not trainable. No building makes one and no amount of gold buys one — the
+  // only golem you will ever field is the one a shrine hands you, which is the
+  // whole reason to go and take a shrine.
+  //
+  // `cost` is nonetheless high, because it is not only a price: garrison losses
+  // are taken cheapest-first, and a golem that wandered home to heal must not be
+  // the first thing thrown at an attacker. `special` keeps it out of the
+  // training row, where a slot that can never be filled is just clutter.
+  golem:     { name: 'Golem',     plural: 'Golems',    cost: 600, trainTimeSec: 0, attack: 55, hp: 420, speed: 1.5,
+               special: true },
+};
+
+// A shrine is one contested thing on the map worth crossing it for. Mechanically
+// it is a camp with a bigger guard and a different prize: no gold, no outpost,
+// just the golem. And unlike a camp it is never permanently claimed — it goes
+// quiet for a while and then wakes up with a fresh guard, so it stays somewhere
+// people keep coming back to rather than a prize the first empire there keeps.
+const SHRINE = {
+  // Tuned against 800 gold of swordsmen, which is roughly what an empire can
+  // field when it first starts thinking about the shrine: at these numbers that
+  // force takes it and loses about half of itself doing so. A guard one step
+  // stronger held against the same army outright, which made the shrine
+  // something only a runaway leader could ever open.
+  hp: 500,
+  guardian: { swordsman: 12, knight: 6, catapult: 3 },
+  // How many golems arrive, and how long before the shrine can be taken again.
+  reward: { golem: 3 },
+  dormantSec: 150,
+  // Well clear of anybody's doorstep: this should be a march, not a land grab
+  // by whoever happened to spawn nearest.
+  spacing: 34,
 };
 
 const AI_CAMP = {
@@ -506,7 +537,7 @@ const TICK_MS = 200;
 module.exports = {
   MAP, MAPS, DEFAULT_MAP, VISION, BUILD, OUTPOST, RACES, RACE_ABILITIES, CASTLE,
   BUILDING_TYPES, UNIT_TYPES,
-  AI_CAMP, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
+  AI_CAMP, SHRINE, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
   TOWER_REDUCTION_CAP, TERRAIN_CLEAR_COST,
   TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA, TICK_MS, MAX_TEAMS,
 };

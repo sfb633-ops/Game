@@ -137,7 +137,13 @@ const Sprites = (function () {
   // for the town center, its level — the keep gets grander as it upgrades.
   function buildingDef(type, opts = {}) {
     const b = manifest.buildings;
-    const setName = type === 'camp' ? b.neutralSet : (b.byRace[opts.race] || b.defaultSet);
+    // Anything the neutral set names belongs to nobody and is drawn from there;
+    // everything else is an empire's and takes its race's colours. This used to
+    // test for 'camp' by name, so the shrine — the second thing to live in the
+    // neutral set — resolved to a race set that has no such building, came back
+    // null, and drew nothing at all while its guards and health bar drew fine.
+    const neutral = b.sets[b.neutralSet];
+    const setName = (neutral && neutral[type]) ? b.neutralSet : (b.byRace[opts.race] || b.defaultSet);
     const def = (b.sets[setName] || b.sets[b.defaultSet])[type];
     if (!def) return null;
     if (!Array.isArray(def)) return def;

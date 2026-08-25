@@ -28,6 +28,8 @@ const UI = path.join(SRC, 'UI', '9-Slice');
 // Faces for the draft. Boons are tarot arcana, spells are spellbook tomes.
 const TAROT = path.join(SRC, 'Tarot Cards [Free]', 'Tarot Cards [Free]', 'Tarot_Original', '1X');
 const TOMES = path.join(SRC, 'SpellBooks', 'TomesMaster32.png');
+// The shrine's golem. One sheet per animation, all frames in a single row.
+const GOLEMS = path.join(SRC, 'Golems', 'Golems_Free_Version', 'Golem_1');
 
 const TILE = 32; // one world tile, and the native cell size of every tileset used
 // MiniWorldSprites is drawn for a 16px tile grid, so everything taken from it
@@ -387,6 +389,15 @@ function buildBuildings() {
   // center, in the neutral set, so they read as something worth storming.
   sets.neutral = {
     camp: cutBuilding(miniBuildingSheet('Wood', 'Keep'), [0, 0, 32, 32], 'buildings', 'neutral', 'camp.png'),
+    // The shrine is a mausoleum: stone, sealed, with something green lit behind
+    // the door. It has to read as a different kind of thing from a camp at a
+    // glance — a camp is somebody's fort and this is nobody's — so it is the
+    // one neutral structure that is not a variation on a keep.
+    // Loaded straight rather than through miniBuildingSheet, which prefixes the
+    // folder name onto the file for everything outside Wood — the Enemy set does
+    // not follow that convention.
+    shrine: cutBuilding(decodePNG(need(path.join(MINI, 'Buildings', 'Enemy', 'Mausoleum.png'))),
+      [0, 0, 32, 32], 'buildings', 'neutral', 'shrine.png'),
   };
   manifest.buildings = { sets, byRace: RACE_BUILDING_SET, defaultSet: 'red', neutralSet: 'neutral' };
   console.log(`  buildings: ${Object.keys(sets).length} sets`);
@@ -599,9 +610,81 @@ function buildCharacter(race, unitType, relPath, layoutName) {
   };
 }
 
+// The golem, from a pack with a single facing and no direction rows at all.
+//
+// Three things about it are unlike every other unit here. It is drawn front-on
+// only, so all four facings get the same frames — acceptable for a hulking
+// lump of rock in a way it would not be for a soldier, and the alternative was
+// not using it. Its art is 1:1 where MiniWorldSprites is doubled, so it is
+// scaled like everything else to keep the pixel size in step; that lands it at
+// about two and a half tiles, which is the right size for the only thing on the
+// map worth crossing it for. And it is built once and registered under every
+// race rather than per race, because a golem belongs to whoever woke it rather
+// than to an empire — the team ring the client already draws under a group is
+// what says whose it is.
+//
+// The content box is measured across every frame of every animation at once, so
+// the golem does not shift inside its frame when it starts swinging.
+const GOLEM_F = 90;               // source frame width; the sheets are one row
+const GOLEM_COLOUR = 'Blue';      // Orange is in the pack too, unused
+const GOLEM_ANIMS = { idle: 'idle', walk: 'walk', attack: 'attack' };
+
+function golemSheets() {
+  const out = {};
+  for (const [name, file] of Object.entries(GOLEM_ANIMS)) {
+    out[name] = decodePNG(need(path.join(GOLEMS, GOLEM_COLOUR, 'No_Swoosh_VFX', `Golem_1_${file}.png`)));
+  }
+  return out;
+}
+
+function golemBox(sheets) {
+  let box = null;
+  for (const img of Object.values(sheets)) {
+    for (let i = 0; i < img.width / GOLEM_F; i++) {
+      const b = ops.bbox(ops.crop(img, i * GOLEM_F, 0, GOLEM_F, img.height));
+      if (!b) continue;
+      box = box ? {
+        x0: Math.min(box.x0, b.x0), y0: Math.min(box.y0, b.y0),
+        x1: Math.max(box.x1, b.x1), y1: Math.max(box.y1, b.y1),
+      } : { ...b };
+    }
+  }
+  return box;
+}
+
+function buildGolem() {
+  const sheets = golemSheets();
+  const box = golemBox(sheets);
+  const W = box.x1 - box.x0 + 1, H = box.y1 - box.y0 + 1;
+  const anims = {};
+  let anchorFrame = null;
+  for (const [name, img] of Object.entries(sheets)) {
+    const count = img.width / GOLEM_F;
+    const out = ops.blank(count * W, 4 * H);
+    for (const destRow of Object.values(DIR_ROWS)) {
+      for (let i = 0; i < count; i++) {
+        ops.blit(out, ops.crop(img, i * GOLEM_F + box.x0, box.y0, W, H), i * W, destRow * H);
+      }
+    }
+    const scaled = ops.scaleUp(out, MINI_SCALE);
+    anims[name] = { file: write(scaled, 'units', 'golem', `${name}.png`), frames: count };
+    if (name === 'idle') anchorFrame = ops.crop(scaled, 0, 0, W * MINI_SCALE, H * MINI_SCALE);
+  }
+  const b = ops.bbox(anchorFrame);
+  return {
+    frameW: W * MINI_SCALE, frameH: H * MINI_SCALE,
+    anchorX: medianX(anchorFrame),
+    anchorY: b ? b.y1 + 1 : H * MINI_SCALE,
+    anims,
+  };
+}
+
 function buildUnits() {
+  // One golem, shared by every race — see buildGolem.
+  const golem = buildGolem();
   for (const [race, byType] of Object.entries(UNIT_SRC)) {
     const variants = {};
+    if (race !== 'bandit') variants.golem = golem;
     for (const [unitType, [relPath, layoutName]] of Object.entries(byType)) {
       variants[unitType] = buildCharacter(race, unitType, relPath, layoutName);
     }

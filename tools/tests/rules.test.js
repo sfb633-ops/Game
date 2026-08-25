@@ -1541,7 +1541,14 @@ function facingOff(aCount, bCount) {
   }
   check('and keeps them the required distance apart',
     closest >= cfg.MAP.spawnSpacing, `${closest.toFixed(1)} vs ${cfg.MAP.spawnSpacing}`);
-  check('camps scaled with the ground', m.aiCamps.length === cfg.AI_CAMP.count);
+  // aiCamps carries the shrine as well as the camps — it is a camp with a
+  // bigger guard and a different prize, which is how it gets targeting,
+  // combat and drawing for free. So count the camps, not the list.
+  check('camps scaled with the ground',
+    m.aiCamps.filter(c => !c.shrine).length === cfg.AI_CAMP.count,
+    `${m.aiCamps.filter(c => !c.shrine).length} camps`);
+  check('and there is exactly one shrine',
+    m.aiCamps.filter(c => c.shrine).length === 1);
 }
 
 
@@ -2433,6 +2440,102 @@ function facingOff(aCount, bCount) {
   }
   check('every race fields each unit at the same frame size', odd.length === 0,
     odd.join('  ') || 'all in step');
+}
+
+// --- nothing spawns on top of a starting seat -----------------------------
+// findOpenSpot reserved the ground it handed out; nearestOpenSpot did not. Only
+// scattered maps use findOpenSpot for seats, so on every laid-out map — five of
+// the six, and every team game — the starting positions were invisible to camp
+// placement. generateCamps' own comment claimed "usedSpawns already holds every
+// starting position"; it was true of exactly one map. Camps were landing a
+// single tile from a keep on The Divide.
+{
+  const worst = [];
+  for (const mapId of ['wilds', 'lakelands', 'highlands', 'divide', 'fourcorners', 'openfield']) {
+    for (const teams of [0, 2, 4]) {
+      const m = new Match({ started: false, map: mapId, teams });
+      let closest = Infinity;
+      for (const seat of m.spawns) {
+        for (const c of m.aiCamps) {
+          closest = Math.min(closest, Math.hypot(c.x - seat.x, c.y - seat.y));
+        }
+      }
+      if (closest < cfg.AI_CAMP.spacing) worst.push(`${mapId}/${teams}:${closest.toFixed(1)}`);
+    }
+  }
+  check('no camp or shrine spawns inside a starting position, on any map or team count',
+    worst.length === 0, worst.join(' ') || `all at least ${cfg.AI_CAMP.spacing} tiles clear`);
+}
+
+// --- the shrine ------------------------------------------------------------
+{
+  const m = new Match({ started: false, map: 'openfield' });
+  const p = m.addPlayer('p', 'human', 'P');
+  m.addPlayer('q', 'orc', 'Q');
+  m.start(); p.draft = null;
+  const shrine = m.aiCamps.find(c => c.shrine);
+  check('a shrine is placed', !!shrine, shrine ? `${shrine.x},${shrine.y}` : 'none');
+  check('  guarded rather than empty',
+    Object.values(shrine.garrison).reduce((a, b) => a + b, 0) > 10,
+    JSON.stringify(shrine.garrison));
+
+  p.idleUnits.swordsman = 40;
+  m.cmdDeployUnits('p', { swordsman: 40 }, p.baseX, p.baseY);
+  const army = [...m.armies.values()].find(a => a.ownerId === 'p');
+  m.cmdAttackArmy('p', army.id, 'camp', shrine.id);
+  let t = 0;
+  for (; t < 12000 && !shrine.defeated; t++) m.tick(0.2);
+  check('  and it can be taken', shrine.defeated, `${(t * 0.2).toFixed(0)}s`);
+  check('  but not for free',
+    !m.armies.has(army.id) || armyCount(army) < 40,
+    `${m.armies.has(army.id) ? armyCount(army) : 0} of 40 left`);
+
+  const golems = [...m.armies.values()].filter(a => a.type === 'golem');
+  check('taking it wakes golems', golems.length > 0,
+    golems.map(g => `${armyCount(g)}x`).join(' '));
+  check('  for whoever took it', golems.every(g => g.ownerId === 'p'));
+  check('  standing at the shrine, not back at the keep',
+    golems.every(g => Math.round(g.x) === shrine.x && Math.round(g.y) === shrine.y));
+  check('  and holding, not wandering', golems.every(g => g.order === 'hold'));
+  check('a shrine pays no gold and no outpost', p.outposts.length === 0);
+  check('and is never claimed, only spent',
+    shrine.defeated && !shrine.capturedBy && shrine.respawnRemaining > 0,
+    `${Math.round(shrine.respawnRemaining)}s dormant`);
+
+  // It comes back, so it stays worth fighting over.
+  for (let i = 0; i < Math.ceil(cfg.SHRINE.dormantSec / 0.2) + 20; i++) m.tick(0.2);
+  check('and it wakes again with a fresh guard',
+    !shrine.defeated && shrine.hp === cfg.SHRINE.hp &&
+    JSON.stringify(shrine.garrison) === JSON.stringify(cfg.SHRINE.guardian),
+    `hp ${shrine.hp} guard ${JSON.stringify(shrine.garrison)}`);
+}
+
+// A golem is worth the march: it beats more than its weight in anything you
+// could have bought instead, and pays for it by being slow.
+{
+  const fight = (n) => {
+    const m = new Match({ started: false, map: 'openfield' });
+    const a = m.addPlayer('a', 'human', 'A'), b = m.addPlayer('b', 'human', 'B');
+    m.start(); a.draft = null; b.draft = null;
+    a.idleUnits.golem = cfg.SHRINE.reward.golem;
+    b.idleUnits.swordsman = n;
+    m.cmdDeployUnits('a', { golem: cfg.SHRINE.reward.golem }, a.baseX, a.baseY);
+    m.cmdDeployUnits('b', { swordsman: n }, b.baseX, b.baseY);
+    const A = [...m.armies.values()].find(x => x.ownerId === 'a');
+    const B = [...m.armies.values()].find(x => x.ownerId === 'b');
+    A.x = 60; A.y = 60; B.x = 62; B.y = 60;
+    m.cmdAttackArmy('a', A.id, 'army', B.id);
+    m.cmdAttackArmy('b', B.id, 'army', A.id);
+    for (let t = 0; t < 3000 && m.armies.has(A.id) && m.armies.has(B.id); t++) m.tick(0.2);
+    return { golems: m.armies.has(A.id) ? armyCount(A) : 0, foot: m.armies.has(B.id) ? armyCount(B) : 0 };
+  };
+  const r = fight(40);
+  check('the shrine\'s golems beat 800 gold of swordsmen', r.golems > 0 && r.foot === 0,
+    `${r.golems} golems left, ${r.foot} swordsmen`);
+  check('but they are the slowest thing on the map',
+    cfg.UNIT_TYPES.golem.speed < cfg.UNIT_TYPES.catapult.speed,
+    `${cfg.UNIT_TYPES.golem.speed} vs catapult ${cfg.UNIT_TYPES.catapult.speed}`);
+  check('and nothing trains them', !Object.values(cfg.BUILDING_TYPES).some(b => b.trains === 'golem'));
 }
 
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');
