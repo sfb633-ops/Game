@@ -28,6 +28,10 @@ const UI = path.join(SRC, 'UI', '9-Slice');
 // Faces for the draft. Boons are tarot arcana, spells are spellbook tomes.
 const TAROT = path.join(SRC, 'Tarot Cards [Free]', 'Tarot Cards [Free]', 'Tarot_Original', '1X');
 const TOMES = path.join(SRC, 'SpellBooks', 'TomesMaster32.png');
+// Bodies and weapons as separate sheets that layer on top of each other. Only
+// the undead knight comes from here — see SKELETON_SRC for why it is the knight
+// and not the footman.
+const SKELETONS = path.join(SRC, 'Skeletons');
 
 const TILE = 32; // one world tile, and the native cell size of every tileset used
 // MiniWorldSprites is drawn for a 16px tile grid, so everything taken from it
@@ -599,11 +603,95 @@ function buildCharacter(race, unitType, relPath, layoutName) {
   };
 }
 
+// The Skeletons pack, which is drawn on a different grid from MiniWorldSprites
+// and needs its own reader.
+//
+// Bodies are 32px cells, eight rows: four facings, each an idle of four frames
+// then a walk of six — down, up, and the two sides, in that order. There is no
+// attack animation in the pack, so the walk stands in for it; the swing a
+// MiniWorldSprites footman has is the one thing given up here.
+//
+// Weapons are separate 32x40 sheets of forty frames in a single row, which is
+// exactly the count of used body cells (4+6+4+6+4+6+4+6). They correspond one
+// for one in row-major order, and they are eight pixels taller than the body
+// because a raised sword needs the headroom — so the body sits at +8 and the
+// weapon at 0.
+const SKELETON_ROWS = [
+  { dir: 'down',  idle: 0, walk: 1 },
+  { dir: 'up',    idle: 2, walk: 3 },
+  { dir: 'left',  idle: 4, walk: 5 },
+  { dir: 'right', idle: 6, walk: 7 },
+];
+const SKELETON_ROW_FRAMES = [4, 6, 4, 6, 4, 6, 4, 6];
+const SKELETON_F = 32;          // body cell
+const SKELETON_WH = 40;         // weapon cell height
+
+// Where a row's frames start in the weapons' single linear row.
+function skeletonWeaponBase(row) {
+  let n = 0;
+  for (let r = 0; r < row; r++) n += SKELETON_ROW_FRAMES[r];
+  return n;
+}
+
+// One composed frame: the body, then every weapon layered over it in order.
+function skeletonFrame(body, weapons, row, col) {
+  const cell = ops.blank(SKELETON_F, SKELETON_WH);
+  ops.drawOver(cell, ops.crop(body, col * SKELETON_F, row * SKELETON_F, SKELETON_F, SKELETON_F), 0, SKELETON_WH - SKELETON_F);
+  const wf = skeletonWeaponBase(row) + col;
+  for (const w of weapons) ops.drawOver(cell, ops.crop(w, wf * SKELETON_F, 0, SKELETON_F, SKELETON_WH), 0, 0);
+  return cell;
+}
+
+function buildSkeleton(race, unitType, bodyFile, weaponFiles) {
+  const body = decodePNG(need(path.join(SKELETONS, 'Skeletons', bodyFile)));
+  const weapons = weaponFiles.map(f => decodePNG(need(path.join(SKELETONS, 'Weapons', f))));
+  const anims = {};
+  let anchorFrame = null;
+  for (const name of ['idle', 'walk', 'attack']) {
+    // No attack art in the pack; the walk carries it.
+    const rowKey = name === 'attack' ? 'walk' : name;
+    const count = SKELETON_ROW_FRAMES[SKELETON_ROWS[0][rowKey]];
+    const out = ops.blank(count * SKELETON_F, 4 * SKELETON_WH);
+    for (const spec of SKELETON_ROWS) {
+      const destRow = DIR_ROWS[spec.dir];
+      for (let c = 0; c < count; c++) {
+        ops.blit(out, skeletonFrame(body, weapons, spec[rowKey], c), c * SKELETON_F, destRow * SKELETON_WH);
+      }
+    }
+    // Doubled like everything off MiniWorldSprites, which is the whole point:
+    // at 1:1 these pixels are half the size of every sprite they stand beside,
+    // and at 2:1 the figure also lands within a few pixels of a mounted
+    // knight's — which is why this is the knight and not the footman.
+    const scaled = ops.scaleUp(out, MINI_SCALE);
+    anims[name] = { file: write(scaled, 'units', race, unitType, `${name}.png`), frames: count };
+    if (name === 'idle') anchorFrame = ops.crop(scaled, 0, 0, SKELETON_F * MINI_SCALE, SKELETON_WH * MINI_SCALE);
+  }
+  const box = ops.bbox(anchorFrame);
+  return {
+    frameW: SKELETON_F * MINI_SCALE, frameH: SKELETON_WH * MINI_SCALE,
+    anchorX: medianX(anchorFrame),
+    anchorY: box ? box.y1 + 1 : SKELETON_WH * MINI_SCALE,
+    anims,
+  };
+}
+
+// Which units come from the Skeletons pack instead of MiniWorldSprites. Just
+// the one: an undead knight reads far better as a towering armoured skeleton
+// than as a purple recolour of a human on a horse, and it is the only slot
+// whose existing sprite is already this size — a mounted knight's body is
+// 28x48, and this comes out 22x44.
+const SKELETON_SRC = {
+  undead: { knight: ['Skeleton_8-Sheet-BlackOutline.png', ['Two-Handed Sword-Sheet-BlackOutlinet.png']] },
+};
+
 function buildUnits() {
   for (const [race, byType] of Object.entries(UNIT_SRC)) {
     const variants = {};
     for (const [unitType, [relPath, layoutName]] of Object.entries(byType)) {
-      variants[unitType] = buildCharacter(race, unitType, relPath, layoutName);
+      const swap = (SKELETON_SRC[race] || {})[unitType];
+      variants[unitType] = swap
+        ? buildSkeleton(race, unitType, swap[0], swap[1])
+        : buildCharacter(race, unitType, relPath, layoutName);
     }
     manifest.units[race] = {
       dirMode: '4dir', dirRows: DIR_ROWS,

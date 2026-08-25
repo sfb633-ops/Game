@@ -1765,13 +1765,16 @@ class Match {
       const card = CARDS[cardId];
       if (!card || !card.spell) continue;
       const max = card.spell.charges;
+      // A spell may set its own clock; everything without one shares the
+      // common rate. Meteor is the reason this exists — see its card.
+      const rate = card.spell.rechargeSec || SPELL_RECHARGE_SEC;
       if ((player.spells[cardId] || 0) >= max) { delete player.spellRecharge[cardId]; continue; }
       const left = (player.spellRecharge[cardId] === undefined)
-        ? SPELL_RECHARGE_SEC : player.spellRecharge[cardId] - dt;
+        ? rate : player.spellRecharge[cardId] - dt;
       if (left > 0) { player.spellRecharge[cardId] = left; continue; }
       player.spells[cardId] = (player.spells[cardId] || 0) + 1;
       // Straight into the next one if there is still room to bank it.
-      if (player.spells[cardId] < max) player.spellRecharge[cardId] = SPELL_RECHARGE_SEC;
+      if (player.spells[cardId] < max) player.spellRecharge[cardId] = rate;
       else delete player.spellRecharge[cardId];
       this.emit(player.id, `${card.name} is ready again.`);
     }

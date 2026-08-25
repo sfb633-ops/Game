@@ -228,6 +228,9 @@ sprite anchors and layering can be eyeballed as a PNG.
   empire's garrison, buildings untouched), Sunder (shatters walls and towers and
   nothing else), Forced March (your groups move half again as fast) and Entangle
   (enemy groups crawl).
+- **The undead knight is a towering armoured skeleton**, not a recoloured
+  human on a horse — drawn from a different art pack at the same scale as every
+  other knight.
 - **Teams.** The host splits the lobby into two, three or four sides and
   everyone picks one. Teammates start next to each other — west and east for
   two, thirds for three, corners for four — share what they have scouted, are

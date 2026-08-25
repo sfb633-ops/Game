@@ -1822,6 +1822,56 @@ camera; there is no up or down to take.
 9-slice the stylesheet is built around; swapping would be a restyle rather than
 an improvement.
 
+### The skeletons went in after all — as the undead knight
+
+The earlier note said the Skeletons pack could not be used because its pixels
+are half the size of everything else's. That was right about the problem and
+wrong about the conclusion: **scaling it by `MINI_SCALE` like every other pack
+fixes the density**, and the reason it looked absurd in the first comparison is
+that it was being measured against a *footman*.
+
+The numbers that settle it: a mounted knight's body is 28x48 inside a 64x64
+frame. The skeleton doubled is 22x44 inside 64x80. Those are the same unit size.
+Against a 28x24 swordsman it is a giant; against a knight it is a knight. So it
+went in as the undead knight, which is also the better sprite by some way — a
+towering armoured skeleton beats a purple recolour of a human on a horse.
+
+Three things about the pack worth writing down, because working them out took
+several wrong turns:
+
+- **Eight rows are four facings, not four animations.** Rows go in pairs — an
+  idle of four frames then a walk of six — in the order down, up, and the two
+  sides. Rows 4-7 look like attack animations the moment you composite a weapon
+  onto them, because a side-facing skeleton holds its sword straight out; the
+  bodies alone make it obvious they are just facings.
+- **There is no attack animation in the pack.** The walk stands in for it. That
+  swing is the one thing given up by not using MiniWorldSprites here.
+- **Weapons are a separate sheet and correspond one-for-one.** Forty frames of
+  32x40 in a single row, against the bodies' forty used cells (4+6+4+6+4+6+4+6)
+  in row-major order. They are eight pixels taller because a raised sword needs
+  the headroom, so the body sits at +8 and the weapon at 0.
+
+`imageops` already had `drawOver`, which composites against the destination
+alpha properly — `blit` is a straight copy on purpose, because slicing must not
+blend a transparent frame edge into what is already there. Layering a weapon
+needs the former; I added a near-duplicate of it before noticing and removed it
+again.
+
+### Meteor recharges on its own clock
+
+`SPELL_RECHARGE_SEC` is the rate every spell shares, and a spell may now
+override it with `rechargeSec` on its card. Meteor is why: it is the only one
+that reaches anywhere on the map, needs no setup, and takes a building off it
+outright, so at 100 seconds you simply always had one about to land — a rhythm
+rather than a decision. 210 now.
+
+Two existing tests had hard-coded `SPELL_RECHARGE_SEC` while exercising the
+machinery *through meteor*, so they broke the moment it stopped using the shared
+rate. They ask the card for its own clock now, which is what they were always
+about — the same fix as the water-routing pin that searched for a hard-coded
+lake. It is worth being suspicious of any test that names a constant it does not
+actually care about.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

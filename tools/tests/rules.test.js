@@ -1283,6 +1283,10 @@ function facingOff(aCount, bCount) {
   m.start(); p.draft = null; p.gold = 999999;
   m.takeCard(p, 'meteor');
   const max = cfg.CARDS.meteor.spell.charges;
+  // Whatever this spell's own clock is. It used to be the shared constant, and
+  // then meteor was given a longer one of its own — the machinery under test is
+  // the same either way, so the test asks the card rather than the default.
+  const rate = cfg.CARDS.meteor.spell.rechargeSec || cfg.SPELL_RECHARGE_SEC;
   check('a drafted spell starts at its cap', p.spells.meteor === max);
   check('and a full spell is not counting anything down',
     p.spellRecharge.meteor === undefined);
@@ -1294,7 +1298,7 @@ function facingOff(aCount, bCount) {
     `${p.spellRecharge.meteor}s`);
 
   // Not a tick before it is due.
-  for (let t = 0; t < (cfg.SPELL_RECHARGE_SEC - 2) / 0.2; t++) m.tick(0.2);
+  for (let t = 0; t < (rate - 2) / 0.2; t++) m.tick(0.2);
   check('the charge does not arrive early', p.spells.meteor === max - 1);
   for (let t = 0; t < 4 / 0.2; t++) m.tick(0.2);
   check('but it does arrive', p.spells.meteor === max, `${p.spells.meteor}`);
@@ -1315,10 +1319,11 @@ function facingOff(aCount, bCount) {
   m.cmdCastSpell('p', 'meteor', p.baseX + 20, p.baseY);
   m.cmdCastSpell('p', 'meteor', p.baseX + 20, p.baseY + 4);
   check('both charges spent', p.spells.meteor === 0);
-  for (let t = 0; t < (cfg.SPELL_RECHARGE_SEC + 1) / 0.2; t++) m.tick(0.2);
+  const rate2 = cfg.CARDS.meteor.spell.rechargeSec || cfg.SPELL_RECHARGE_SEC;
+  for (let t = 0; t < (rate2 + 1) / 0.2; t++) m.tick(0.2);
   check('the first comes back alone', p.spells.meteor === 1, `${p.spells.meteor}`);
   check('and the second is already on its way', p.spellRecharge.meteor > 0);
-  for (let t = 0; t < (cfg.SPELL_RECHARGE_SEC + 1) / 0.2; t++) m.tick(0.2);
+  for (let t = 0; t < (rate2 + 1) / 0.2; t++) m.tick(0.2);
   check('then the second', p.spells.meteor === 2, `${p.spells.meteor}`);
 }
 
@@ -2384,6 +2389,48 @@ function facingOff(aCount, bCount) {
     check('and Forced March carries a teammate along with you',
       armySpeedOf(ally) > cfg.UNIT_TYPES.swordsman.speed, `${armySpeedOf(ally).toFixed(2)}`);
   }
+}
+
+// A spell may set its own recharge clock. Meteor is why: it is the only one
+// that reaches anywhere on the map with no setup and takes a building off it
+// outright, so at the common rate you always had one about to land.
+{
+  const m = new Match({ started: false, map: 'openfield' });
+  const p = m.addPlayer('p', 'human', 'P');
+  m.start(); p.draft = null;
+  m.takeCard(p, 'meteor');
+  m.takeCard(p, 'bulwark');
+  p.spells.meteor = 0; p.spells.bulwark = 0;
+  let meteorBack = null, otherBack = null;
+  for (let t = 0; t < 2000 && (meteorBack === null || otherBack === null); t++) {
+    m.tick(0.2);
+    if (meteorBack === null && p.spells.meteor > 0) meteorBack = t * 0.2;
+    if (otherBack === null && p.spells.bulwark > 0) otherBack = t * 0.2;
+  }
+  check('a spell with no clock of its own uses the common rate',
+    Math.abs(otherBack - cfg.SPELL_RECHARGE_SEC) < 1, `${otherBack}s vs ${cfg.SPELL_RECHARGE_SEC}s`);
+  check('and meteor takes markedly longer than everything else',
+    meteorBack > otherBack * 1.8, `${meteorBack}s vs ${otherBack}s`);
+  check('  matching what its card asks for',
+    Math.abs(meteorBack - cfg.CARDS.meteor.spell.rechargeSec) < 1,
+    `${meteorBack}s vs ${cfg.CARDS.meteor.spell.rechargeSec}s`);
+}
+
+// The undead knight comes off a different art pack, so its frames are a
+// different size from every other unit's. The manifest has to say so, and the
+// sprite has to be anchored at its feet like everything else.
+{
+  const manifest = require('../../public/assets/manifest.json');
+  const undead = manifest.units.undead.variants.knight;
+  const human = manifest.units.human.variants.knight;
+  check('the undead knight has its own frame size', undead.frameH !== human.frameH,
+    `${undead.frameW}x${undead.frameH} vs ${human.frameW}x${human.frameH}`);
+  check('  with all three animations built',
+    !!(undead.anims.idle && undead.anims.walk && undead.anims.attack));
+  check('  anchored at the feet, inside the frame',
+    undead.anchorY > 0 && undead.anchorY <= undead.frameH, `anchorY ${undead.anchorY}`);
+  check('  and centred, near enough',
+    Math.abs(undead.anchorX - undead.frameW / 2) < undead.frameW / 4, `anchorX ${undead.anchorX}`);
 }
 
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');

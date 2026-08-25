@@ -413,7 +413,11 @@ const CARDS = {
     // building off the map in one go and kills a wall segment outright, but it
     // is half of what it was, and with the keep immune (see cast_meteor) a
     // meteor now opens an attack instead of being one.
-    spell: { charges: 2, radius: 2.6, damage: 150, range: 'anywhere' },
+    // Its own recharge, well past the 100s everything else gets. A meteor is
+    // the only spell that reaches anywhere on the map, needs no setup and takes
+    // a building off it outright — at the common rate you simply always had one
+    // about to land, which made it a rhythm rather than a decision.
+    spell: { charges: 2, radius: 2.6, damage: 150, range: 'anywhere', rechargeSec: 210 },
   },
   terraform: {
     name: 'Reshape the Land', kind: 'spell', sigil: '▲',
