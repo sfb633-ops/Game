@@ -425,6 +425,41 @@ const CARDS = {
     desc: 'Raise a free ring of walls around any tile inside your border.',
     spell: { charges: 2, radius: 2.2, range: 'territory' },
   },
+  // The map is 240x160 and most of it is dark, so a spell whose entire effect
+  // is *knowing something* belongs here. Deliberately the cheapest thing in the
+  // book to hold and the only one that never touches another empire.
+  farsight: {
+    name: 'Farsight', kind: 'spell', sigil: '◍',
+    desc: 'Lay a wide circle of the map bare, anywhere at all. What it uncovers stays on your map — and on your allies\' — the same as ground you have walked.',
+    spell: { charges: 2, radius: 13, range: 'anywhere' },
+  },
+  // The opposite of a meteor on purpose: this takes the troops standing in a
+  // keep and leaves the building alone, so the two answer different problems —
+  // one opens the wall, the other empties the room behind it.
+  withering: {
+    name: 'Withering', kind: 'spell', sigil: '☠',
+    desc: 'A plague over one empire\'s home. Cuts down the troops idling in their keep and touches nothing they have built.',
+    spell: { charges: 2, radius: 4, damage: 260, range: 'anywhere' },
+  },
+  // Walls went to 260 health when towers stopped shielding the keep, which is
+  // right for the thing you have to break through — and it left an attacker
+  // with no answer to somebody who simply keeps building more of it.
+  sunder: {
+    name: 'Sunder', kind: 'spell', sigil: '✖',
+    desc: 'Shatter stonework. Wrecks enemy walls and towers caught in the blast and leaves everything else standing.',
+    spell: { charges: 2, radius: 2.8, damage: 240, range: 'anywhere' },
+  },
+  // These two ride the same field on an army; see armySpeed.
+  forcedMarch: {
+    name: 'Forced March', kind: 'spell', sigil: '⇶',
+    desc: 'Your groups in the circle march half again as fast for a while.',
+    spell: { charges: 2, radius: 7, speedMult: 1.5, durationSec: 25, range: 'anywhere' },
+  },
+  entangle: {
+    name: 'Entangle', kind: 'spell', sigil: '✵',
+    desc: 'Roots and briars. Enemy groups in the circle crawl for a while.',
+    spell: { charges: 2, radius: 4.5, speedMult: 0.4, durationSec: 14, range: 'anywhere' },
+  },
 };
 
 // The training queue for one kind of unit, across every building that makes

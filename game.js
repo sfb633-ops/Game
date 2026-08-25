@@ -85,7 +85,13 @@ function armyRange(army) {
 // One kind of soldier per group, so there is no slowest member to find.
 function armySpeed(army) {
   const def = UNIT_TYPES[army.type];
-  return def ? def.speed : 0;
+  if (!def) return 0;
+  // Forced March hurries a group along and Entangle bogs one down, and both
+  // ride this one field so nothing downstream has to know which of them did
+  // it — the pathfinder, the leash and the client all just see a slower or
+  // faster group.
+  const mark = army.speedSpell;
+  return def.speed * (mark && mark.remaining > 0 ? mark.mult : 1);
 }
 
 function armyWounded(army) {
@@ -1604,6 +1610,106 @@ class Match {
     return true;
   }
 
+  // Lay bare a circle of the map. Written straight into explored, so it is
+  // remembered rather than watched: the ground goes dim again the moment
+  // nobody is looking at it, exactly like somewhere you marched through once.
+  cast_farsight(player, spec, x, y) {
+    const r = spec.radius, rr = r * r;
+    const viewers = this.alliesOf(player);
+    let lit = 0;
+    for (let ty = Math.max(0, Math.floor(y - r)); ty <= Math.min(MAP.height - 1, Math.ceil(y + r)); ty++) {
+      for (let tx = Math.max(0, Math.floor(x - r)); tx <= Math.min(MAP.width - 1, Math.ceil(x + r)); tx++) {
+        const dx = tx - x, dy = ty - y;
+        if (dx * dx + dy * dy > rr) continue;
+        const i = ty * MAP.width + tx;
+        if (!player.explored[i]) lit++;
+        for (const v of viewers) {
+          if (v.explored[i]) continue;
+          v.explored[i] = 1;
+          v.exploredDelta.push(i);
+        }
+      }
+    }
+    if (!lit) { this.emit(player.id, 'You have seen all of that already.'); return false; }
+    this.effects.push({ kind: 'farsight', x, y, radius: r });
+    this.emit(player.id, `Farsight — ${lit} tiles laid bare.`);
+    return true;
+  }
+
+  // A plague on a household: the garrison, and nothing else. Aimed at keeps
+  // rather than at a point, so it cannot be used to shave troops off a group
+  // in the field — that is what an army is for.
+  cast_withering(player, spec, x, y) {
+    let struck = 0;
+    for (const other of this.players.values()) {
+      if (!other.alive || this.allied(player.id, other.id)) continue;
+      if (Math.hypot(other.baseX - x, other.baseY - y) > spec.radius) continue;
+      const standing = standingHp(other, other.idleUnits, other.mods);
+      if (standing <= 0) continue;
+      damageUnits(other, other.idleUnits, other.mods,
+        this.mitigate(other.id, Math.min(standing, spec.damage), player.race, true));
+      struck++;
+      this.emit(other.id, 'A plague has swept through your garrison.');
+    }
+    if (!struck) { this.emit(player.id, 'There is no garrison there to wither.'); return false; }
+    this.effects.push({ kind: 'withering', x, y, radius: spec.radius });
+    this.emit(player.id, `Withering — ${struck} garrison${struck === 1 ? '' : 's'} struck.`);
+    return true;
+  }
+
+  // Stonework only, and hard enough to matter: 240 against a 260-health wall
+  // means a segment survives one and falls to two, so it opens a breach rather
+  // than deleting a defence.
+  cast_sunder(player, spec, x, y) {
+    let hit = 0, broken = 0;
+    for (const other of this.players.values()) {
+      if (!other.alive || this.allied(player.id, other.id)) continue;
+      const damage = this.mitigate(other.id, spec.damage, player.race, true);
+      let theirs = 0;
+      for (const b of Object.values(other.buildings)) {
+        if (b.type !== 'wall' && b.type !== 'tower') continue;
+        if (Math.hypot(b.x - x, b.y - y) > spec.radius) continue;
+        b.hp -= damage;
+        theirs++;
+        if (b.hp <= 0.5) { this.razeBuilding(other, b); broken++; }
+      }
+      if (theirs) this.emit(other.id, 'Something has shattered your stonework.');
+      hit += theirs;
+    }
+    if (!hit) { this.emit(player.id, 'There is no stonework there to break.'); return false; }
+    this.effects.push({ kind: 'sunder', x, y, radius: spec.radius });
+    this.emit(player.id, `Sunder — ${hit} section${hit === 1 ? '' : 's'} struck, ${broken} brought down.`);
+    return true;
+  }
+
+  // Both speed spells are the same operation with the sign flipped, so they
+  // are the same function: who it lands on, and what it multiplies by.
+  markSpeed(player, spec, x, y, onAllies, kind, label, empty) {
+    let touched = 0;
+    for (const army of this.armies.values()) {
+      if (this.allied(player.id, army.ownerId) !== onAllies) continue;
+      if (armyCount(army) === 0) continue;
+      if (Math.hypot(army.x - x, army.y - y) > spec.radius) continue;
+      army.speedSpell = { mult: spec.speedMult, remaining: spec.durationSec };
+      touched++;
+      if (!onAllies) this.emit(army.ownerId, 'One of your groups is caught in briars.');
+    }
+    if (!touched) { this.emit(player.id, empty); return false; }
+    this.effects.push({ kind, x, y, radius: spec.radius });
+    this.emit(player.id, `${label} — ${touched} group${touched === 1 ? '' : 's'}.`);
+    return true;
+  }
+
+  cast_forcedMarch(player, spec, x, y) {
+    return this.markSpeed(player, spec, x, y, true, 'forcedMarch', 'Forced March',
+      'None of your groups are in that circle.');
+  }
+
+  cast_entangle(player, spec, x, y) {
+    return this.markSpeed(player, spec, x, y, false, 'entangle', 'Entangle',
+      'There is nothing of theirs in that circle.');
+  }
+
   // ---- Race abilities -----------------------------------------------------
 
   // One button, no cost, a long cooldown. Everything about whether it may fire
@@ -2343,6 +2449,13 @@ class Match {
 
     for (const army of Array.from(this.armies.values())) {
       if (armyCount(army) === 0) { this.armies.delete(army.id); continue; }
+      // Forced March and Entangle both wear off here, and the field is dropped
+      // rather than left at zero so serialize has nothing to say about a group
+      // that is simply walking normally again.
+      if (army.speedSpell) {
+        army.speedSpell.remaining -= dt;
+        if (army.speedSpell.remaining <= 0) army.speedSpell = null;
+      }
       if (army.order === 'hold') continue; // parked in the field, awaiting orders
       if (army.order === 'fight') { this.stepBattle(army, dt); continue; }
       // Marching at an enemy group follows it: unlike a keep or a camp, it can

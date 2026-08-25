@@ -676,6 +676,14 @@ const CARD_ART = {
   meteor:      { tome: [1, 1] },
   terraform:   { tome: [6, 3] },
   bulwark:     { tome: [5, 6] },
+  // Picked for how different the covers read from each other and from the
+  // three above, which matters more on a card the size of a thumbnail than
+  // any literal match between a book and what it does.
+  farsight:    { tome: [7, 8] },   // blue spiral
+  withering:   { tome: [3, 5] },   // dark occult
+  sunder:      { tome: [1, 7] },   // fire, distinct from the meteor's comet
+  forcedMarch: { tome: [5, 2] },   // gold radiant
+  entangle:    { tome: [6, 4] },   // green vine
 };
 
 // Both are magnified by whole pixels to the size the draft actually draws them

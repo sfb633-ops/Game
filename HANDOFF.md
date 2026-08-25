@@ -1757,6 +1757,71 @@ Both directions now: paused when the page is hidden, paused on `pagehide`.
 the back/forward cache, which is exactly the case where a page stops running but
 is not thrown away.
 
+### Five more spells
+
+The tome sheet holds eighty covers and three were in use. The five added are
+deliberately spread across *systems* rather than across damage numbers, so each
+one answers a problem none of the others do:
+
+- **Farsight** writes straight into `explored`. The only spell whose whole
+  effect is knowing something, and on a map this dark that is worth a rock
+  through a roof. Remembered rather than watched — the ground dims again when
+  nobody is looking, exactly like somewhere you marched through once.
+- **Withering** takes a garrison and leaves the buildings. The deliberate
+  opposite of a meteor, so the two answer different problems: one opens the
+  wall, the other empties the room behind it. Aimed at keeps rather than at a
+  point, so it cannot be used to shave troops off a group in the field.
+- **Sunder** is stonework only, at 240 against a 260-health wall — so a segment
+  survives one cast and falls to two. It opens a breach rather than deleting a
+  defence, and it exists because walls got twice as tough when towers stopped
+  shielding the keep, which left an attacker with no answer to somebody who
+  simply keeps building more of it.
+- **Forced March** and **Entangle** are the same operation with the sign
+  flipped, so they are one function. Both ride a single `speedSpell` field on
+  the army, which is why `armySpeed` is the only thing that had to learn about
+  them — the pathfinder, the leash and the client all just see a group moving
+  at a different rate.
+
+Every one that touches another empire spares an ally and **refunds the charge
+when there was nothing legitimate to hit**, which is the existing contract:
+`cmdCastSpell` only decrements when the cast returns something other than false.
+
+Worth knowing for balance: the draft is 16 cards now, half of them spells, so an
+offer of six carries about three where it used to carry one and a half. Spells
+went from a thing you occasionally saw to a thing you usually have. If that
+proves too swingy the lever is `CARD_DRAFT.offer`, or weighting `rollDraft`
+rather than shuffling the pool flat.
+
+### The unused art packs, and why four of the five stayed unused
+
+Looked at all of them against what the game actually draws.
+
+**Skeletons** — the near miss, and worth recording so nobody re-derives it.
+Top-down, four facings, 4-frame idle and 6-frame walk per facing, and the
+weapon sheets are 40 frames of 32x40 that overlay the bodies' 40 used cells
+one-for-one — they composite perfectly, first try, with the body at +8. It is
+genuinely nicer art than what the undead field today.
+
+It is still wrong for this game, for the reason the tower already taught us:
+**the two packs are drawing at different pixel sizes.** MiniWorldSprites is 16px
+art magnified by two, so its pixels are 2x2 blocks. The skeletons are 32px
+native — 1x1 pixels, half the size — and their figures sit noticeably smaller
+and thinner in the frame than units drawn to fill a tile. Stood next to a human
+swordsman on the same ground it reads as a sprite from another game. The archer
+tower gets away with exactly this because it is a building that nothing stands
+beside; a footman does not.
+
+**Environment 1** — a byte-for-byte duplicate of `Pixel Art Top Down - Basic`,
+which the pipeline already reads in full. Every one of its eleven textures has
+the same md5 as the copy in use. Nothing there.
+
+**Orc** and **Orc and Soldier** — side-view, one facing, 100x100 frames. Wrong
+camera; there is no up or down to take.
+
+**Ui Pack** — a complete alternative UI theme. Coherent, but so is the Kenney
+9-slice the stylesheet is built around; swapping would be a restyle rather than
+an improvement.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

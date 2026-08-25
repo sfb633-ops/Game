@@ -2561,6 +2561,56 @@
     "h": 60
    }
   },
+  "farsight": {
+   "file": "cards/farsight.png",
+   "w": 126,
+   "h": 186,
+   "small": {
+    "file": "cards/farsight-sm.png",
+    "w": 42,
+    "h": 62
+   }
+  },
+  "withering": {
+   "file": "cards/withering.png",
+   "w": 144,
+   "h": 180,
+   "small": {
+    "file": "cards/withering-sm.png",
+    "w": 48,
+    "h": 60
+   }
+  },
+  "sunder": {
+   "file": "cards/sunder.png",
+   "w": 138,
+   "h": 180,
+   "small": {
+    "file": "cards/sunder-sm.png",
+    "w": 46,
+    "h": 60
+   }
+  },
+  "forcedMarch": {
+   "file": "cards/forcedMarch.png",
+   "w": 138,
+   "h": 180,
+   "small": {
+    "file": "cards/forcedMarch-sm.png",
+    "w": 46,
+    "h": 60
+   }
+  },
+  "entangle": {
+   "file": "cards/entangle.png",
+   "w": 162,
+   "h": 174,
+   "small": {
+    "file": "cards/entangle-sm.png",
+    "w": 54,
+    "h": 58
+   }
+  },
   "back": {
    "file": "cards/back.png",
    "w": 153,

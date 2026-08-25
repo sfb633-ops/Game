@@ -1924,6 +1924,8 @@ const SPELL_FLASH_COLOR = {
   meteor: '255, 150, 90', terraform: '150, 230, 140', bulwark: '160, 210, 255',
   reincarnation: '196, 132, 255', warband: '255, 108, 74',
   strengthInUnity: '122, 178, 255', agilityOfTheWoods: '128, 232, 148',
+  farsight: '210, 232, 255', withering: '150, 210, 120', sunder: '236, 176, 96',
+  forcedMarch: '255, 226, 128', entangle: '116, 196, 128',
 };
 function drawSpellFlash(fx, ts) {
   const age = clock - fx.start;

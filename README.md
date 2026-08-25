@@ -223,6 +223,11 @@ sprite anchors and layering can be eyeballed as a PNG.
   through and harasses what walks past, but its health is not a wall in front
   of your keep, so building ten of them is not a defence. Walls are the thing
   an attacker has to break, and they are twice as tough as they were.
+- **Eight spells in the draft.** Meteor, Reshape the Land and Bulwark are
+  joined by Farsight (lay a circle of the map bare), Withering (a plague on one
+  empire's garrison, buildings untouched), Sunder (shatters walls and towers and
+  nothing else), Forced March (your groups move half again as fast) and Entangle
+  (enemy groups crawl).
 - **Teams.** The host splits the lobby into two, three or four sides and
   everyone picks one. Teammates start next to each other — west and east for
   two, thirds for three, corners for four — share what they have scouted, are

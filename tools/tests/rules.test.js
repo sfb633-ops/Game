@@ -15,6 +15,12 @@ function sendAt(m, playerId, units, targetType, targetId) {
   }
 }
 
+// A group's speed as the rules see it, spell marks and all.
+function armySpeedOf(army) {
+  const def = cfg.UNIT_TYPES[army.type];
+  const mark = army.speedSpell;
+  return def.speed * (mark && mark.remaining > 0 ? mark.mult : 1);
+}
 let seed = 7 >>> 0;
 Math.random = () => { seed = (seed + 0x6D2B79F5) >>> 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 
@@ -1792,8 +1798,13 @@ function facingOff(aCount, bCount) {
 // to path across impassable ground — it was simply never asked to, because the
 // only question planRoute put to it was "is there a wall in the way". A march
 // whose straight line crossed a lake was therefore declared clear and swum.
-// This is the worst case a sweep of three maps could find: 47 tiles of open
-// water on the straight line, which the old code walked across for 41 ticks.
+// The destination is searched for rather than written down. It used to be a
+// fixed tile, and that made this block quietly depend on how many times
+// everything above it had called Math.random — adding five cards to the draft
+// changed the shuffle, changed the terrain, and the lake moved out from under
+// the test. The guard below caught it, which is what it was for, but a test
+// that has to be re-tuned whenever an unrelated table grows is not much of a
+// pin. Now it finds its own lake.
 {
   const m = new Match({ started: false, map: 'lakelands' });
   const p = m.addPlayer('p', 'human', 'P');
@@ -1802,17 +1813,30 @@ function facingOff(aCount, bCount) {
   m.cmdDeployUnits('p', { swordsman: 10 }, p.baseX, p.baseY);
   const army = [...m.armies.values()][0];
   const T = m.terrain, W = T[0].length, H = T.length;
-  const dest = { x: 167, y: 7 };
   const sx = army.x, sy = army.y;
 
-  // The straight line really does cross deep water — if map generation ever
-  // drifts this stops being the test it was written to be, so it is checked.
-  let crossed = 0;
-  const n = Math.ceil(Math.hypot(dest.x - sx, dest.y - sy) * 4);
-  for (let i = 1; i <= n; i++) {
-    const t = i / n;
-    const cx = Math.round(sx + (dest.x - sx) * t), cy = Math.round(sy + (dest.y - sy) * t);
-    if (cx >= 0 && cy >= 0 && cx < W && cy < H && T[cy][cx] === 2) crossed++;
+  const waterOnLine = (tx, ty) => {
+    let wet = 0;
+    const n = Math.ceil(Math.hypot(tx - sx, ty - sy) * 4);
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      const cx = Math.round(sx + (tx - sx) * t), cy = Math.round(sy + (ty - sy) * t);
+      if (cx >= 0 && cy >= 0 && cx < W && cy < H && T[cy][cx] === 2) wet++;
+    }
+    return wet;
+  };
+  // The furthest-crossing landfall this map offers, so the test is always the
+  // hardest case available rather than one that happened to be hard once.
+  let dest = null, crossed = 0;
+  for (let ang = 0; ang < 360; ang += 5) {
+    for (let r = 20; r < 70; r += 3) {
+      const x = Math.round(sx + Math.cos(ang * Math.PI / 180) * r);
+      const y = Math.round(sy + Math.sin(ang * Math.PI / 180) * r);
+      if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) continue;
+      if (T[y][x] !== 0) continue;
+      const wet = waterOnLine(x, y);
+      if (wet > crossed) { crossed = wet; dest = { x, y }; }
+    }
   }
   check('the straight line to the target crosses open water', crossed > 20, `${crossed} samples`);
 
@@ -2235,6 +2259,131 @@ function facingOff(aCount, bCount) {
   check('and twenty swordsmen take real time to break a segment',
     firstDown > 50, `${(firstDown * 0.2).toFixed(0)}s`);
   check('though a sealed keep still falls in the end', !d.alive, `${(t * 0.2).toFixed(0)}s`);
+}
+
+// --- the five spells added to the book ------------------------------------
+// Each one is pinned on the thing that makes it itself rather than on its
+// numbers, so retuning damage or duration does not break the test.
+{
+  const fresh = (teams) => {
+    const m = new Match({ started: false, map: 'openfield', teams });
+    const a = m.addPlayer('a', 'human', 'A');
+    const d = m.addPlayer('d', 'orc', 'D');
+    m.start(); a.draft = null; d.draft = null; a.gold = d.gold = 999999;
+    return { m, a, d };
+  };
+
+  // Farsight writes into explored, so what it uncovers is remembered rather
+  // than watched — it dims again when nobody is looking, like anywhere walked.
+  {
+    const { m, a } = fresh(0);
+    a.spells.farsight = 1;
+    const before = a.explored.reduce((n, v) => n + v, 0);
+    m.cmdCastSpell('a', 'farsight', 20, 20);
+    const after = a.explored.reduce((n, v) => n + v, 0);
+    check('Farsight lays a circle of the map bare', after > before + 200, `+${after - before} tiles`);
+    check('  and spends the charge', a.spells.farsight === 0);
+    // Casting it on the same ground again achieves nothing and is refused, so
+    // a charge is never burned for no effect.
+    a.spells.farsight = 1;
+    m.cmdCastSpell('a', 'farsight', 20, 20);
+    check('  but is refused where there is nothing left to uncover', a.spells.farsight === 1);
+  }
+
+  // Withering is the opposite of a meteor on purpose: the garrison, not the
+  // buildings.
+  {
+    const { m, a, d } = fresh(0);
+    a.spells.withering = 1;
+    d.idleUnits = { swordsman: 12, knight: 4, catapult: 2 };
+    m.cmdBuild('d', d.baseX + 2, d.baseY, 'bank');
+    const bank = d.buildings[`${d.baseX + 2},${d.baseY}`];
+    const castleHp = m.getCastle(d).hp;
+    m.cmdCastSpell('a', 'withering', d.baseX, d.baseY);
+    const lost = 12 - d.idleUnits.swordsman;
+    check('Withering cuts down a garrison', lost > 0, `${lost} swordsmen`);
+    check('  and leaves their buildings alone', bank.hp === bank.maxHp && m.getCastle(d).hp === castleHp);
+    // Nothing to wither means nothing spent.
+    a.spells.withering = 1;
+    d.idleUnits = { swordsman: 0, knight: 0, catapult: 0 };
+    m.cmdCastSpell('a', 'withering', d.baseX, d.baseY);
+    check('  and is refused against an empty keep', a.spells.withering === 1);
+  }
+
+  // Sunder is stonework only, and deliberately not quite enough to delete a
+  // wall in one cast — it opens a breach rather than removing a defence.
+  {
+    const { m, a, d } = fresh(0);
+    a.spells.sunder = 1;
+    const tiles = [];
+    for (let i = -2; i <= 2; i++) tiles.push({ x: d.baseX + i, y: d.baseY + 3 });
+    m.cmdBuildWall('d', tiles);
+    m.cmdBuild('d', d.baseX + 5, d.baseY, 'bank');
+    const bank = d.buildings[`${d.baseX + 5},${d.baseY}`];
+    const before = Object.values(d.buildings).filter(b => b.type === 'wall').length;
+    check('a wall line goes up to break', before >= 4, `${before} segments`);
+    m.cmdCastSpell('a', 'sunder', d.baseX, d.baseY + 3);
+    const hurt = Object.values(d.buildings).filter(b => b.type === 'wall' && b.hp < b.maxHp).length;
+    check('Sunder damages the stonework it lands on', hurt > 0, `${hurt} segments hurt`);
+    check('  and leaves everything else standing', bank.hp === bank.maxHp);
+    // A second cast finishes what the first started.
+    a.spells.sunder = 1;
+    m.cmdCastSpell('a', 'sunder', d.baseX, d.baseY + 3);
+    const after = Object.values(d.buildings).filter(b => b.type === 'wall').length;
+    check('  and a second cast brings a section down', after < before, `${before} -> ${after}`);
+  }
+
+  // Both speed spells ride one field on the army, so they are tested together.
+  {
+    const { m, a, d } = fresh(0);
+    a.spells.forcedMarch = 1; a.spells.entangle = 1;
+    a.idleUnits.swordsman = 5; d.idleUnits.swordsman = 5;
+    m.cmdDeployUnits('a', { swordsman: 5 }, a.baseX, a.baseY);
+    m.cmdDeployUnits('d', { swordsman: 5 }, d.baseX, d.baseY);
+    const mine = [...m.armies.values()].find(x => x.ownerId === 'a');
+    const theirs = [...m.armies.values()].find(x => x.ownerId === 'd');
+    const base = cfg.UNIT_TYPES.swordsman.speed;
+    m.cmdCastSpell('a', 'forcedMarch', mine.x, mine.y);
+    m.cmdCastSpell('a', 'entangle', theirs.x, theirs.y);
+    check('Forced March hurries your own group along', armySpeedOf(mine) > base,
+      `${base} -> ${armySpeedOf(mine).toFixed(2)}`);
+    check('Entangle bogs an enemy group down', armySpeedOf(theirs) < base,
+      `${base} -> ${armySpeedOf(theirs).toFixed(2)}`);
+    for (let t = 0; t < 200; t++) m.tick(0.2);      // 40s, past both durations
+    check('  and both wear off', armySpeedOf(mine) === base && armySpeedOf(theirs) === base);
+    check('  leaving nothing behind on the group', !mine.speedSpell && !theirs.speedSpell);
+  }
+
+  // Every spell that touches another empire spares an ally, and refunds the
+  // charge when there was nothing legitimate to hit.
+  {
+    const m = new Match({ started: false, map: 'openfield', teams: 2 });
+    const a = m.addPlayer('a', 'human', 'A', 0);
+    const b = m.addPlayer('b', 'human', 'B', 0);
+    m.addPlayer('e', 'orc', 'E', 1);
+    m.start();
+    for (const p of m.players.values()) { p.draft = null; p.gold = 999999; }
+    b.idleUnits = { swordsman: 10, knight: 0, catapult: 0 };
+    a.spells.withering = 1;
+    m.cmdCastSpell('a', 'withering', b.baseX, b.baseY);
+    check('Withering spares a teammate', b.idleUnits.swordsman === 10 && a.spells.withering === 1);
+
+    const tiles = [];
+    for (let i = -1; i <= 1; i++) tiles.push({ x: b.baseX + i, y: b.baseY + 3 });
+    m.cmdBuildWall('b', tiles);
+    a.spells.sunder = 1;
+    m.cmdCastSpell('a', 'sunder', b.baseX, b.baseY + 3);
+    const intact = Object.values(b.buildings).every(x => x.hp === x.maxHp);
+    check('Sunder spares a teammate\'s walls', intact && a.spells.sunder === 1);
+
+    b.idleUnits.swordsman = 5;
+    m.cmdDeployUnits('b', { swordsman: 5 }, b.baseX, b.baseY);
+    const ally = [...m.armies.values()].find(x => x.ownerId === 'b');
+    a.spells.forcedMarch = 1;
+    m.cmdCastSpell('a', 'forcedMarch', ally.x, ally.y);
+    check('and Forced March carries a teammate along with you',
+      armySpeedOf(ally) > cfg.UNIT_TYPES.swordsman.speed, `${armySpeedOf(ally).toFixed(2)}`);
+  }
 }
 
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');
