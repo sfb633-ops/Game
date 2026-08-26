@@ -2077,6 +2077,131 @@ and you had one group and no way back.
 A group you have selected is somewhere to go. A group you have not selected is
 something to join.
 
+### Losing means losing
+
+Reported as "base was destroyed but still was able to control troops", and
+guessed at as a two-players-on-one-wifi problem. It was not: `cmdMoveArmy`,
+`cmdAttackArmy`, `cmdMergeArmy` and `cmdRecallArmy` all took an army id and an
+owner id and never asked whether that owner was still in the game. Only
+`cmdDeployUnits` checked. So a player whose town centre had been levelled went
+on marching, merging and besieging with whatever had been in the field when it
+fell.
+
+Two halves, because either alone leaves a hole:
+
+- `eliminate` disbands the fallen empire's groups. "Your empire has fallen"
+  cannot be true of an empire that still has an army.
+- `ownArmy(playerId, armyId)` is the single gate every order goes through, and
+  it asks both questions.
+
+### Buildings are ground, and every one of them can be pulled down
+
+Walls used to be the only building an army could interact with: the only one it
+had to walk round, the only one it could break. Everything else was scenery
+painted on the floor — a column marched straight through a barracks.
+
+- **`solidAt`** replaced `wallAt`: it finds *any* building on a tile. Everything
+  that used to ask about walls — `blockingBuilding`, `pathBlocked`, `findRoute`'s
+  blocked set — asks about buildings now, so a keep with four buildings round it
+  is a place with a shape.
+- **The town centre is deliberately exempt.** It is what an assault on an empire
+  is aimed *at*, so making it something to walk round would put a wall in front
+  of the one thing every attack is trying to reach.
+- **`hitBuilding`** is one tick of taking a building apart, and both routes into
+  it share it: `stepBreach` (walked into on the march) and `stepBuildingBattle`
+  (marched at on purpose, `targetType: 'building'`). A stable pulled down on the
+  way past and a stable a raid was sent for come out the same. The building hits
+  back with its own `defensePower`, which is 15 for a tower and nothing for
+  everything else.
+- **Anything broken leaves rubble**; anything its owner demolishes does not.
+- **`wallVersion` bumps for every building**, not just walls, or an army would
+  route across a barracks that went up after its route was planned.
+
+The target id is the tile, `"x,y"`, and it arrives off the wire — so
+`buildingAt` checks it against `TILE_KEY` and uses `hasOwnProperty` before it
+touches `player.buildings`. Without that, a target id of `__proto__` sails
+through the truthiness test and hands an army `Object.prototype` to knock down,
+writing `hp` onto it. One crafted message, whole prototype poisoned. There is a
+pin that tries eleven such ids.
+
+Verified against the thing that would actually break: a keep ringed by its
+owner's own buildings can still be stormed, a march goes round a single bank
+without stopping to batter it, and 15,000 fuzzed ticks of six players building
+and razing produced no army penned in by anybody's stable.
+
+### A siege that gets jumped fights the people
+
+Reported as "units attacking town hall were attacked ... the troops and the town
+hall both took damage at the same time", with the request that being attacked
+should pull the attackers off the building. Both halves are the same fix, in
+`buildFocus`: a group whose order is on a camp or a keep swings at an enemy
+*group* in preference to the masonry. The keep is not going anywhere; the
+swordsmen behind you are. The order itself is not thrown away — only what this
+tick's swing lands on — so once the group that jumped them is gone the siege
+picks up again.
+
+### Ballistae wading into the melee
+
+Reported as "ballista targeting is weird". Two things, both real:
+
+- **The arrival test measured the wrong distance.** An attack order on a group
+  rounds the destination to a tile, for the pathfinder, and arrival was measured
+  against that rounded tile. Two thirds of a tile does not matter to a swordsman
+  closing to arm's length; it matters a great deal to a catapult holding at four
+  while the enemy walks towards it, because the rounded distance stayed just
+  over the range and the crew kept advancing to meet them.
+- **Every bolt was aimed at last tick's position.** `stepProjectiles` ran before
+  the exchange, and squaring up — which is what turns a group to face what it is
+  fighting — runs during it. Against anything moving, a volley that visibly
+  misses.
+
+The design underneath is unchanged and correct: a crew shooting at troops who
+stay put settles at exactly four tiles and wins without a scratch, and troops
+who charge drag it down to arm's length and kill it there. Both are pinned.
+
+### Failed attempt: clamping the step to the firing distance
+
+Worth recording because it looked obviously right. To stop a crew walking inside
+its own range, the march step was clamped to `dist - stopAt`. Measured, it
+bought less than a tenth of a tile — what actually closes that gap is the enemy
+walking, not the crew. What it cost was real: the clamp is a distance to the
+*target*, while the step is taken along the *route*, and those are not the same
+direction whenever a route exists. Groups crawled the last stretch and arrived
+piecemeal; thirty knights sent at three golems as three groups went from
+nineteen survivors to ten. Reverted.
+
+### Race passives, second pass
+
+"Skeletons feel weak. Their debuff negates their buff." Exactly right, and it
+was true by construction: the undead paid for 20%-off soldiers with 15% less
+gold a second. The buff and the debuff were the same number pointed in opposite
+directions, and what was left was a race that felt weak for no gain.
+
+Their income is level with everyone else's now, and the price of being cheap is
+paid where it belongs — each skeleton is slightly less than the soldier it
+stands opposite. 5% off everything, 5% frailer, 2% weaker.
+
+**`speedMult` is new, and it is the interesting part.** Every other multiplier
+in `RACES` is squared on its way to a result (see "A race is a slant"), which is
+why they all have to sit within a few percent of even and why no race can be
+given an edge you can feel. How fast a group walks is the exception: it does not
+decide how a fight comes out, it decides whether you are in the fight at all. So
+elves can be plainly quicker than everyone else — 15%, which you notice every
+time you cross the map — while every number that touches damage stays inside a
+few percent. If a race needs more character in future, this is the axis to
+spend it on.
+
+Measured band across all six matchups in three fights each: the winner keeps
+3–30%.
+
+### Farsight
+
+Reworded — the old line took three clauses and a dash to say "look anywhere",
+and a card you read while somebody is attacking you has to land in one — and
+given its own 45-second recharge against everything else's 100. It is the only
+spell in the book that cannot hurt anybody, and one you were saving because it
+was expensive was a spell doing nothing.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

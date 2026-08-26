@@ -10,6 +10,9 @@ const {
   TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA,
 } = require('./config');
 
+// What a building's target id has to look like. See Match.buildingAt.
+const TILE_KEY = /^-?\d+,-?\d+$/;
+
 function tileKey(x, y) { return `${x},${y}`; }
 
 const TILE_LAND = 0;
@@ -83,7 +86,7 @@ function armyRange(army) {
 }
 
 // One kind of soldier per group, so there is no slowest member to find.
-function armySpeed(army) {
+function armySpeed(army, mods) {
   const def = UNIT_TYPES[army.type];
   if (!def) return 0;
   // Forced March hurries a group along and Entangle bogs one down, and both
@@ -91,7 +94,8 @@ function armySpeed(army) {
   // it — the pathfinder, the leash and the client all just see a slower or
   // faster group.
   const mark = army.speedSpell;
-  return def.speed * (mark && mark.remaining > 0 ? mark.mult : 1);
+  return def.speed * (mark && mark.remaining > 0 ? mark.mult : 1)
+    * (mods && mods.speedMult ? mods.speedMult : 1);
 }
 
 function armyWounded(army) {
@@ -165,7 +169,7 @@ function standingHp(owner, units, race) {
 // every boon they draft multiplies into it, so nothing downstream has to know
 // whether a number came from a race or a card.
 const BASE_MODS = {
-  incomeMult: 1, attackMult: 1, hpMult: 1, buildTimeMult: 1, costMult: 1,
+  incomeMult: 1, attackMult: 1, hpMult: 1, buildTimeMult: 1, costMult: 1, speedMult: 1,
   structureHpMult: 1, borderBonus: 0,
 };
 
@@ -1247,7 +1251,10 @@ class Match {
   // the version its route was planned under and replans when they differ.
   placeBuilding(player, building) {
     player.buildings[tileKey(building.x, building.y)] = building;
-    if (building.type === 'wall') this.wallVersion++;
+    // Every building is something to walk round now, so every building changes
+    // the map an army is routing across — not only walls. `wallVersion` keeps
+    // its name because that is what every route stamp calls it.
+    if (building.type !== 'castle') this.wallVersion++;
     return building;
   }
 
@@ -1255,10 +1262,10 @@ class Match {
   // clear ground — rubble is what a fight leaves behind.
   razeBuilding(player, building, demolished) {
     delete player.buildings[tileKey(building.x, building.y)];
-    if (building.type === 'wall') this.wallVersion++;
-    if (!demolished && (building.type === 'wall' || building.type === 'tower')) {
-      this.rubble.set(tileKey(building.x, building.y), RUBBLE_SEC);
-    }
+    if (building.type !== 'castle') this.wallVersion++;
+    // Rubble is what a fight leaves behind, whatever was standing there. Pull
+    // it down yourself and the ground is clear.
+    if (!demolished) this.rubble.set(tileKey(building.x, building.y), RUBBLE_SEC);
   }
 
   // Rubble clears on its own. One pass for the whole match rather than one per
@@ -1986,12 +1993,37 @@ class Match {
   // would seal your own troops inside it. And a fallen empire's walls stop
   // stopping anyone: ruins should not go on fencing the map off for the rest of
   // the match.
-  wallAt(x, y) {
-    const key = tileKey(x, y);
+  // Whatever is standing on this tile, and whose it is.
+  //
+  // This used to find walls and nothing else, which is why an army could march
+  // straight through a barracks: a wall was ground and every other building was
+  // scenery painted on the floor. They are all ground now — a keep with four
+  // buildings round it is a place with a shape, and getting into it means going
+  // round them or knocking one down.
+  //
+  // The town center is the exception, and deliberately: it is what an assault
+  // on an empire is aimed AT (see stepPlayerBattle), so making it something to
+  // walk round would put a wall in front of the one thing every attack is
+  // trying to reach.
+  solidAt(x, y) {
+    return this.buildingAt(tileKey(x, y));
+  }
+
+  // The building at a "x,y" target id, if anyone still owns one there.
+  //
+  // The key comes off the wire — it is whatever the client said it was
+  // right-clicking — so it is checked before it is used as a property name.
+  // `buildings` is a plain object, and a target id of "__proto__" or
+  // "constructor" would otherwise sail through the truthiness test below and
+  // hand an army Object.prototype to knock down, writing `hp` onto it. That is
+  // the whole prototype poisoned by one crafted message.
+  buildingAt(key) {
+    if (typeof key !== 'string' || !TILE_KEY.test(key)) return null;
     for (const player of this.players.values()) {
       if (!player.alive) continue;
+      if (!Object.prototype.hasOwnProperty.call(player.buildings, key)) continue;
       const b = player.buildings[key];
-      if (b && b.type === 'wall') return { wall: b, owner: player };
+      if (b && b.type !== 'castle') return { building: b, owner: player };
     }
     return null;
   }
@@ -2016,15 +2048,20 @@ class Match {
     return null;
   }
 
-  blockingWall(army, worldX, worldY) {
+  blockingBuilding(army, worldX, worldY) {
     const x = Math.round(worldX), y = Math.round(worldY);
     // Already standing on the tile — a bulwark dropped on top of it, say — is
     // not the same as walking into it. It has to be able to leave.
     if (x === Math.round(army.x) && y === Math.round(army.y)) return null;
-    const found = this.wallAt(x, y);
+    const found = this.solidAt(x, y);
+    if (!found) return null;
     // An ally's gate is your gate, for the same reason your own is: a team that
     // walls its own ground must not wall its partners out of it.
-    return found && !this.allied(army.ownerId, found.owner.id) ? found : null;
+    if (this.allied(army.ownerId, found.owner.id)) return null;
+    // ...and whatever you were sent to knock down is not an obstacle, it is the
+    // destination.
+    if (army.targetType === 'building' && army.targetId === tileKey(x, y)) return null;
+    return found;
   }
 
   // Is there anything along the straight line an army cannot walk through:
@@ -2042,8 +2079,8 @@ class Match {
     return this.forEachTileOnLine(army.x, army.y, tx, ty, (x, y) => {
       if (x === ax && y === ay) return false;         // the tile it is stood on
       if (!this.validMoveTile(x, y)) return true;
-      const w = this.wallAt(x, y);
-      return !!w && !this.allied(army.ownerId, w.owner.id);
+      const b = this.solidAt(x, y);
+      return !!b && !this.allied(army.ownerId, b.owner.id);
     });
   }
 
@@ -2146,7 +2183,7 @@ class Match {
       for (const player of this.players.values()) {
         if (!player.alive || this.allied(army.ownerId, player.id)) continue;
         for (const b of Object.values(player.buildings)) {
-          if (b.type === 'wall') blocked.add(tileKey(b.x, b.y));
+          if (b.type !== 'castle') blocked.add(tileKey(b.x, b.y));
         }
       }
     }
@@ -2193,25 +2230,40 @@ class Match {
   // at a time, with its own health: this is the only place a wall takes damage
   // from an army, and the only place one is knocked down.
   beginBreach(army, found) {
-    army.breach = { x: found.wall.x, y: found.wall.y, ownerId: found.owner.id };
+    army.breach = { x: found.building.x, y: found.building.y, ownerId: found.owner.id };
     const attacker = this.players.get(army.ownerId);
-    this.emit(found.owner.id, `${attacker ? attacker.name : 'An enemy'} is battering your wall.`);
+    const def = BUILDING_TYPES[found.building.type];
+    this.emit(found.owner.id,
+      `${attacker ? attacker.name : 'An enemy'} is battering your ${def ? def.name.toLowerCase() : 'buildings'}.`);
   }
 
   stepBreach(army, dt) {
     const owner = this.players.get(army.breach.ownerId);
-    const wall = owner && owner.alive && owner.buildings[tileKey(army.breach.x, army.breach.y)];
-    if (!wall || wall.type !== 'wall') { army.breach = null; return; }
-    const def = BUILDING_TYPES.wall;
-    wall.hp -= this.mitigate(owner.id, this.attackOutput(army, dt), army.race, true);
-    if (wall.hp <= 0.5) {
-      this.razeBuilding(owner, wall);
-      this.emit(owner.id, 'A section of your wall has been breached.');
-      army.breach = null;
+    const b = owner && owner.alive && owner.buildings[tileKey(army.breach.x, army.breach.y)];
+    if (!b || b.type === 'castle') { army.breach = null; return; }
+    this.hitBuilding(army, owner, b, dt);
+  }
+
+  // One tick of an army taking a building apart, wherever that started: walked
+  // into on the march, or marched at on purpose. Returns false once the army is
+  // gone.
+  hitBuilding(army, owner, b, dt) {
+    const def = BUILDING_TYPES[b.type] || {};
+    b.hp -= this.mitigate(owner.id, this.attackOutput(army, dt), army.race, true);
+    if (b.hp <= 0.5) {
+      this.razeBuilding(owner, b);
+      this.emit(owner.id, b.type === 'wall'
+        ? 'A section of your wall has been breached.'
+        : `Your ${def.name ? def.name.toLowerCase() : 'building'} has been destroyed.`);
+      this.emit(army.ownerId, `Destroyed their ${def.name ? def.name.toLowerCase() : 'building'}.`);
+      if (army.breach) army.breach = null;
+      if (army.targetType === 'building') this.holdPosition(army);
     }
-    // A wall is not a garrison, but it is not free to stand under either.
-    this.absorb(army, this.mitigate(army.ownerId, def.defensePower * COMBAT.tempo * dt, owner.race, false),
-                'Your army broke against their walls.');
+    // A building is not a garrison, but it is not free to stand under either —
+    // and a tower is not free at all.
+    return this.absorb(army,
+      this.mitigate(army.ownerId, (def.defensePower || 0) * COMBAT.tempo * dt, owner.race, false),
+      'Your army broke against their defences.');
   }
 
   // ---- Army helpers ----
@@ -2228,6 +2280,14 @@ class Match {
       const c = this.aiCamps.find(c => c.id === targetId);
       if (!c || c.defeated) return null;
       return { x: c.x, y: c.y };
+    }
+    // One building of somebody else's, by the tile it stands on. Everything an
+    // empire owns can be knocked down on its own account now, so a raid can go
+    // after the stables rather than having to break the whole empire.
+    if (targetType === 'building') {
+      const found = this.buildingAt(targetId);
+      if (!found || this.allied(playerId, found.owner.id)) return null;
+      return { x: found.building.x, y: found.building.y };
     }
     // A group in the field. Unlike a keep or a camp this one moves, so the
     // destination is refreshed every tick while the order stands — see the
@@ -2406,9 +2466,20 @@ class Match {
     this.spawnArmies(player, units, 'move', { x: Math.round(x), y: Math.round(y) });
   }
 
-  cmdMoveArmy(playerId, armyId, x, y) {
+  // Every order below starts the same way: is this a group you own, and are you
+  // still in the game? The second half was missing everywhere except
+  // cmdDeployUnits, which is how a player whose keep had fallen kept playing.
+  ownArmy(playerId, armyId) {
+    const player = this.players.get(playerId);
+    if (!player || !player.alive) return null;
     const army = this.armies.get(armyId);
-    if (!army || army.ownerId !== playerId) return;
+    if (!army || army.ownerId !== playerId) return null;
+    return army;
+  }
+
+  cmdMoveArmy(playerId, armyId, x, y) {
+    const army = this.ownArmy(playerId, armyId);
+    if (!army) return;
     if (!this.validMoveTile(x, y)) return;
     this.bankPlunder(army);
     army.order = 'move';
@@ -2418,8 +2489,8 @@ class Match {
   }
 
   cmdAttackArmy(playerId, armyId, targetType, targetId) {
-    const army = this.armies.get(armyId);
-    if (!army || army.ownerId !== playerId) return;
+    const army = this.ownArmy(playerId, armyId);
+    if (!army) return;
     const dest = this.resolveTarget(playerId, targetType, targetId);
     if (!dest) return;
     this.bankPlunder(army);
@@ -2437,9 +2508,9 @@ class Match {
   // refusing in silence, because "merge" is a reasonable thing to have expected
   // to work.
   cmdMergeArmy(playerId, armyId, targetId) {
-    const army = this.armies.get(armyId);
+    const army = this.ownArmy(playerId, armyId);
     const into = this.armies.get(targetId);
-    if (!army || army.ownerId !== playerId) return;
+    if (!army) return;
     if (!into || into.ownerId !== playerId || into === army) return;
     if (army.type !== into.type) {
       const a = UNIT_TYPES[army.type], b = UNIT_TYPES[into.type];
@@ -2477,8 +2548,8 @@ class Match {
   }
 
   cmdRecallArmy(playerId, armyId) {
-    const army = this.armies.get(armyId);
-    if (!army || army.ownerId !== playerId) return;
+    const army = this.ownArmy(playerId, armyId);
+    if (!army) return;
     this.bankPlunder(army);
     this.startReturn(army);
   }
@@ -2584,9 +2655,21 @@ class Match {
       if (army.order === 'fight') { this.stepBattle(army, dt); continue; }
       // Marching at an enemy group follows it: unlike a keep or a camp, it can
       // walk away while you are crossing the map to reach it.
+      let aim = null;                          // where the target really is
       if (army.order === 'attack' && army.targetType === 'army') {
         const prey = this.armies.get(army.targetId);
         if (!prey || armyCount(prey) === 0) { this.holdPosition(army); continue; }
+        // The route is planned to a tile, so the destination is rounded — but
+        // arriving is measured against where the enemy actually is. Rounding
+        // both was worth up to two thirds of a tile, which does not matter to a
+        // swordsman closing to arm's length and matters a great deal to a
+        // catapult holding at four: with the enemy walking towards it, the
+        // rounded distance stayed just over its range and the crew kept
+        // advancing to meet them. Artillery that closes on a charge is
+        // artillery with no range at all — the whole of the reported weirdness
+        // about ballistae was them wading into the melee they had been built to
+        // stay out of.
+        aim = { x: prey.x, y: prey.y };
         army.destX = Math.round(prey.x); army.destY = Math.round(prey.y);
       }
       // A group on its way to join another follows it: the target may still be
@@ -2607,8 +2690,8 @@ class Match {
       // the wall does.
       if (army.breach) { this.stepBreach(army, dt); continue; }
       const dx = army.destX - army.x, dy = army.destY - army.y;
-      const dist = Math.hypot(dx, dy);
-      const speed = armySpeed(army);
+      const dist = aim ? Math.hypot(aim.x - army.x, aim.y - army.y) : Math.hypot(dx, dy);
+      const speed = armySpeed(army, this.modsFor(army));
       // Where a march ends. Marching onto a spot of ground means standing on
       // it; marching onto an enemy means stopping where you will fight them
       // from, which for anyone without a range is arm's length rather than the
@@ -2624,7 +2707,7 @@ class Match {
         : army.targetType === 'army'
           ? Math.max(COMBAT.engageRange, this.standoffOf(army))
           : Math.max(COMBAT.engageRange, armyRange(army));
-      if (dist < stopAt || speed <= 0) {
+      if (dist <= stopAt || speed <= 0) {
         if (army.order === 'attack') {
           this.beginBattle(army);
         } else if (army.order === 'return') {
@@ -2689,7 +2772,7 @@ class Match {
       // The route is planned round walls, so this only fires when there was no
       // way round to plan — a sealed compound, or a wall raised across the path
       // between one tick and the next.
-      const found = this.blockingWall(army, nx, ny);
+      const found = this.blockingBuilding(army, nx, ny);
       if (found) { this.beginBreach(army, found); continue; }
       // Ground an army cannot stand on stops it as surely as a wall does, and
       // unlike a wall there is nothing to knock down. Getting here means either
@@ -2746,10 +2829,15 @@ class Match {
   }
 
   stepBattle(army, dt) {
-    this.stepProjectiles(army, dt);
     if (army.targetType === 'camp') this.stepCampBattle(army, dt);
     else if (army.targetType === 'army') this.stepArmyBattle(army, dt);
+    else if (army.targetType === 'building') this.stepBuildingBattle(army, dt);
     else this.stepPlayerBattle(army, dt);
+    // After the exchange, not before it: squaring up is what turns a group to
+    // face what it is fighting, and firing first meant every bolt was aimed at
+    // where the enemy had been on the previous tick. Against anything moving,
+    // that is a volley that visibly misses.
+    if (this.armies.has(army.id)) this.stepProjectiles(army, dt);
   }
 
   // How far apart two groups end up, and it is decided by whoever is trying to
@@ -2847,17 +2935,40 @@ class Match {
       const army = key[0] === 'a' ? this.armies.get(key.slice(2)) : null;
       const ordered = army && army.targetType === 'army' ? 'a:' + army.targetId : null;
       if (ordered && opponents.has(ordered)) { focus.set(key, ordered); continue; }
-      const here = at(key);
-      let best = null, bestD = Infinity;
-      for (const other of opponents) {
-        const there = at(other);
-        if (!there) continue;
-        const d = here && there ? Math.hypot(there.x - here.x, there.y - here.y) : 0;
-        // Ties broken by id so a fight plays out the same way twice.
-        if (d < bestD || (d === bestD && (best === null || other < best))) { bestD = d; best = other; }
+      // Somebody hitting you comes before a building that is not hitting back.
+      // Troops battering a town center while an enemy group cut them down used
+      // to split their attention between the two, so the keep and the relief
+      // force lost health at the same time and the group doing the battering
+      // was fighting on two fronts at full strength on both. A wall or a keep
+      // is not going anywhere; the swordsmen behind you are.
+      //
+      // The order itself is not thrown away — only what this tick's swing lands
+      // on. Once the group that jumped them is gone the siege picks straight up
+      // again, which is what an order should mean.
+      if (army && army.targetType !== 'army') {
+        const threats = [...opponents].filter(k => k[0] === 'a');
+        if (threats.length) {
+          focus.set(key, this.nearestKey(key, threats, at));
+          continue;
+        }
       }
+      const best = this.nearestKey(key, opponents, at);
       if (best) focus.set(key, best);
     }
+  }
+
+  // Whichever of these is closest to `key`. Ties broken by id, so a fight plays
+  // out the same way twice.
+  nearestKey(key, candidates, at) {
+    const here = at(key);
+    let best = null, bestD = Infinity;
+    for (const other of candidates) {
+      const there = at(other);
+      if (!there) continue;
+      const d = here && there ? Math.hypot(there.x - here.x, there.y - here.y) : 0;
+      if (d < bestD || (d === bestD && (best === null || other < best))) { bestD = d; best = other; }
+    }
+    return best;
   }
 
   // Is this the opponent that combatant is swinging at this tick?
@@ -2965,7 +3076,7 @@ class Match {
   walkTo(army, x, y, dt) {
     const dx = x - army.x, dy = y - army.y;
     const d = Math.hypot(dx, dy);
-    const cap = armySpeed(army) * (dt || 0);
+    const cap = armySpeed(army, this.modsFor(army)) * (dt || 0);
     if (d < 1e-9) return;
     if (!(cap > 0) || d <= cap) { army.x = x; army.y = y; return; }
     army.x += (dx / d) * cap;
@@ -3205,6 +3316,16 @@ class Match {
     this.holdPosition(army);
   }
 
+  // Knocking down one building, because somebody sent troops to do exactly
+  // that. The same exchange as walking into one on the march — see hitBuilding
+  // — so a stable pulled down on the way past and a stable a raid was sent for
+  // come out the same.
+  stepBuildingBattle(army, dt) {
+    const found = this.buildingAt(army.targetId);
+    if (!found || this.allied(army.ownerId, found.owner.id)) { this.holdPosition(army); return; }
+    this.hitBuilding(army, found.owner, found.building, dt);
+  }
+
   // Attacking another empire. Garrison, towers and walls soak the assault
   // together; break through and the survivors work on the town center, carrying
   // off gold as they go.
@@ -3277,8 +3398,22 @@ class Match {
     player.alive = false;
     const castle = this.getCastle(player);
     if (castle) castle.hp = 0;
+    // The troops go with the empire. They used to stay on the map and keep
+    // taking orders: every command but cmdDeployUnits took an army id and an
+    // owner id and never asked whether that owner was still in the game, so a
+    // player whose town center had been levelled went on marching, merging and
+    // besieging with whatever had been in the field when it fell. Losing has to
+    // mean something, and "your empire has fallen" cannot be true of an empire
+    // that still has an army.
+    let disbanded = 0;
+    for (const [id, army] of this.armies) {
+      if (army.ownerId !== player.id) continue;
+      disbanded += armyCount(army);
+      this.armies.delete(id);
+    }
+    if (disbanded > 0) this.emit(player.id, `Your ${disbanded} remaining soldiers scatter.`);
     this.releaseOutposts(player);
-    // Their walls stop blocking with them — see wallAt. Armies routing round
+    // Everything they built stops blocking with them — see solidAt. Armies routing round
     // the ruins have to be told the map just opened up.
     this.wallVersion++;
     this.emit(player.id, reason);

@@ -162,19 +162,34 @@ const OUTPOST = {
 // which pins that band, before it is believed.
 //
 // The identities, then, are small and deliberate:
-//   Orc    hits hardest and falls fastest, and is slower and poorer at raising
-//          the next lot. The brute.
-//   Elf    frailer, richer, quicker to train. Wins by having more of them, and
-//          its ability makes what it has in the field hard to hit.
-//   Undead cheaper and quicker to raise, slightly frailer, poorer per second.
-//          Wins by getting them back — see Reincarnation.
+//   Orc    hits hardest and falls fastest, and is heavy on its feet. The brute.
+//   Elf    quickest on the map and quickest to raise, a shade frailer. Wins by
+//          being there first, and its ability makes what it has in the field
+//          hard to hit.
+//   Undead cheaper and quicker to raise, and every soldier a little weaker and
+//          a little frailer for it. Wins on numbers, and on getting them back —
+//          see Reincarnation.
 //   Human  the flat baseline, with the best ability of the four to make up for
 //          having no numbers of its own.
+//
+// `speedMult` earns its place by being the one knob here that is NOT squared.
+// Everything else decides how a fight comes out; how fast a group walks decides
+// whether it is in the fight at all — it is felt every second of the game and
+// costs almost nothing in the balance. That is what a race is supposed to be,
+// and it is why elves can be plainly quicker than everyone else while every
+// number that touches damage stays inside a few percent.
+//
+// The undead used to pay for cheaper soldiers with 15% less gold a second,
+// which cancelled the discount outright — the buff and the debuff were the same
+// number pointed in opposite directions, and what was left was a race that felt
+// weak for no gain. Their income is level with everyone else's now and the
+// price of being cheap is paid where it belongs: each skeleton is slightly less
+// than the soldier it stands opposite.
 const RACES = {
-  human:  { name: 'Human',  incomeMult: 1.00, attackMult: 1.00, hpMult: 1.00, buildTimeMult: 1.00, costMult: 1.00 },
-  orc:    { name: 'Orc',    incomeMult: 0.97, attackMult: 1.13, hpMult: 0.93, buildTimeMult: 1.03, costMult: 1.00 },
-  elf:    { name: 'Elf',    incomeMult: 1.04, attackMult: 1.00, hpMult: 0.96, buildTimeMult: 0.95, costMult: 1.00 },
-  undead: { name: 'Undead', incomeMult: 0.97, attackMult: 1.00, hpMult: 0.98, buildTimeMult: 0.95, costMult: 0.97 },
+  human:  { name: 'Human',  incomeMult: 1.00, attackMult: 1.00, hpMult: 1.00, buildTimeMult: 1.00, costMult: 1.00, speedMult: 1.00 },
+  orc:    { name: 'Orc',    incomeMult: 0.97, attackMult: 1.09, hpMult: 0.96, buildTimeMult: 1.00, costMult: 1.00, speedMult: 0.95 },
+  elf:    { name: 'Elf',    incomeMult: 1.01, attackMult: 1.00, hpMult: 0.98, buildTimeMult: 0.96, costMult: 1.00, speedMult: 1.15 },
+  undead: { name: 'Undead', incomeMult: 1.00, attackMult: 0.98, hpMult: 0.97, buildTimeMult: 0.96, costMult: 0.95, speedMult: 1.00 },
 };
 
 // One active ability per race, on a cooldown of its own. Abilities are not
@@ -521,8 +536,13 @@ const CARDS = {
   // book to hold and the only one that never touches another empire.
   farsight: {
     name: 'Farsight', kind: 'spell', sigil: '◍',
-    desc: 'Lay a wide circle of the map bare, anywhere at all. What it uncovers stays on your map — and on your allies\' — the same as ground you have walked.',
-    spell: { charges: 2, radius: 13, range: 'anywhere' },
+    // Reworded because the old line took three clauses and a dash to say
+    // "look anywhere", and a card you read while somebody is attacking you has
+    // to land in one. Recharges faster than anything else in the book: it is
+    // the only spell that cannot hurt anybody, and one you were saving because
+    // it was expensive was a spell doing nothing.
+    desc: 'Reveals a wide circle of the map, anywhere you like. What you see stays on your map and on your allies\'.',
+    spell: { charges: 2, radius: 13, range: 'anywhere', rechargeSec: 45 },
   },
   // The opposite of a meteor on purpose: this takes the troops standing in a
   // keep and leaves the building alone, so the two answer different problems —

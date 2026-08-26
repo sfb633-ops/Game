@@ -1371,7 +1371,9 @@ function facingOff(aCount, bCount) {
   check('and the wall can go back up', !!p.buildings[`${wx},${wy}`]);
 }
 
-// A tower leaves the same as a wall; a building you pull down yourself does not.
+// Rubble is what a fight leaves behind, whatever was standing there — a bank is
+// a building an army can knock down now, the same as a tower or a wall, so it
+// leaves the same mess. Pulling one down yourself still leaves clear ground.
 {
   const m = new Match({ started: false });
   const p = m.addPlayer('p', 'human', 'P');
@@ -1384,7 +1386,12 @@ function facingOff(aCount, bCount) {
   const bx = p.baseX - 3;
   m.cmdBuild('p', bx, ty, 'bank');
   m.razeBuilding(p, p.buildings[`${bx},${ty}`]);
-  check('an ordinary building does not', !m.rubble.has(`${bx},${ty}`));
+  check('and so does an ordinary building broken in a fight', m.rubble.has(`${bx},${ty}`));
+
+  const dx = p.baseX - 4;
+  m.cmdBuild('p', dx, ty, 'bank');
+  m.cmdDemolish('p', dx, ty);
+  check('but not one its owner demolished', !m.rubble.has(`${dx},${ty}`));
 
   const cx = p.baseX, cy = p.baseY + 3;
   m.cmdBuild('p', cx, cy, 'tower');
@@ -2786,6 +2793,224 @@ function fightOut(m, ours, theirs) {
     worst <= 0.35, `worst is ${worstAt} — winner keeps ${(worst * 100).toFixed(0)}%`);
   check('  and every matchup is still decided by somebody',
     worst >= 0.05, `worst ${(worst * 100).toFixed(0)}%`);
+}
+
+// --- losing means losing --------------------------------------------------
+//
+// Every order but cmdDeployUnits took an army id and an owner id and never
+// asked whether that owner was still in the game, so a player whose town centre
+// had been levelled went on marching, merging and besieging with whatever had
+// been in the field when it fell. Reported from a playtest as "base was
+// destroyed but still was able to control troops".
+{
+  const m = twoSides();
+  const a = m.players.get('a'), b = m.players.get('b');
+  const army = field(m, 'a', 'knight', 20, b.baseX - 8, b.baseY);
+  m.eliminate(a, 'fallen');
+  check('a fallen empire has no army left in the field',
+    [...m.armies.values()].filter(x => x.ownerId === 'a').length === 0);
+
+  // ...and if one somehow survives, it takes no orders. Raised straight
+  // through spawnArmy, because the front door is shut to a dead player and the
+  // point of this half is the back one.
+  const ghostId = m.spawnArmy(a, 'knight', 5, 'hold', { x: b.baseX - 8, y: b.baseY });
+  const ghost = m.armies.get(ghostId);
+  m.cmdMoveArmy('a', ghost.id, 40, 40);
+  m.cmdAttackArmy('a', ghost.id, 'player', 'b');
+  m.cmdRecallArmy('a', ghost.id);
+  check('  and gives no orders either',
+    ghost.order === 'hold' && ghost.targetType === null,
+    `order '${ghost.order}' target ${ghost.targetType}`);
+}
+
+// --- artillery keeps its distance ------------------------------------------
+//
+// A group that stands back and shoots is the whole reason to own one. Reported
+// as "ballista targeting is weird": the crew waded into the melee.
+{
+  const stand = (charge) => {
+    const m = twoSides();
+    const crew = field(m, 'a', 'catapult', 8, 60, 60);
+    const foe = field(m, 'b', 'swordsman', 20, 68, 60);
+    m.cmdAttackArmy('a', crew.id, 'army', foe.id);
+    if (charge) m.cmdAttackArmy('b', foe.id, 'army', crew.id);
+    for (let t = 0; t < 900 && m.armies.has(crew.id) && m.armies.has(foe.id); t++) m.tick(0.2);
+    return {
+      gap: Math.hypot(crew.x - foe.x, crew.y - foe.y),
+      crew: m.armies.has(crew.id) ? armyCount(crew) : 0,
+      foe: m.armies.has(foe.id) ? armyCount(foe) : 0,
+    };
+  };
+  const held = stand(false);
+  check('a crew shooting at troops who stay put settles at its own range',
+    Math.abs(held.gap - cfg.UNIT_TYPES.catapult.range) < 0.2,
+    `${held.gap.toFixed(2)} tiles against a range of ${cfg.UNIT_TYPES.catapult.range}`);
+  check('  and wins without a scratch', held.crew === 8 && held.foe === 0,
+    `${held.crew}/8 crew, ${held.foe}/20 swordsmen`);
+  // ...and the counter still works: troops that charge drag it down to arm's
+  // length and kill it there, which is what melee is for.
+  const charged = stand(true);
+  check('  but troops who charge drag it into arm\'s length', charged.crew === 0,
+    `${charged.crew}/8 crew, ${charged.foe}/20 swordsmen`);
+}
+
+// --- a siege that gets jumped fights the people, not the masonry ------------
+//
+// Reported as "units attacking town hall were attacked ... the troops and the
+// town hall both took damage at the same time". They were fighting two things
+// at full strength on both fronts. A keep is not going anywhere; the swordsmen
+// behind you are.
+{
+  const m = twoSides();
+  const b = m.players.get('b');
+  m.getCastle(b).hp = m.getCastle(b).maxHp = 100000;   // so the siege outlives the test
+  const siege = field(m, 'a', 'swordsman', 30, b.baseX - 1, b.baseY);
+  m.cmdAttackArmy('a', siege.id, 'player', 'b');
+  for (let t = 0; t < 40; t++) m.tick(0.2);
+  const relief = field(m, 'b', 'swordsman', 20, b.baseX - 3, b.baseY);
+  m.cmdAttackArmy('b', relief.id, 'army', siege.id);
+  // Measured from once the relief force is actually in the fight. The ticks it
+  // spends crossing the last two tiles are ticks the besiegers are still —
+  // correctly — swinging at the keep.
+  for (let t = 0; t < 10; t++) m.tick(0.2);
+  const keepAt = m.getCastle(b).hp, reliefAt = armyHp(relief);
+  for (let t = 0; t < 40; t++) m.tick(0.2);
+  const keepLost = keepAt - m.getCastle(b).hp;
+  const reliefLost = reliefAt - (m.armies.has(relief.id) ? armyHp(relief) : 0);
+  check('troops jumped mid-siege turn on whoever jumped them',
+    reliefLost > 0 && keepLost === 0,
+    `keep lost ${keepLost.toFixed(0)}, the relief force lost ${reliefLost.toFixed(0)}`);
+}
+
+// --- everything an empire builds can be knocked down -----------------------
+{
+  const m = twoSides();
+  const b = m.players.get('b');
+  b.gold = 999999;
+  const bx = b.baseX - 4, by = b.baseY;
+  m.cmdBuild('b', bx, by, 'stable');
+  const key = `${bx},${by}`;
+  check('a stable can be built to knock down', !!b.buildings[key]);
+  const raiders = field(m, 'a', 'swordsman', 20, bx - 8, by);
+  m.cmdAttackArmy('a', raiders.id, 'building', key);
+  let t = 0;
+  for (; t < 900 && b.buildings[key]; t++) m.tick(0.2);
+  check('  and troops sent at it knock it down', !b.buildings[key], `${(t * 0.2).toFixed(0)}s`);
+  check('  leaving rubble, the same as a broken wall', m.rubble.has(key));
+  check('  and the raiders stop when it is gone',
+    m.armies.has(raiders.id) && raiders.order === 'hold', raiders.order);
+}
+
+// A tower is the one building that costs something to pull down.
+{
+  const cost = (type) => {
+    const m = twoSides();
+    const b = m.players.get('b');
+    b.gold = 999999;
+    const bx = b.baseX - 4, by = b.baseY + 2;
+    m.cmdBuild('b', bx, by, type);
+    const raiders = field(m, 'a', 'swordsman', 20, bx - 2, by);
+    m.cmdAttackArmy('a', raiders.id, 'building', `${bx},${by}`);
+    for (let t = 0; t < 900 && b.buildings[`${bx},${by}`]; t++) m.tick(0.2);
+    return m.armies.has(raiders.id) ? armyCount(raiders) : 0;
+  };
+  const tower = cost('tower'), bank = cost('bank');
+  check('a tower fights back while it is being pulled down', tower < 20, `${tower}/20 raiders left`);
+  check('  and a bank does not', bank === 20, `${bank}/20 raiders left`);
+}
+
+// Buildings are ground now, so a march goes round one rather than over it — and
+// the pathfinder has to keep finding the way, or an empire's own outbuildings
+// become a maze nobody can cross.
+{
+  const m = twoSides();
+  const b = m.players.get('b');
+  b.gold = 999999;
+  const bx = b.baseX - 4, by = b.baseY;
+  m.cmdBuild('b', bx, by, 'bank');
+  const column = field(m, 'a', 'swordsman', 20, bx - 6, by);
+  m.cmdMoveArmy('a', column.id, bx + 4, by);
+  let closest = Infinity, battering = 0, t = 0;
+  for (; t < 900 && m.armies.has(column.id); t++) {
+    m.tick(0.2);
+    closest = Math.min(closest, Math.hypot(column.x - bx, column.y - by));
+    if (column.breach) battering++;
+    if (Math.abs(column.x - (bx + 4)) < 0.4) break;
+  }
+  check('a march goes round a building rather than through it', closest >= 1,
+    `closest approach ${closest.toFixed(2)} tiles`);
+  check('  without stopping to knock it down', battering === 0 && !!b.buildings[`${bx},${by}`]);
+  check('  and still arrives', Math.abs(column.x - (bx + 4)) < 1,
+    `${column.x.toFixed(1)} of ${bx + 4}`);
+}
+
+// An assault has to be able to reach the keep it was sent at, whatever its
+// owner has parked around it.
+{
+  const m = twoSides();
+  const b = m.players.get('b');
+  b.gold = 999999;
+  for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) {
+    if (Math.abs(dx) !== 2 && Math.abs(dy) !== 2) continue;
+    m.cmdBuild('b', b.baseX + dx, b.baseY + dy, 'bank');
+  }
+  const ring = Object.values(b.buildings).filter(x => x.type === 'bank').length;
+  const host = field(m, 'a', 'swordsman', 60, b.baseX - 8, b.baseY);
+  m.cmdAttackArmy('a', host.id, 'player', 'b');
+  for (let t = 0; t < 3000 && b.alive; t++) m.tick(0.2);
+  check('a keep ringed by its own buildings can still be stormed', !b.alive,
+    `${ring} buildings around it, keep at ${Math.round(m.getCastle(b).hp)}`);
+}
+
+// The target id for a building is a tile, and it arrives off the wire. Anything
+// else must be refused before it is used as a property name — "__proto__" would
+// otherwise hand an army Object.prototype to knock down.
+{
+  const m = twoSides();
+  const army = field(m, 'a', 'swordsman', 10, 60, 60);
+  const bad = ['__proto__', 'constructor', 'toString', 'hasOwnProperty', '', 'x,y', '1,2,3', null, undefined, {}, 7];
+  let trouble = null;
+  for (const id of bad) {
+    m.cmdAttackArmy('a', army.id, 'building', id);
+    for (let t = 0; t < 3; t++) m.tick(0.2);
+    if (army.targetType === 'building') trouble = String(id);
+    if ({}.hp !== undefined || {}.x !== undefined) trouble = `prototype poisoned by ${String(id)}`;
+  }
+  check('a made-up building target is refused, not looked up', trouble === null, trouble || `${bad.length} tried`);
+}
+
+// A race's speed is the one thing about it that is not squared on its way to a
+// result, which is why it is allowed to be a number you can actually feel.
+{
+  const m = twoSides('elf', 'orc');
+  const quick = field(m, 'a', 'swordsman', 5, 60, 60);
+  const heavy = field(m, 'b', 'swordsman', 5, 60, 70);
+  m.cmdMoveArmy('a', quick.id, 100, 60);
+  m.cmdMoveArmy('b', heavy.id, 100, 70);
+  const from = { a: quick.x, b: heavy.x };
+  for (let t = 0; t < 50; t++) m.tick(0.2);
+  const elf = quick.x - from.a, orc = heavy.x - from.b;
+  check('an elf column outmarches an orc one', elf > orc * 1.1,
+    `${elf.toFixed(1)} tiles against ${orc.toFixed(1)} in the same ten seconds`);
+  check('  and it is the race doing it, not the unit',
+    cfg.RACES.elf.speedMult > cfg.RACES.orc.speedMult &&
+    cfg.UNIT_TYPES.swordsman.speed > 0,
+    `elf x${cfg.RACES.elf.speedMult}, orc x${cfg.RACES.orc.speedMult}`);
+}
+
+// Farsight cannot hurt anybody, so it is the one spell that should come back
+// quickly — a reveal you are hoarding because it is expensive is a reveal doing
+// nothing.
+{
+  const rest = Object.entries(cfg.CARDS)
+    .filter(([id, c]) => c.spell && id !== 'farsight')
+    .map(([, c]) => c.spell.rechargeSec || cfg.SPELL_RECHARGE_SEC);
+  const far = cfg.CARDS.farsight.spell.rechargeSec || cfg.SPELL_RECHARGE_SEC;
+  check('Farsight recharges faster than every other spell',
+    rest.every(s => far < s), `${far}s against ${Math.min(...rest)}-${Math.max(...rest)}s`);
+  check('  and its card still says what it does in one line',
+    cfg.CARDS.farsight.desc.length < 130 && !cfg.CARDS.farsight.desc.includes('—'),
+    `${cfg.CARDS.farsight.desc.length} characters`);
 }
 
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');

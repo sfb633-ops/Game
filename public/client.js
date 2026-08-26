@@ -7,13 +7,16 @@
 // so the menu can say which one you are choosing before you have joined
 // anything and there is a server to ask.
 const RACE_INFO = [
-  { id: 'human',  name: 'Human',  color: '#6fa8dc', desc: 'Balanced. No weaknesses, no edges.',
+  // These say what the numbers in config's RACES table actually do. Keep them
+  // in step with it — a blurb promising an edge the table does not give is
+  // worse than no blurb.
+  { id: 'human',  name: 'Human',  color: '#6fa8dc', desc: 'Balanced. No weakness anywhere, and the strongest ability.',
     ability: 'Strength in Unity' },
-  { id: 'orc',    name: 'Orc',    color: '#c0392b', desc: 'Hard-hitting units. Weaker economy.',
+  { id: 'orc',    name: 'Orc',    color: '#c0392b', desc: 'Hits hardest. Frailer, heavy on its feet, a little poorer.',
     ability: 'Warband' },
-  { id: 'elf',    name: 'Elf',    color: '#6fcf7a', desc: 'Fast building, strong economy. Fragile troops.',
+  { id: 'elf',    name: 'Elf',    color: '#6fcf7a', desc: 'Quickest on the map and quickest to train. Slightly frail.',
     ability: 'Agility of the Woods' },
-  { id: 'undead', name: 'Undead', color: '#9b59b6', desc: 'Cheap, fast troops. Slow gold income.',
+  { id: 'undead', name: 'Undead', color: '#9b59b6', desc: 'Everything 5% cheaper and quicker to raise. Each one weaker for it.',
     ability: 'Reincarnation' },
 ];
 
@@ -2135,6 +2138,22 @@ function nearestTarget(fx, fy, maxDist = 1.6) {
     const d = Math.hypot(p.baseX - fx, p.baseY - fy);
     if (d < bestDist) { bestDist = d; best = { type: 'player', id: p.id }; }
   }
+  // Anything else an enemy has built. Every building can be knocked down on its
+  // own account now, so a wall segment, a stable or the tower shooting at you
+  // is a thing you can send troops at rather than something you can only reach
+  // by breaking the whole empire.
+  //
+  // The town center is not offered here: it is what an attack on the empire is
+  // aimed at, and it was already matched above as that empire. Two ways to
+  // click the same tile that mean different things is one too many.
+  for (const p of latestState.players) {
+    if (!p.alive || isAlly(p.id)) continue;
+    for (const b of p.buildings) {
+      if (b.type === 'castle') continue;
+      const d = Math.hypot(b.x - fx, b.y - fy);
+      if (d < bestDist) { bestDist = d; best = { type: 'building', id: b.x + ',' + b.y }; }
+    }
+  }
   // Somebody else's troops in the field. Checked last so a keep or a camp with
   // an army parked on it is still the thing you meant to attack.
   for (const a of latestState.armies) {
@@ -2941,12 +2960,12 @@ function renderPanel() {
       return: 'Marching home', hold: 'Holding position', merge: 'Joining another group' }[a.order] || a.order;
     if (syncSection(armyCmd, `${a.id}|${count}|${a.order}|${parts.join(',')}`, `<div class="row"><span class="label">${count} ${name}</span><span class="sub">${orderLabel}</span></div>
       <div class="sub">${parts.join(', ')}</div>
-      <div class="sub">Right-click: ground to march and hold, one of your groups to join it, an enemy/camp to attack.</div>
+      <div class="sub">Right-click: ground to march and hold, one of your groups it is not in to join it, an enemy, camp or one of their buildings to attack.</div>
       <div class="btn-row"><button class="btn btn-sm" id="recall-btn">Recall (R)</button></div>`)) {
       document.getElementById('recall-btn').addEventListener('click', () => send({ type: 'recallArmy', armyId: a.id }));
     }
   } else {
-    syncSection(armyCmd, 'none', `<div class="sub">Left-click one of your groups to select it, or drag a box across several. Shift-click adds one. Then right-click: ground to march there and hold, another of your groups to join it, an enemy or camp to attack. R marches them home.</div>`);
+    syncSection(armyCmd, 'none', `<div class="sub">Left-click one of your groups to select it, or drag a box across several. Shift-click adds one. Then right-click: ground to march there and hold, one of your groups that is not selected to join it, or an enemy, a camp or anything they have built to attack. R marches them home.</div>`);
   }
 
   for (const icon of troopIcons) {
@@ -2980,6 +2999,7 @@ function renderPanel() {
       : unitTypes[type].name + ' \u2014 click to train (' + price + 'g) \u00b7 ' +
         trim(unitTypes[type].attack * modOf('attackMult')) + ' attack \u00b7 ' +
         trim(unitTypes[type].hp * modOf('hpMult')) + ' hp' +
+        ' \u00b7 ' + trim(unitTypes[type].speed * modOf('speedMult')) + ' speed' +
         ' \u00b7 queue ' + t.queued + '/' + t.capacity +
         (t.full ? ' (full ' + '\u2014' + ' another ' + trainerNameFor(type) + ' widens it)' : '') +
         ' \u00b7 right-click to stage all';
