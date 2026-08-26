@@ -2419,6 +2419,69 @@ which is the whole trick: the top and bottom rails carry a repeating gold
 ornament that must be tiled, and the sides are plain gold where stretching is
 exact and a tile would show a seam.
 
+### Losing, watching, and not being able to help
+
+Reported: knocked out in a team game and given no screen at all. Correct — and
+the reason is worth stating, because it is a whole class of missing case.
+Losing and the match ending are the **same moment** in a free-for-all of two,
+and the game-over banner covered that one. In a team game they are not the same
+moment at all: your side can win without you. So a knocked-out player was left
+with a dead keep, buttons that did nothing, and no word about why.
+
+`#defeat-screen` covers the gap and offers the thing that was missing: stay and
+watch. Dismissing it leaves `#spectating-chip` on screen, because "why can I not
+build anything" needs an answer that is still there ten minutes later.
+
+**The rule that matters is what a spectator may see**, and it is the one to keep
+if any of this is rewritten:
+
+> A fallen empire watches through its side's eyes and never further.
+
+`watchersFor(player)` returns the living allies of a dead player, and `canSee`
+and `visibleArmiesFor` go through it. A spectator who could see more than the
+team they were on is a way to feed them — "I am out, so I may as well help" is
+exactly the thing not to build. Only when there is **nobody left on that side**
+does it open up (`spectatesAll`), because by then there is no side to feed, and
+watching a black rectangle until somebody wins is not watching.
+
+Two details that were wrong on the first pass and are pinned now:
+
+- **The fallen keep seeing what their side uncovers.** `stepVision` writes to
+  living allies; a dead teammate was not among them, so their map froze at the
+  moment they lost.
+- **The empire that fell FIRST is the one whose side empties last.** Granting the
+  full map only to the player who just died left the first casualty watching a
+  frozen picture while the second could see everything. `eliminate` reconsiders
+  every fallen player, not just the one it was called for.
+
+### Ballista and golem
+
+Both measured before and after; the numbers are what moved them.
+
+**The ballista was sieging for free.** Four crews — 280 gold — levelled a keep
+defended by twenty swordsmen **without a single loss**, because a garrison
+reaches 2.45 tiles and a catapult shoots from 4. That trade is the whole point
+of owning artillery, so the fix is its pace rather than its existence: attack 20
+to 16 takes the same four crews from 58 seconds to about 72, which is long
+enough to notice and answer.
+
+Worth recording: **the counter already works.** One archer tower placed to cover
+the approach wipes all eight crews and saves the keep. An earlier measurement
+said towers did nothing, and that measurement had put them on the far side of
+the keep, out of range of the attack — the tower's five tiles is a bubble around
+the tower, not a ring around the empire.
+
+**The golem was not worth the walk.** Three of them beat about 960 gold of
+knights, against a shrine that costs roughly 800 gold of swordsmen and a fifth
+of them to open, plus the march and the risk of being caught doing it. The prize
+was worth about what it cost. At 110 attack and 850 health they beat about 1,900
+gold of knights — clearly worth going for, and still not a button that wins the
+game: twenty knights of your own will take them, and the shrine wakes up again
+for whoever wants it next.
+
+Speed went 1.5 to 1.7 and stays under the catapult's, so they remain the slowest
+thing on the map. That is what they pay with.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

@@ -2652,20 +2652,27 @@ function fightOut(m, ours, theirs) {
   return { ours: live(ours), theirs: live(theirs) };
 }
 {
+  // Sixty, because a golem is worth about twice what it was — see UNIT_TYPES.
+  // The number is not the point of this check and never was: what is being
+  // pinned is that the SAME sixty get the same answer however they are packed.
+  // It is written against golems because that is the fight it was reported
+  // from, and the general form of it lives in invariants.test.js.
+  const HOST = 60;
   const asOneBlock = () => {
     const m = twoSides();
-    return fightOut(m, [field(m, 'a', 'knight', 30, 60, 60)], [field(m, 'b', 'golem', 3, 63, 60)]);
+    return fightOut(m, [field(m, 'a', 'knight', HOST, 60, 60)], [field(m, 'b', 'golem', 3, 63, 60)]);
   };
   const asThreeGroups = () => {
     const m = twoSides();
+    const third = HOST / 3;
     return fightOut(m,
-      [field(m, 'a', 'knight', 10, 60, 59), field(m, 'a', 'knight', 10, 60, 60), field(m, 'a', 'knight', 10, 60, 61)],
+      [field(m, 'a', 'knight', third, 60, 59), field(m, 'a', 'knight', third, 60, 60), field(m, 'a', 'knight', third, 60, 61)],
       [field(m, 'b', 'golem', 3, 63, 60)]);
   };
   const one = asOneBlock(), three = asThreeGroups();
-  check('thirty knights beat three golems as one block', one.ours > 0 && one.theirs === 0,
+  check(`${HOST} knights beat three golems as one block`, one.ours > 0 && one.theirs === 0,
     `${one.ours} knights left`);
-  check('and the same thirty do it as three groups too', three.ours > 0 && three.theirs === 0,
+  check('and the same knights do it as three groups too', three.ours > 0 && three.theirs === 0,
     `${three.ours} knights left`);
   // Some difference is honest — a group that is wiped out stops contributing
   // sooner than the same men would inside a bigger one — but it has to be a
@@ -3028,6 +3035,83 @@ function fightOut(m, ours, theirs) {
   check('  and its card still says what it does in one line',
     cfg.CARDS.farsight.desc.length < 130 && !cfg.CARDS.farsight.desc.includes('—'),
     `${cfg.CARDS.farsight.desc.length} characters`);
+}
+
+// --- losing is the end of playing, not of watching --------------------------
+//
+// Reported from a playtest: knocked out in a team game and given no screen at
+// all, because losing and the match ending are the same moment in a
+// free-for-all of two and are not the same moment in a team game.
+//
+// The rule that matters here is the one about what a spectator may SEE. A
+// fallen player watches through their side's eyes and never further: a
+// spectator who could see more than the team they were on is a way to feed
+// them, and "I am out, so I may as well help" is exactly the thing not to
+// build. Only when there is nobody left on that side does it open up.
+{
+  const m = new Match({ started: false, map: 'openfield', teams: 2 });
+  const a = m.addPlayer('a', 'human', 'A', 0);
+  const b = m.addPlayer('b', 'human', 'B', 0);
+  const c = m.addPlayer('c', 'orc', 'C', 1);
+  m.start(); [a, b, c].forEach(p => { p.draft = null; });
+
+  m.eliminate(a, 'fallen');
+  check('a fallen empire in a team game watches through its side',
+    m.watchersFor(a).length === 1 && m.watchersFor(a)[0] === b,
+    m.watchersFor(a).map(p => p.id).join(','));
+  check('  so it sees what its teammate sees', m.canSee(a, b.baseX, b.baseY));
+  check('  and NOT what the other side is doing', !m.canSee(a, c.baseX, c.baseY),
+    'a spectator that outsees its own team is a way to feed it');
+  check('  and the match is not over', !m.gameOver);
+
+  // Nobody left on that side: there is no team to feed any more, and watching a
+  // black rectangle until somebody wins is not watching.
+  m.eliminate(b, 'fallen');
+  check('once the whole side is gone, the map opens up', m.spectatesAll(a) && m.canSee(a, c.baseX, c.baseY));
+  const all = a.explored.length;
+  check('  for the one that fell FIRST as well as the one that fell last',
+    a.explored.reduce((n, v) => n + v, 0) === all && b.explored.reduce((n, v) => n + v, 0) === all,
+    `${a.explored.reduce((n, v) => n + v, 0)} and ${b.explored.reduce((n, v) => n + v, 0)} of ${all}`);
+  check('  and the whole map reaches the client as a delta',
+    (m.drainExplored('a') || []).length > 0);
+}
+
+// A fallen empire's map keeps filling in while its side keeps scouting, or it
+// is watching a picture frozen at the moment it lost.
+{
+  const m = new Match({ started: false, map: 'openfield', teams: 2 });
+  const a = m.addPlayer('a', 'human', 'A', 0);
+  const b = m.addPlayer('b', 'human', 'B', 0);
+  m.addPlayer('c', 'orc', 'C', 1);
+  m.start(); for (const p of m.players.values()) p.draft = null;
+  m.eliminate(a, 'fallen');
+  m.drainExplored('a');
+  // Send the survivor somewhere new.
+  b.idleUnits.swordsman = 5;
+  m.cmdDeployUnits('b', { swordsman: 5 }, b.baseX, b.baseY);
+  const army = [...m.armies.values()].find(x => x.ownerId === 'b');
+  m.cmdMoveArmy('b', army.id, Math.round(cfg.MAP.width / 2), Math.round(cfg.MAP.height / 2));
+  for (let t = 0; t < 400; t++) m.tick(0.2);
+  check('a fallen empire keeps seeing what its side uncovers',
+    (m.drainExplored('a') || []).length > 0);
+}
+
+// In a free-for-all there is no side, so being knocked out opens the map at
+// once — and the match carries on for everyone else.
+{
+  const m = new Match({ started: false, map: 'openfield' });
+  const x = m.addPlayer('x', 'human', 'X');
+  m.addPlayer('y', 'orc', 'Y');
+  m.addPlayer('z', 'elf', 'Z');
+  m.start(); for (const p of m.players.values()) p.draft = null;
+  m.eliminate(x, 'fallen');
+  check('a free-for-all loser watches the whole map',
+    m.spectatesAll(x) && x.explored.every(v => v === 1));
+  check('  and the game is still going', !m.gameOver);
+  const ser = m.serialize().players.find(p => p.id === 'x');
+  check('  and the page is told it is watching, not playing',
+    ser.spectating === true && ser.watchingSide === false,
+    JSON.stringify({ spectating: ser.spectating, watchingSide: ser.watchingSide }));
 }
 
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');

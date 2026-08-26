@@ -1149,13 +1149,54 @@ class Match {
     for (const o of player.outposts) yield { x: o.x, y: o.y, r: VISION.building };
   }
 
+  // Whose eyes this empire watches the map through.
+  //
+  // While it is alive: its own and its living allies'. Once it has fallen it
+  // has no eyes of its own — the buildings are ruins and the armies are gone —
+  // so it borrows its side's, and that is what lets a knocked-out player watch
+  // the rest of the match instead of staring at a dark screen.
+  //
+  // Deliberately never MORE than its side can see. A spectator who could see
+  // further than the team they were on is a way to feed them, and "I am out, so
+  // I may as well help" is the exact thing not to build. Only when there is
+  // nobody left on that side does it open up — see spectatesAll — because by
+  // then there is no side to help.
+  watchersFor(player) {
+    if (player.alive) return this.alliesOf(player);
+    const side = [];
+    if (this.teamCount && player.team != null) {
+      for (const other of this.players.values()) {
+        if (other.alive && other.team === player.team) side.push(other);
+      }
+    }
+    return side;
+  }
+
+  // A fallen empire with nobody left on its side sees the whole map. It cannot
+  // act, it has no team to tell, and the alternative is watching a black
+  // rectangle until somebody wins.
+  spectatesAll(player) {
+    return !player.alive && this.watchersFor(player).length === 0;
+  }
+
+  // Hand that map over. Costs one pass over the fog the first time it applies
+  // and nothing afterwards, and reaches the client as a delta like any other
+  // ground uncovered.
+  grantSpectatorView(player) {
+    if (!this.spectatesAll(player) || !player.explored) return;
+    for (let i = 0; i < player.explored.length; i++) {
+      if (!player.explored[i]) { player.explored[i] = 1; player.exploredDelta.push(i); }
+    }
+  }
+
   // Is this point being watched right now? Used to decide whether an enemy
   // group appears on somebody's screen at all.
   // A team looks through one pair of eyes between them: anything an ally can
   // see, you can. On a map this size and this dark, that is the difference
   // between playing together and playing beside each other.
   canSee(player, x, y) {
-    for (const viewer of this.alliesOf(player)) {
+    if (this.spectatesAll(player)) return true;
+    for (const viewer of this.watchersFor(player)) {
       for (const eye of this.eyesOf(viewer)) {
         if (Math.hypot(eye.x - x, eye.y - y) <= eye.r) return true;
       }
@@ -1167,7 +1208,15 @@ class Match {
   // are recorded, so the delta shipped to the client is the *new* ground and
   // settles to nothing once an army stops moving.
   stepVision(player) {
+    // Everyone this empire's sight is written to: its living allies, and its
+    // fallen ones — who are watching through exactly these eyes and would
+    // otherwise be looking at a map frozen at the moment they died.
     const viewers = this.alliesOf(player);
+    if (this.teamCount && player.team != null) {
+      for (const other of this.players.values()) {
+        if (!other.alive && other.team === player.team) viewers.push(other);
+      }
+    }
     for (const eye of this.eyesOf(player)) {
       const cx = Math.round(eye.x), cy = Math.round(eye.y);
       const r = eye.r, rr = r * r;
@@ -1219,6 +1268,9 @@ class Match {
   visibleArmiesFor(playerId, armies) {
     const player = this.players.get(playerId);
     if (!player) return armies;
+    // Nobody left on their side: they are watching the end of a game they are
+    // not in, and there is no longer anyone they could give an advantage to.
+    if (this.spectatesAll(player)) return armies;
     // An ally's groups are always on your map, the same as your own — you are
     // meant to be able to see where your partner's army is without chasing it.
     return armies.filter(a => this.allied(playerId, a.ownerId) || this.canSee(player, a.x, a.y));
@@ -3504,6 +3556,15 @@ class Match {
       disbanded += armyCount(army);
       this.armies.delete(id);
     }
+    // Falling is the end of playing, not the end of watching. A player with
+    // teammates left keeps their side's view and nothing more; one with nobody
+    // left is handed the whole map, because there is no longer a side to feed.
+    //
+    // Every fallen player is reconsidered, not just this one: the empire that
+    // died FIRST is the one whose side has just emptied, and checking only the
+    // one that died last left them watching a map frozen at the moment they
+    // lost while their teammate, who died second, could see everything.
+    for (const other of this.players.values()) this.grantSpectatorView(other);
     if (disbanded > 0) this.emit(player.id, `Your ${disbanded} remaining soldiers scatter.`);
     this.releaseOutposts(player);
     // Everything they built stops blocking with them — see solidAt. Armies routing round
@@ -3557,6 +3618,12 @@ class Match {
       players: Array.from(this.players.values()).map(p => ({
         id: p.id, name: p.name, race: p.race, baseX: p.baseX, baseY: p.baseY,
         gold: Math.floor(p.gold), alive: p.alive,
+        // Out of the game but still in the room. The page needs to know the
+        // difference between "you have lost" and "the match is over", which are
+        // the same thing in a free-for-all of two and very much not in a team
+        // game, where your side can still win without you.
+        spectating: !p.alive,
+        watchingSide: !p.alive && this.watchersFor(p).length > 0,
         team: p.team,
         buildRadius: this.buildRadius(p),
         buildingsUsed: this.buildingsUsed(p),

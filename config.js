@@ -391,7 +391,16 @@ const UNIT_TYPES = {
   // than a keep's border, so a ring of walls still has to be broken through to
   // get inside artillery range — siege outranges a wall only if you built the
   // wall almost on top of the keep.
-  catapult:  { name: 'Catapult',  plural: 'Catapults', cost: 70, trainTimeSec: 13.6, attack: 20, hp: 25, speed: 1.8,
+  // Attack came down from 20. The counter works — one archer tower covering the
+  // approach wipes eight crews and saves the keep — but a keep with no tower on
+  // that side was being levelled by four of them, 280 gold, WITHOUT A LOSS,
+  // over a garrison of twenty that can never reach them. That is the trade
+  // artillery is supposed to make, so the fix is the pace of it rather than the
+  // fact of it: the same four crews now take about seventy seconds instead of
+  // fifty-eight, which is long enough to notice and answer. In the open they
+  // are also a touch weaker — nine lose to sixteen charging swordsmen where
+  // they used to need eighteen.
+  catapult:  { name: 'Catapult',  plural: 'Catapults', cost: 70, trainTimeSec: 13.6, attack: 16, hp: 25, speed: 1.8,
                range: 4, projectile: 'arrow', shotSec: 1.4 },
   // Not trainable. No building makes one and no amount of gold buys one — the
   // only golem you will ever field is the one a shrine hands you, which is the
@@ -401,7 +410,21 @@ const UNIT_TYPES = {
   // are taken cheapest-first, and a golem that wandered home to heal must not be
   // the first thing thrown at an attacker. `special` keeps it out of the
   // training row, where a slot that can never be filled is just clutter.
-  golem:     { name: 'Golem',     plural: 'Golems',    cost: 600, trainTimeSec: 0, attack: 55, hp: 420, speed: 1.5,
+  // Doubled, near enough, and it needed it. At 55/420 three golems beat about
+  // 960 gold of knights — against a shrine that costs roughly 800 gold of
+  // swordsmen and a fifth of them to open, plus the march there and the risk of
+  // being caught doing it. The prize was worth about what it cost, which is no
+  // reason to cross a map for it.
+  //
+  // At 110/850 they beat about 1,900 gold of knights: clearly worth going for,
+  // and still not a button that wins the game on its own — twenty knights of
+  // your own will take them, and anyone can go and take the shrine back when it
+  // wakes.
+  //
+  // Speed stays under the catapult's, so they remain the slowest thing on the
+  // map. That is what they pay with, and 1.7 keeps the payment while making the
+  // walk from a shrine to somebody's keep merely long rather than absurd.
+  golem:     { name: 'Golem',     plural: 'Golems',    cost: 600, trainTimeSec: 0, attack: 110, hp: 850, speed: 1.7,
                special: true },
 };
 

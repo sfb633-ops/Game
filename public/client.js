@@ -364,6 +364,8 @@ function abandonSession(reason) {
   document.getElementById('game-ui').classList.add('hidden');
   document.getElementById('draft').classList.add('hidden');
   document.getElementById('game-over-banner').classList.remove('show');
+  document.getElementById('defeat-screen').classList.add('hidden');
+  document.getElementById('spectating-chip').classList.add('hidden');
   clearAttackAlert();
   showExitConfirm(false);
   menuEl.classList.remove('hidden');
@@ -475,6 +477,12 @@ document.getElementById('exit-btn').addEventListener('click', () => {
 document.getElementById('exit-no').addEventListener('click', () => showExitConfirm(false));
 document.getElementById('exit-yes').addEventListener('click', leaveGame);
 document.getElementById('quit-btn').addEventListener('click', leaveGame);
+document.getElementById('defeat-quit-btn').addEventListener('click', leaveGame);
+document.getElementById('spectate-btn').addEventListener('click', () => {
+  defeatShown = true;
+  document.getElementById('defeat-screen').classList.add('hidden');
+  document.getElementById('spectating-chip').classList.remove('hidden');
+});
 
 document.getElementById('restart-btn').addEventListener('click', () => {
   document.getElementById('game-over-banner').classList.remove('show');
@@ -482,6 +490,11 @@ document.getElementById('restart-btn').addEventListener('click', () => {
 });
 
 function onInit(msg) {
+  // A rematch is a new empire, so a defeat already acknowledged must not
+  // silence the next one.
+  defeatShown = false;
+  document.getElementById('defeat-screen').classList.add('hidden');
+  document.getElementById('spectating-chip').classList.add('hidden');
   const rejoining = inputsBound;   // a rematch reuses the same socket and DOM
   myId = msg.playerId;
   mapCfg = msg.map;
@@ -2782,6 +2795,7 @@ function renderPanel() {
   document.getElementById('gold-val').textContent = me.gold;
   const castle = me.buildings.find(b => b.type === 'castle');
   renderKeepBar(me);
+  renderDefeat(me);
   document.getElementById('income-val').textContent = me.incomePerSec;
   const marching = latestState.armies
     .filter(a => a.ownerId === myId)
@@ -3341,6 +3355,43 @@ function clearAttackAlert() {
   if (!el) return;
   el.classList.remove('leaving');
   el.classList.add('hidden');
+}
+
+// ---------------------------------------------------------------------------
+// Your empire has fallen
+// ---------------------------------------------------------------------------
+//
+// Losing and the match ending are the same moment in a free-for-all of two, and
+// the game-over banner covers that. They are not the same moment in a team game
+// — your side can win without you — and until this, a knocked-out player was
+// left with a dead keep, buttons that did nothing and no word about why.
+//
+// Shown once. Dismissing it leaves the chip, because "why can I not build
+// anything" needs an answer that is still on screen ten minutes later.
+let defeatShown = false;
+
+function renderDefeat(me) {
+  const screen = document.getElementById('defeat-screen');
+  const chip = document.getElementById('spectating-chip');
+  if (!screen || !chip) return;
+
+  // The game-over banner owns the end of the match; this owns everything
+  // before it.
+  const fallen = me && me.spectating && !latestState.gameOver && !inLobby;
+  if (!fallen) {
+    screen.classList.add('hidden');
+    chip.classList.add('hidden');
+    return;
+  }
+  const stillIn = me.watchingSide;
+  document.getElementById('defeat-sub').textContent = stillIn
+    ? 'Your side is still fighting. You can watch the rest of the match through their eyes.'
+    : 'The match goes on without you. You can watch the rest of it from here.';
+  document.getElementById('spectating-note').textContent = stillIn
+    ? "watching your side's view"
+    : 'watching the whole map';
+  chip.classList.toggle('hidden', !defeatShown);
+  screen.classList.toggle('hidden', defeatShown);
 }
 
 function log(text) {

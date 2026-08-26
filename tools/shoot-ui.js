@@ -65,6 +65,18 @@ const CASES = {
     keep(0.78, 'hp-green', 'Town Center', '702 / 900');
     alert('Grishnak');
     document.getElementById('attack-alert').style.opacity = '0.45';`,
+  // Knocked out while the match goes on. Two flavours: a side still fighting,
+  // and nobody left.
+  defeatTeam: `
+    document.getElementById('defeat-screen').classList.remove('hidden');
+    document.getElementById('defeat-sub').textContent =
+      'Your side is still fighting. You can watch the rest of the match through their eyes.';`,
+  spectating: `
+    keep(0.0, 'hp-red', 'Town Center', '0 / 900');
+    document.getElementById('keep-bar').classList.add('hidden');
+    const c = document.getElementById('spectating-chip');
+    c.classList.remove('hidden');
+    document.getElementById('spectating-note').textContent = "watching your side's view";`,
   // And the ordinary case: a match with nobody attacking.
   quiet: `
     keep(0.78, 'hp-green', 'Town Center', '702 / 900');`,

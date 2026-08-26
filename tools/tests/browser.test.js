@@ -85,7 +85,8 @@ document.getElementById('probe-result').textContent = JSON.stringify(out);
 {
   const r = probe(`
     const out = {};
-    for (const id of ['keep-bar', 'attack-alert', 'game-ui', 'draft', 'menu']) {
+    for (const id of ['keep-bar', 'attack-alert', 'defeat-screen', 'spectating-chip',
+                      'game-ui', 'draft', 'menu']) {
       const el = document.getElementById(id);
       el.classList.add('hidden');
       out[id] = css(id, 'display');

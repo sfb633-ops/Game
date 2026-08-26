@@ -221,6 +221,39 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
    The variable --keep-cap is the width of the trough's rounded end in the source art (6px)
    times that scale. It is a variable because the border-width and the slice
    have to agree, and them disagreeing is the one way to get this wrong. */
+/* ---- Your empire has fallen ------------------------------------------------
+   Modelled on the game-over banner, because it is the same kind of news and
+   should not look like a different game. The difference is what it offers: the
+   match is still running, so the first button is to stay and watch it. */
+#defeat-screen {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 7, 4, 0.72);
+  z-index: 60;
+}
+#defeat-screen.hidden { display: none; }
+.defeat-box { padding: 26px 34px; text-align: center; max-width: 460px; }
+.defeat-box h1 {
+  margin: 0 0 6px; font-size: 1.35rem; letter-spacing: 0.1em;
+  color: #d9534f; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+}
+.defeat-box .sub { margin: 0 0 16px; }
+
+#spectating-chip {
+  position: absolute; top: 10px; left: 50%;
+  transform: translateX(-50%);
+  display: flex; gap: 0.6rem; align-items: baseline;
+  padding: 4px 12px;
+  background: rgba(10, 7, 4, 0.72);
+  border: 1px solid #6b5334;
+  font-size: 0.72rem; letter-spacing: 0.14em;
+  color: #d9534f;
+  pointer-events: none;
+  z-index: 30;
+}
+#spectating-chip.hidden { display: none; }
+#spectating-note { color: var(--ink); letter-spacing: 0.04em; }
+
 #keep-bar {
   --keep-cap: 18px;
   --keep-fill-cap: 9px;

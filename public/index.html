@@ -202,6 +202,24 @@
   </div>
 </div>
 
+<!-- Your empire has fallen but the match has not ended. In a free-for-all of
+     two those are the same moment and the game-over banner covers it; in a team
+     game they are not, and until now a knocked-out player was left with a dead
+     keep, disabled buttons and nothing telling them what had happened. -->
+<div id="defeat-screen" class="hidden">
+  <div class="frame frame-panel defeat-box">
+    <h1>YOUR EMPIRE HAS FALLEN</h1>
+    <p class="sub" id="defeat-sub"></p>
+    <div class="btn-row">
+      <button class="btn btn-primary btn-lg" id="spectate-btn">Watch the rest</button>
+      <button class="btn btn-lg" id="defeat-quit-btn">Exit to Menu</button>
+    </div>
+  </div>
+</div>
+<!-- Left on screen for as long as they are watching, so "why can I not build
+     anything" always has an answer in view. -->
+<div id="spectating-chip" class="hidden"><span>SPECTATING</span><span id="spectating-note"></span></div>
+
 <div id="game-over-banner">
   <div class="frame frame-panel game-over-box">
     <h1 id="game-over-text"></h1>
