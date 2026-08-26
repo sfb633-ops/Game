@@ -288,6 +288,13 @@ class Match {
     this.terrain = this.generateTerrain();
     this.players = new Map(); // id -> player state
     this.armies = new Map();  // id -> army
+    // "x,y" -> { building, owner } for every building on the map, whoever's.
+    // Every lookup by tile — is it occupied, is it solid, what did they send
+    // troops at — used to walk every player's building list, which a 300-tile
+    // wall drag did 300 times over. Maintained by indexBuilding/unindexBuilding,
+    // which the two placement choke points and the two seat moves all go
+    // through; nothing else creates or deletes a building.
+    this.buildingIndex = new Map();
     this.usedSpawns = [];
     // Starting positions are picked and levelled here, not when players join,
     // so the terrain sent to every client at init never changes underneath
@@ -913,6 +920,7 @@ class Match {
     };
     player.mods = computeMods(player);
     this.players.set(id, player);
+    this.indexBuilding(player, buildings[tileKey(spot.x, spot.y)]);
     this.stepVision(player);          // an empire can see where it woke up
     this.syncTeamVision(player);      // and inherits whatever its side already knew
     // Once a match has been a contest it stays one, however many walk out
@@ -1033,6 +1041,7 @@ class Match {
   // the same thing for a different reason.
   reseat(player, seat) {
     if (player.baseX === seat.x && player.baseY === seat.y) return;
+    this.unindexBuilding(player.buildings[tileKey(player.baseX, player.baseY)]);
     delete player.buildings[tileKey(player.baseX, player.baseY)];
     player.baseX = seat.x; player.baseY = seat.y;
     player.buildings[tileKey(seat.x, seat.y)] = {
@@ -1040,6 +1049,7 @@ class Match {
       hp: CASTLE.hp[0], maxHp: CASTLE.hp[0],
       underConstruction: false, remainingSec: 0, upgrading: false, trainQueue: [],
     };
+    this.indexBuilding(player, player.buildings[tileKey(seat.x, seat.y)]);
     // Somewhere else means having seen somewhere else. Cleared rather than
     // added to, for the same reason setTeam clears it.
     player.explored = new Uint8Array(MAP.width * MAP.height);
@@ -1251,9 +1261,7 @@ class Match {
 
   // Is (x,y) already taken by any building (any player) or a live AI camp?
   tileOccupied(x, y) {
-    for (const p of this.players.values()) {
-      if (p.buildings[tileKey(x, y)]) return true;
-    }
+    if (this.buildingIndex.has(tileKey(x, y))) return true;
     for (const camp of this.aiCamps) {
       // A razed camp leaves ruins standing, so its tile stays taken.
       if ((!camp.defeated || camp.capturedBy) && camp.x === x && camp.y === y) return true;
@@ -1267,6 +1275,7 @@ class Match {
       const seat = this.spawns.find(sp => sp.x === player.baseX && sp.y === player.baseY);
       if (seat) seat.taken = false;   // hand the starting position back
       this.releaseOutposts(player);   // and the camps, or they stay locked forever
+      for (const b of Object.values(player.buildings)) this.unindexBuilding(b);
     }
     this.players.delete(id);
     for (const [armyId, army] of this.armies) {
@@ -1538,12 +1547,21 @@ class Match {
     return damage;
   }
 
+  indexBuilding(owner, building) {
+    if (building) this.buildingIndex.set(tileKey(building.x, building.y), { building, owner });
+  }
+
+  unindexBuilding(building) {
+    if (building) this.buildingIndex.delete(tileKey(building.x, building.y));
+  }
+
   // Every building that appears or disappears goes through these two, so that
   // nothing can quietly change the map an army is routing across without
   // saying so. `wallVersion` is that announcement: an army compares it against
   // the version its route was planned under and replans when they differ.
   placeBuilding(player, building) {
     player.buildings[tileKey(building.x, building.y)] = building;
+    this.indexBuilding(player, building);
     // Every building is something to walk round now, so every building changes
     // the map an army is routing across — not only walls. `wallVersion` keeps
     // its name because that is what every route stamp calls it.
@@ -1555,6 +1573,7 @@ class Match {
   // clear ground — rubble is what a fight leaves behind.
   razeBuilding(player, building, demolished) {
     delete player.buildings[tileKey(building.x, building.y)];
+    this.unindexBuilding(building);
     if (building.type !== 'castle') this.wallVersion++;
     // Rubble is what a fight leaves behind, whatever was standing there. Pull
     // it down yourself and the ground is clear.
@@ -2315,13 +2334,9 @@ class Match {
   // the whole prototype poisoned by one crafted message.
   buildingAt(key) {
     if (typeof key !== 'string' || !TILE_KEY.test(key)) return null;
-    for (const player of this.players.values()) {
-      if (!player.alive) continue;
-      if (!Object.prototype.hasOwnProperty.call(player.buildings, key)) continue;
-      const b = player.buildings[key];
-      if (b && b.type !== 'castle') return { building: b, owner: player };
-    }
-    return null;
+    const found = this.buildingIndex.get(key);
+    if (!found || !found.owner.alive || found.building.type === 'castle') return null;
+    return found;
   }
 
   // Enemy troops take up ground. A marching column used to walk clean over the
@@ -2475,15 +2490,14 @@ class Match {
     const start = sy * W + sx, goal = gy * W + gx;
     if (start === goal) return null;
 
-    const blocked = new Set();
-    if (!ignoreWalls) {
-      for (const player of this.players.values()) {
-        if (!player.alive || this.allied(army.ownerId, player.id)) continue;
-        for (const b of Object.values(player.buildings)) {
-          if (b.type !== 'castle') blocked.add(tileKey(b.x, b.y));
-        }
-      }
-    }
+    // Somebody else's standing building, other than a town center. Asked of
+    // the index per tile rather than copied into a Set per call: a route is
+    // planned for every marching group every time the map changes.
+    const blocked = (x, y) => {
+      const found = this.buildingIndex.get(tileKey(x, y));
+      return !!found && found.building.type !== 'castle' && found.owner.alive &&
+        !this.allied(army.ownerId, found.owner.id);
+    };
 
     if (this.routeStamp > 2e9) { this.routeSeen.fill(0); this.routeStamp = 0; }
     const stamp = ++this.routeStamp;
@@ -2503,8 +2517,8 @@ class Match {
         // The goal is always enterable. A keep with a wall across its doorway
         // is still the thing the army was sent to.
         if (n !== goal) {
-          if (blocked.has(tileKey(nx, ny))) continue;
           if (!isPassable(this.terrain[ny][nx])) continue;
+          if (!ignoreWalls && blocked(nx, ny)) continue;
         }
         seen[n] = stamp;
         from[n] = cur;
