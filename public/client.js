@@ -1281,14 +1281,30 @@ function colorForPlayer(id) {
 
 const BUILDING_COLOR = { bank: '#e6c14a', barracks: '#c0392b', stable: '#3498db', siege: '#8e44ad', tower: '#7f8c8d', wall: '#9a8b6f' };
 
+// Three tile sets the map is asked about constantly — every frame for the
+// walls, every hover and every tile of a wall drag for the other two — and
+// that only change when a state message arrives, five times a second. Rebuilt
+// in onState, not on demand.
+let wallSet = new Set(), occupiedSet = new Set(), rubbleSet = new Set();
+
+function rebuildTileSets(msg) {
+  wallSet = new Set(); occupiedSet = new Set(); rubbleSet = new Set();
+  for (const p of msg.players) {
+    for (const b of p.buildings) {
+      if (!b.type) continue;
+      occupiedSet.add(`${b.x},${b.y}`);
+      if (b.type === 'wall') wallSet.add(`${b.x},${b.y}`);
+    }
+  }
+  // A razed camp leaves ruins standing, so its tile stays taken.
+  for (const c of msg.aiCamps) if (!c.defeated || c.capturedBy) occupiedSet.add(`${c.x},${c.y}`);
+  for (const r of msg.rubble || []) rubbleSet.add(`${r.x},${r.y}`);
+}
+
 // Every wall tile currently on the map, so each one can pick the rampart
 // piece that matches its neighbours instead of a lone block.
 function wallLookup() {
-  const set = new Set();
-  if (latestState) {
-    for (const p of latestState.players)
-      for (const b of p.buildings) if (b.type === 'wall') set.add(`${b.x},${b.y}`);
-  }
+  const set = wallSet;
   return (x, y) => set.has(`${x},${y}`);
 }
 
@@ -1332,11 +1348,7 @@ function drawBuilding(b, px, py, color, hasWall, race, pop, insideX) {
 // Tiles occupied by any building or a live camp — used to mirror the server's
 // placement rules for the local build-preview (server still re-validates).
 function occupiedTiles() {
-  const set = new Set();
-  if (!latestState) return set;
-  for (const p of latestState.players) for (const b of p.buildings) if (b.type) set.add(`${b.x},${b.y}`);
-  for (const c of latestState.aiCamps) if (!c.defeated || c.capturedBy) set.add(`${c.x},${c.y}`);
-  return set;
+  return occupiedSet;
 }
 
 // Display name for a player id — falls back to the id for anyone who has
@@ -1473,9 +1485,7 @@ function isExplored(tx, ty) {
 }
 
 function isRubble(tx, ty) {
-  if (!latestState || !latestState.rubble) return false;
-  for (const r of latestState.rubble) if (r.x === tx && r.y === ty) return true;
-  return false;
+  return rubbleSet.has(`${tx},${ty}`);
 }
 
 // Client-side echo of Match.inTerritory (UX only; the server is
@@ -3312,6 +3322,7 @@ function onState(msg) {
     else spellFlash.push({ ...fx, start: clock });
   }
   latestState = msg;
+  rebuildTileSets(msg);
   render();
   renderPanel();
 }
