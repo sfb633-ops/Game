@@ -1998,34 +1998,10 @@ class Match {
     return true;
   }
 
-  // A free ring of wall, one tile thick, around the target. Tiles that aren't
-  // legal to build on are simply skipped rather than failing the whole cast.
-  cast_bulwark(player, spec, x, y) {
-    const def = BUILDING_TYPES.wall;
-    const hp = Math.round(def.hp * player.mods.structureHpMult);
-    let placed = 0;
-    for (let ty = Math.floor(y - spec.radius); ty <= Math.ceil(y + spec.radius); ty++) {
-      for (let tx = Math.floor(x - spec.radius); tx <= Math.ceil(x + spec.radius); tx++) {
-        const d = Math.hypot(tx - x, ty - y);
-        if (d < spec.radius - 1 || d > spec.radius) continue;      // the ring only
-        if (!this.canBuildAt(player, tx, ty)) continue;
-        this.placeBuilding(player, {
-          x: tx, y: ty, type: 'wall', maxHp: hp, hp,
-          underConstruction: false, remainingSec: 0, trainQueue: [],
-        });
-        placed++;
-      }
-    }
-    if (!placed) { this.emit(player.id, 'There is no room for a bulwark there.'); return false; }
-    this.effects.push({ kind: 'bulwark', x, y, radius: spec.radius });
-    this.emit(player.id, `Raised ${placed} sections of wall.`);
-    return true;
-  }
-
   // Lay bare a circle of the map. Written straight into explored, so it is
   // remembered rather than watched: the ground goes dim again the moment
   // nobody is looking at it, exactly like somewhere you marched through once.
-  cast_farsight(player, spec, x, y) {
+  cast_revealTheHeathens(player, spec, x, y) {
     const r = spec.radius, rr = r * r;
     const viewers = this.alliesOf(player);
     let lit = 0;
@@ -2043,7 +2019,7 @@ class Match {
       }
     }
     if (!lit) { this.emit(player.id, 'You have seen all of that already.'); return false; }
-    this.effects.push({ kind: 'farsight', x, y, radius: r });
+    this.effects.push({ kind: 'revealTheHeathens', x, y, radius: r });
     this.emit(player.id, `Farsight — ${lit} tiles laid bare.`);
     return true;
   }
@@ -2051,7 +2027,7 @@ class Match {
   // A plague on a household: the garrison, and nothing else. Aimed at keeps
   // rather than at a point, so it cannot be used to shave troops off a group
   // in the field — that is what an army is for.
-  cast_withering(player, spec, x, y) {
+  cast_curseOfSickness(player, spec, x, y) {
     let struck = 0;
     for (const other of this.players.values()) {
       if (!other.alive || this.allied(player.id, other.id)) continue;
@@ -2064,7 +2040,7 @@ class Match {
       this.emit(other.id, 'A plague has swept through your garrison.');
     }
     if (!struck) { this.emit(player.id, 'There is no garrison there to wither.'); return false; }
-    this.effects.push({ kind: 'withering', x, y, radius: spec.radius });
+    this.effects.push({ kind: 'curseOfSickness', x, y, radius: spec.radius });
     this.emit(player.id, `Withering — ${struck} garrison${struck === 1 ? '' : 's'} struck.`);
     return true;
   }
@@ -2072,7 +2048,7 @@ class Match {
   // Stonework only, and hard enough to matter: 240 against a 260-health wall
   // means a segment survives one and falls to two, so it opens a breach rather
   // than deleting a defence.
-  cast_sunder(player, spec, x, y) {
+  cast_sabotageDefenses(player, spec, x, y) {
     let hit = 0, broken = 0;
     for (const other of this.players.values()) {
       if (!other.alive || this.allied(player.id, other.id)) continue;
@@ -2089,38 +2065,39 @@ class Match {
       hit += theirs;
     }
     if (!hit) { this.emit(player.id, 'There is no stonework there to break.'); return false; }
-    this.effects.push({ kind: 'sunder', x, y, radius: spec.radius });
+    this.effects.push({ kind: 'sabotageDefenses', x, y, radius: spec.radius });
     this.emit(player.id, `Sunder — ${hit} section${hit === 1 ? '' : 's'} struck, ${broken} brought down.`);
     return true;
   }
 
-  // Both speed spells are the same operation with the sign flipped, so they
-  // are the same function: who it lands on, and what it multiplies by.
-  markSpeed(player, spec, x, y, onAllies, kind, label, empty) {
+  // Roots every enemy group in the circle where it stands. `speedMult` is zero,
+  // which is a stop rather than a slow — see the rooted check in tick(), which
+  // exists for this and would otherwise read a frozen group as one that had
+  // arrived.
+  //
+  // It takes their legs and not their arms: a group caught mid-fight goes on
+  // fighting, and one caught in the open is simply stuck there with whatever is
+  // coming for it.
+  cast_entangle(player, spec, x, y) {
     let touched = 0;
     for (const army of this.armies.values()) {
-      if (this.allied(player.id, army.ownerId) !== onAllies) continue;
+      if (this.allied(player.id, army.ownerId)) continue;
       if (armyCount(army) === 0) continue;
       if (Math.hypot(army.x - x, army.y - y) > spec.radius) continue;
       army.speedSpell = { mult: spec.speedMult, remaining: spec.durationSec };
       touched++;
-      if (!onAllies) this.emit(army.ownerId, 'One of your groups is caught in briars.');
+      this.emit(army.ownerId, 'One of your groups is rooted where it stands.');
     }
-    if (!touched) { this.emit(player.id, empty); return false; }
-    this.effects.push({ kind, x, y, radius: spec.radius });
-    this.emit(player.id, `${label} — ${touched} group${touched === 1 ? '' : 's'}.`);
+    if (!touched) {
+      this.emit(player.id, 'There is nothing of theirs in that circle.');
+      return false;
+    }
+    this.effects.push({ kind: 'entangle', x, y, radius: spec.radius });
+    this.emit(player.id, `Entangle — ${touched} group${touched === 1 ? '' : 's'} frozen.`);
     return true;
   }
 
-  cast_forcedMarch(player, spec, x, y) {
-    return this.markSpeed(player, spec, x, y, true, 'forcedMarch', 'Forced March',
-      'None of your groups are in that circle.');
-  }
 
-  cast_entangle(player, spec, x, y) {
-    return this.markSpeed(player, spec, x, y, false, 'entangle', 'Entangle',
-      'There is nothing of theirs in that circle.');
-  }
 
   // ---- Race abilities -----------------------------------------------------
 
@@ -2364,8 +2341,9 @@ class Match {
 
   blockingBuilding(army, worldX, worldY) {
     const x = Math.round(worldX), y = Math.round(worldY);
-    // Already standing on the tile — a bulwark dropped on top of it, say — is
-    // not the same as walking into it. It has to be able to leave.
+    // Already standing on the tile — somebody dragged a wall across it while
+    // the group was there — is not the same as walking into it. It has to be
+    // able to leave.
     if (x === Math.round(army.x) && y === Math.round(army.y)) return null;
     const found = this.solidAt(x, y);
     if (!found) return null;
@@ -3037,7 +3015,16 @@ class Match {
         : army.targetType === 'army'
           ? Math.max(COMBAT.engageRange, this.standoffOf(army))
           : Math.max(COMBAT.engageRange, armyRange(army));
-      if (dist <= stopAt || speed <= 0) {
+      // Rooted: a group whose speed has been taken away entirely. Standing
+      // still is not the same as arriving, and conflating the two — which this
+      // line did, because until Entangle became a freeze no unit could ever
+      // have a speed of zero — is three separate disasters at once. A group on
+      // 'move' set x to destX and TELEPORTED across the map. One on 'return'
+      // was deleted and its soldiers banked into the garrison from wherever
+      // they were standing. One on 'attack' opened a battle at any distance at
+      // all. The order is kept, so the group carries on the moment it is free.
+      if (speed <= 0) continue;
+      if (dist <= stopAt) {
         if (army.order === 'attack') {
           this.beginBattle(army);
         } else if (army.order === 'return') {

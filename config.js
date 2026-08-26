@@ -546,48 +546,52 @@ const CARDS = {
   // ---- boons ----
   prosperity: {
     name: 'Prosperity', kind: 'boon', sigil: '✦',
-    // Every one of these numbers is smaller than it was, and the reason is the
-    // one written over RACES: a boon that changes how many soldiers you field
-    // is squared on its way to a result, and a boon that changes how good each
-    // one is, is not. So +25% income was not worth 25%, it was worth 56%, while
-    // Forge Fires' +15% attack was worth exactly 15%. Measured across the eight
-    // boons, the best was 1.55 times the worst — which does not make a draft, it
-    // makes a right answer. They now sit between 1.21 and 1.29.
+    // Every one of these numbers is smaller than it looks like it should be,
+    // and the reason is the one written over RACES: a boon that changes how
+    // many soldiers you field is squared on its way to a result, and a boon
+    // that changes how good each one is, is not. So +25% income was never worth
+    // 25%, it was worth 56%, while a +15% attack was worth exactly 15%. Left
+    // alone, the best boon was 1.55 times the worst, which does not make a
+    // draft — it makes a right answer.
     desc: '+13% gold income, for as long as the empire stands.',
     mods: { incomeMult: 1.13 },
   },
-  warChest: {
-    name: 'War Chest', kind: 'boon', sigil: '◆',
-    desc: '400 gold in the treasury right now, and +10% income after.',
-    mods: { incomeMult: 1.10 }, grant: { gold: 400 },
+  // The one boon that is worth something the moment it is drafted and nothing
+  // afterwards. It used to carry a permanent income multiplier as well, which
+  // made it quietly the same shape as Prosperity with a bonus on top; now it is
+  // the opposite kind of card, and drafting it is a bet on the early game.
+  spoilsOfWar: {
+    name: 'Spoils of War', kind: 'boon', sigil: '◆',
+    desc: '300 gold in your treasury the moment you take it. Nothing after that.',
+    grant: { gold: 300 },
   },
   drillmaster: {
     name: 'Drillmaster', kind: 'boon', sigil: '⚔',
-    desc: 'Training and upgrades finish 12% faster.',
-    mods: { buildTimeMult: 0.88 },
+    desc: 'Training and upgrades finish 10% faster.',
+    mods: { buildTimeMult: 0.90 },
   },
-  forgeFires: {
-    name: 'Forge Fires', kind: 'boon', sigil: '✳',
-    desc: 'Every soldier hits 28% harder.',
-    mods: { attackMult: 1.28 },
+  deadlyTactics: {
+    name: 'Deadly Tactics', kind: 'boon', sigil: '✳',
+    desc: 'Every soldier hits 10% harder.',
+    mods: { attackMult: 1.10 },
   },
   ironhide: {
     name: 'Ironhide', kind: 'boon', sigil: '◉',
-    desc: 'Every soldier carries 28% more health.',
-    mods: { hpMult: 1.28 },
+    desc: 'Every soldier carries 15% more health.',
+    mods: { hpMult: 1.15 },
   },
-  thrift: {
-    name: 'Thrift', kind: 'boon', sigil: '△',
-    desc: 'Everything you build and train costs 11% less.',
-    mods: { costMult: 0.89 },
+  barteringTactics: {
+    name: 'Bartering Tactics', kind: 'boon', sigil: '△',
+    desc: 'Everything you build and train costs 10% less.',
+    mods: { costMult: 0.90 },
   },
-  surveyors: {
-    name: "Surveyor's Charter", kind: 'boon', sigil: '◎',
+  profoundInfluence: {
+    name: 'Profound Influence', kind: 'boon', sigil: '◎',
     desc: 'Your border reaches 2 tiles further at every level.',
     mods: { borderBonus: 2 },
   },
-  masonry: {
-    name: 'Deep Masonry', kind: 'boon', sigil: '▣',
+  defensiveSavant: {
+    name: 'Defensive Savant', kind: 'boon', sigil: '▣',
     desc: 'Walls and towers stand with 50% more health.',
     mods: { structureHpMult: 1.5 },
   },
@@ -605,57 +609,55 @@ const CARDS = {
     // the only spell that reaches anywhere on the map, needs no setup and takes
     // a building off it outright — at the common rate you simply always had one
     // about to land, which made it a rhythm rather than a decision.
-    spell: { charges: 2, radius: 2.6, damage: 150, range: 'anywhere', rechargeSec: 210 },
+    spell: { charges: 2, radius: 2.3, damage: 150, range: 'anywhere', rechargeSec: 210 },
   },
   terraform: {
     name: 'Reshape the Land', kind: 'spell', sigil: '▲',
     desc: 'Level mountains and drain water inside your own border, turning them into ground you can build on.',
     spell: { charges: 2, radius: 2.6, range: 'territory' },
   },
-  bulwark: {
-    name: 'Bulwark', kind: 'spell', sigil: '▥',
-    desc: 'Raise a free ring of walls around any tile inside your border.',
-    spell: { charges: 2, radius: 2.2, range: 'territory' },
-  },
+
   // The map is 240x160 and most of it is dark, so a spell whose entire effect
   // is *knowing something* belongs here. Deliberately the cheapest thing in the
   // book to hold and the only one that never touches another empire.
-  farsight: {
-    name: 'Farsight', kind: 'spell', sigil: '◍',
+  revealTheHeathens: {
+    name: 'Reveal the Heathens', kind: 'spell', sigil: '◍',
     // Reworded because the old line took three clauses and a dash to say
     // "look anywhere", and a card you read while somebody is attacking you has
     // to land in one. Recharges faster than anything else in the book: it is
     // the only spell that cannot hurt anybody, and one you were saving because
     // it was expensive was a spell doing nothing.
     desc: 'Reveals a wide circle of the map, anywhere you like. What you see stays on your map and on your allies\'.',
-    spell: { charges: 2, radius: 13, range: 'anywhere', rechargeSec: 45 },
+    spell: { charges: 2, radius: 13, range: 'anywhere', rechargeSec: 50 },
   },
   // The opposite of a meteor on purpose: this takes the troops standing in a
   // keep and leaves the building alone, so the two answer different problems —
   // one opens the wall, the other empties the room behind it.
-  withering: {
-    name: 'Withering', kind: 'spell', sigil: '☠',
+  curseOfSickness: {
+    name: 'Curse of Sickness', kind: 'spell', sigil: '☠',
     desc: 'A plague over one empire\'s home. Cuts down the troops idling in their keep and touches nothing they have built.',
     spell: { charges: 2, radius: 4, damage: 260, range: 'anywhere' },
   },
   // Walls went to 260 health when towers stopped shielding the keep, which is
   // right for the thing you have to break through — and it left an attacker
   // with no answer to somebody who simply keeps building more of it.
-  sunder: {
-    name: 'Sunder', kind: 'spell', sigil: '✖',
+  sabotageDefenses: {
+    name: 'Sabotage Defenses', kind: 'spell', sigil: '✖',
     desc: 'Shatter stonework. Wrecks enemy walls and towers caught in the blast and leaves everything else standing.',
     spell: { charges: 2, radius: 2.8, damage: 240, range: 'anywhere' },
   },
-  // These two ride the same field on an army; see armySpeed.
-  forcedMarch: {
-    name: 'Forced March', kind: 'spell', sigil: '⇶',
-    desc: 'Your groups in the circle march half again as fast for a while.',
-    spell: { charges: 2, radius: 7, speedMult: 1.5, durationSec: 25, range: 'anywhere' },
-  },
+  // Rides `speedSpell` on an army; see armySpeed. A multiplier of zero is a
+  // stop rather than a slow, and the march loop has to tell "cannot move" apart
+  // from "arrived" for it — see the rooted check in tick(), which exists
+  // entirely because of this card.
+  //
+  // Freezing takes the group's legs and not its arms: one caught mid-fight goes
+  // on fighting, and one caught crossing open ground is simply stuck there for
+  // ten seconds with whatever is coming for it. That is the whole card.
   entangle: {
     name: 'Entangle', kind: 'spell', sigil: '✵',
-    desc: 'Roots and briars. Enemy groups in the circle crawl for a while.',
-    spell: { charges: 2, radius: 4.5, speedMult: 0.4, durationSec: 14, range: 'anywhere' },
+    desc: 'Roots and briars. Enemy groups in the circle are frozen where they stand for 10 seconds.',
+    spell: { charges: 2, radius: 4.5, speedMult: 0, durationSec: 10, range: 'anywhere' },
   },
 };
 

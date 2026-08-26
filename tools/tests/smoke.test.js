@@ -45,7 +45,7 @@ for (const [id, p] of [['a', a], ['b', b]]) {
   m.cmdBuildWall(id, ring);
 }
 
-m.takeCard(a, 'surveyors');
+m.takeCard(a, 'profoundInfluence');
 m.takeCard(a, 'meteor');
 m.takeCard(b, 'ironhide');
 

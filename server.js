@@ -348,6 +348,9 @@ function sendInit(ws, room, playerId) {
     castle: config.CASTLE,
     cards: config.CARDS,
     cardDraft: config.CARD_DRAFT,
+    // The rate a spell recharges at unless its own card names one. The page
+    // prints it on every spell face, so it cannot be left on the server.
+    spellRechargeSec: config.SPELL_RECHARGE_SEC,
     terrainClearCost: config.TERRAIN_CLEAR_COST,
     outpost: config.OUTPOST,
   }));

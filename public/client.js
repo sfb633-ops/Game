@@ -26,6 +26,7 @@ let myRace = null;
 let myRoom = null;         // { code, name } of the game this client is in
 let inputsBound = false;   // canvas/keyboard handlers are attached exactly once
 let cardDefs = null, draftCfg = null, outpostCfg = null;
+let spellRechargeSec = 0;   // the rate a spell with no clock of its own uses
 let draftShown = null;     // the offer currently on screen, so it deals once
 let armedSpell = null;     // card id waiting for a map click to aim it
 let abilityDefs = null;    // race -> ability definition, straight from init
@@ -523,6 +524,7 @@ function onInit(msg) {
   fogCanvas = null; fogLayer = null; fogDirty = true;
   miniBase = null; miniBuiltAt = -1e9;      // new world, new minimap
   draftCfg = msg.cardDraft;
+  spellRechargeSec = msg.spellRechargeSec || 0;
   outpostCfg = msg.outpost;
   myRoom = msg.room || null;
   if (msg.session && myRoom) {
@@ -870,6 +872,30 @@ document.getElementById('lobby-leave').addEventListener('click', () => {
 
 // The hand is only dealt once per offer. Re-rendering it every state message
 // would restart the roll-in animation five times a second.
+// The mechanical facts of a spell, in a line, built from the spell's own spec.
+//
+// The prose on a card says what it does; this says how far and how hard. A
+// player choosing between two spells cannot tell from "a wide circle" and "the
+// circle" which one will actually reach the thing they are aiming at, and until
+// this the numbers were nowhere on screen at all.
+//
+// Generated rather than written out beside each card, so it cannot drift from
+// the spell it describes — the same reason the test that checks card text
+// against card numbers exists.
+function spellFacts(spell, recharge) {
+  if (!spell) return '';
+  const bits = [];
+  if (spell.radius) bits.push(`radius ${spell.radius}`);
+  if (spell.damage) bits.push(`${spell.damage} damage`);
+  if (spell.speedMult === 0) bits.push('stops them dead');
+  else if (spell.speedMult) bits.push(`\u00d7${spell.speedMult} speed`);
+  if (spell.durationSec) bits.push(`${spell.durationSec}s`);
+  bits.push(spell.range === 'territory' ? 'your border only' : 'anywhere on the map');
+  const back = spell.rechargeSec || recharge;
+  if (back) bits.push(`${spell.charges} charges, one back every ${back}s`);
+  return bits.join(' \u00b7 ');
+}
+
 function renderDraft(me) {
   const overlay = document.getElementById('draft');
   if (!me || !me.draft) {
@@ -906,7 +932,8 @@ function renderDraft(me) {
       (art ? `<img src="assets/${art.file}" alt="" onerror="this.remove()">` : '') + '</div>' +
       `<div class="card-kind">${def.kind}</div>` +
       `<div class="card-title">${def.name}</div>` +
-      `<div class="card-desc">${def.desc}</div>`;
+      `<div class="card-desc">${def.desc}</div>` +
+      (def.spell ? `<div class="card-facts">${spellFacts(def.spell, spellRechargeSec)}</div>` : '');
     el.addEventListener('click', () => {
       if (el.classList.contains('taken') || el.classList.contains('spent')) return;
       send({ type: 'pickCard', cardId: id });
@@ -1097,7 +1124,7 @@ function renderCards(me) {
     // panel has no room for a card and a button beside it.
     return `<div class="owned-card card-${def.kind}${armedSpell === id ? ' spell-armed' : ''}${spent ? ' spell-spent' : ''}"` +
       (def.spell && !spent ? ` role="button" tabindex="0" data-spell="${id}"` : '') +
-      ` title="${def.name} — ${def.desc}${def.spell ? ` (${charges} left${recharge ? `, next in ${recharge}s` : ''})` : ''}">` +
+      ` title="${def.name} — ${def.desc}${def.spell ? `\n${spellFacts(def.spell, spellRechargeSec)}\n${charges} left${recharge ? `, next in ${recharge}s` : ''}` : ''}">` +
       `<span class="card-sigil">${def.sigil}</span>` +
       (art ? `<img src="assets/${art.file}" alt="" onerror="this.remove()">` : '') +
       (def.spell ? `<span class="charge-badge">×${charges}</span>` : '') +
@@ -1968,11 +1995,11 @@ function drawFog(ts) {
 // Keyed by card id for a spell and by ability id for an ability; an ability
 // arrives as kind 'ability' and carries which one it was alongside.
 const SPELL_FLASH_COLOR = {
-  meteor: '255, 150, 90', terraform: '150, 230, 140', bulwark: '160, 210, 255',
+  meteor: '255, 150, 90', terraform: '150, 230, 140',
   reincarnation: '196, 132, 255', warband: '255, 108, 74',
   strengthInUnity: '122, 178, 255', agilityOfTheWoods: '128, 232, 148',
-  farsight: '210, 232, 255', withering: '150, 210, 120', sunder: '236, 176, 96',
-  forcedMarch: '255, 226, 128', entangle: '116, 196, 128',
+  revealTheHeathens: '210, 232, 255', curseOfSickness: '150, 210, 120',
+  sabotageDefenses: '236, 176, 96', entangle: '116, 196, 128',
 };
 function drawSpellFlash(fx, ts) {
   const age = clock - fx.start;

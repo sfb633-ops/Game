@@ -644,6 +644,16 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 .draft-card.taken .card-kind { color: #6b4c14; }
 .card-title { font-size: 0.9rem; margin: 0.1rem 0 0.3rem; font-weight: bold; }
 .card-desc { font-size: 0.66rem; line-height: 1.4; color: var(--ink); flex: 1 1 auto; }
+/* The generated spec line under a spell's prose — see spellFacts. Quieter than
+   the description above it, because it is looked up rather than read. */
+.card-facts {
+  margin-top: 0.3rem; padding-top: 0.3rem;
+  border-top: 1px solid #ffffff1a;
+  font-size: 0.6rem; line-height: 1.35;
+  color: var(--ink-dark-dim);
+  flex: 0 0 auto;
+}
+.card-boon .card-facts, .draft-card.taken .card-facts { color: #6b4c14; }
 
 /* ---- Cards in the side panel ---- */
 

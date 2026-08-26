@@ -166,7 +166,7 @@ for (const how of ['army', 'direct']) {
   const p = m.addPlayer('p', 'undead', 'P');       // race already shifts both
   p.draft = null;
   m.takeCard(p, 'prosperity');                     // and a boon shifts them again
-  m.takeCard(p, 'thrift');
+  m.takeCard(p, 'barteringTactics');
   const ser = m.serialize().players[0];
   const raw = cfg.CASTLE.incomePerSec[0];
   check('serialized income reflects race and boons',
@@ -174,7 +174,7 @@ for (const how of ['army', 'direct']) {
     `raw ${raw} vs sent ${ser.incomePerSec}`);
   check('serialized mods carry the cost multiplier',
     ser.mods && Math.abs(ser.mods.costMult -
-      (cfg.RACES.undead.costMult * cfg.CARDS.thrift.mods.costMult)) < 1e-9,
+      (cfg.RACES.undead.costMult * cfg.CARDS.barteringTactics.mods.costMult)) < 1e-9,
     `costMult ${ser.mods && ser.mods.costMult}`);
 }
 
@@ -189,16 +189,16 @@ for (const how of ['army', 'direct']) {
   // the figure here instead means a balance pass breaks a test that was never
   // about balance — which has now happened three times.
   const income = cfg.CARDS.prosperity.mods.incomeMult;
-  const border = cfg.CARDS.surveyors.mods.borderBonus;
-  const discount = cfg.CARDS.thrift.mods.costMult;
+  const border = cfg.CARDS.profoundInfluence.mods.borderBonus;
+  const discount = cfg.CARDS.barteringTactics.mods.costMult;
   m.takeCard(a, 'prosperity');
   check(`Prosperity is the income it claims (x${income})`,
     Math.abs(m.incomePerSec(a) / m.incomePerSec(b) - income) < 1e-9,
     `x${(m.incomePerSec(a) / m.incomePerSec(b)).toFixed(3)}`);
-  m.takeCard(a, 'surveyors');
+  m.takeCard(a, 'profoundInfluence');
   check(`Surveyor's Charter is the border it claims (+${border})`,
     m.buildRadius(a) - m.buildRadius(b) === border);
-  m.takeCard(a, 'thrift');
+  m.takeCard(a, 'barteringTactics');
   const before = a.gold;
   m.cmdBuild('a', a.baseX + 2, a.baseY, 'bank');
   const beforeB = b.gold;
@@ -2339,44 +2339,44 @@ function facingOff(aCount, bCount) {
   // than watched — it dims again when nobody is looking, like anywhere walked.
   {
     const { m, a } = fresh(0);
-    a.spells.farsight = 1;
+    a.spells.revealTheHeathens = 1;
     const before = a.explored.reduce((n, v) => n + v, 0);
-    m.cmdCastSpell('a', 'farsight', 20, 20);
+    m.cmdCastSpell('a', 'revealTheHeathens', 20, 20);
     const after = a.explored.reduce((n, v) => n + v, 0);
-    check('Farsight lays a circle of the map bare', after > before + 200, `+${after - before} tiles`);
-    check('  and spends the charge', a.spells.farsight === 0);
+    check('Reveal the Heathens lays a circle of the map bare', after > before + 200, `+${after - before} tiles`);
+    check('  and spends the charge', a.spells.revealTheHeathens === 0);
     // Casting it on the same ground again achieves nothing and is refused, so
     // a charge is never burned for no effect.
-    a.spells.farsight = 1;
-    m.cmdCastSpell('a', 'farsight', 20, 20);
-    check('  but is refused where there is nothing left to uncover', a.spells.farsight === 1);
+    a.spells.revealTheHeathens = 1;
+    m.cmdCastSpell('a', 'revealTheHeathens', 20, 20);
+    check('  but is refused where there is nothing left to uncover', a.spells.revealTheHeathens === 1);
   }
 
   // Withering is the opposite of a meteor on purpose: the garrison, not the
   // buildings.
   {
     const { m, a, d } = fresh(0);
-    a.spells.withering = 1;
+    a.spells.curseOfSickness = 1;
     d.idleUnits = { swordsman: 12, knight: 4, catapult: 2 };
     m.cmdBuild('d', d.baseX + 2, d.baseY, 'bank');
     const bank = d.buildings[`${d.baseX + 2},${d.baseY}`];
     const castleHp = m.getCastle(d).hp;
-    m.cmdCastSpell('a', 'withering', d.baseX, d.baseY);
+    m.cmdCastSpell('a', 'curseOfSickness', d.baseX, d.baseY);
     const lost = 12 - d.idleUnits.swordsman;
-    check('Withering cuts down a garrison', lost > 0, `${lost} swordsmen`);
+    check('Curse of Sickness cuts down a garrison', lost > 0, `${lost} swordsmen`);
     check('  and leaves their buildings alone', bank.hp === bank.maxHp && m.getCastle(d).hp === castleHp);
     // Nothing to wither means nothing spent.
-    a.spells.withering = 1;
+    a.spells.curseOfSickness = 1;
     d.idleUnits = { swordsman: 0, knight: 0, catapult: 0 };
-    m.cmdCastSpell('a', 'withering', d.baseX, d.baseY);
-    check('  and is refused against an empty keep', a.spells.withering === 1);
+    m.cmdCastSpell('a', 'curseOfSickness', d.baseX, d.baseY);
+    check('  and is refused against an empty keep', a.spells.curseOfSickness === 1);
   }
 
   // Sunder is stonework only, and deliberately not quite enough to delete a
   // wall in one cast — it opens a breach rather than removing a defence.
   {
     const { m, a, d } = fresh(0);
-    a.spells.sunder = 1;
+    a.spells.sabotageDefenses = 1;
     const tiles = [];
     for (let i = -2; i <= 2; i++) tiles.push({ x: d.baseX + i, y: d.baseY + 3 });
     m.cmdBuildWall('d', tiles);
@@ -2384,13 +2384,13 @@ function facingOff(aCount, bCount) {
     const bank = d.buildings[`${d.baseX + 5},${d.baseY}`];
     const before = Object.values(d.buildings).filter(b => b.type === 'wall').length;
     check('a wall line goes up to break', before >= 4, `${before} segments`);
-    m.cmdCastSpell('a', 'sunder', d.baseX, d.baseY + 3);
+    m.cmdCastSpell('a', 'sabotageDefenses', d.baseX, d.baseY + 3);
     const hurt = Object.values(d.buildings).filter(b => b.type === 'wall' && b.hp < b.maxHp).length;
-    check('Sunder damages the stonework it lands on', hurt > 0, `${hurt} segments hurt`);
+    check('Sabotage Defenses damages the stonework it lands on', hurt > 0, `${hurt} segments hurt`);
     check('  and leaves everything else standing', bank.hp === bank.maxHp);
     // A second cast finishes what the first started.
-    a.spells.sunder = 1;
-    m.cmdCastSpell('a', 'sunder', d.baseX, d.baseY + 3);
+    a.spells.sabotageDefenses = 1;
+    m.cmdCastSpell('a', 'sabotageDefenses', d.baseX, d.baseY + 3);
     const after = Object.values(d.buildings).filter(b => b.type === 'wall').length;
     check('  and a second cast brings a section down', after < before, `${before} -> ${after}`);
   }
@@ -2398,22 +2398,57 @@ function facingOff(aCount, bCount) {
   // Both speed spells ride one field on the army, so they are tested together.
   {
     const { m, a, d } = fresh(0);
-    a.spells.forcedMarch = 1; a.spells.entangle = 1;
-    a.idleUnits.swordsman = 5; d.idleUnits.swordsman = 5;
-    m.cmdDeployUnits('a', { swordsman: 5 }, a.baseX, a.baseY);
+    a.spells.entangle = 1;
+    d.idleUnits.swordsman = 5;
     m.cmdDeployUnits('d', { swordsman: 5 }, d.baseX, d.baseY);
-    const mine = [...m.armies.values()].find(x => x.ownerId === 'a');
     const theirs = [...m.armies.values()].find(x => x.ownerId === 'd');
     const base = cfg.UNIT_TYPES.swordsman.speed;
-    m.cmdCastSpell('a', 'forcedMarch', mine.x, mine.y);
-    m.cmdCastSpell('a', 'entangle', theirs.x, theirs.y);
-    check('Forced March hurries your own group along', armySpeedOf(mine) > base,
-      `${base} -> ${armySpeedOf(mine).toFixed(2)}`);
-    check('Entangle bogs an enemy group down', armySpeedOf(theirs) < base,
-      `${base} -> ${armySpeedOf(theirs).toFixed(2)}`);
-    for (let t = 0; t < 200; t++) m.tick(0.2);      // 40s, past both durations
-    check('  and both wear off', armySpeedOf(mine) === base && armySpeedOf(theirs) === base);
-    check('  leaving nothing behind on the group', !mine.speedSpell && !theirs.speedSpell);
+
+    // Send them somewhere far off, then root them on the way.
+    m.cmdMoveArmy('d', theirs.id, 20, 20);
+    for (let t = 0; t < 10; t++) m.tick(0.2);
+    m.cmdCastSpell('a', 'entangle', Math.round(theirs.x), Math.round(theirs.y));
+    check('Entangle stops an enemy group dead', armySpeedOf(theirs) === 0,
+      `${base} -> ${armySpeedOf(theirs)}`);
+
+    // The one that matters. A speed of zero used to read as "arrived", and the
+    // three branches of that are all disasters: a group on 'move' set x to
+    // destX and TELEPORTED, one on 'return' was deleted and banked home from
+    // wherever it stood, and one on 'attack' opened a battle at any range.
+    const stood = { x: theirs.x, y: theirs.y };
+    for (let t = 0; t < 25; t++) m.tick(0.2);       // 5s, still inside the freeze
+    check('  and a frozen group stays exactly where it was frozen',
+      m.armies.has(theirs.id) &&
+      Math.abs(theirs.x - stood.x) < 1e-9 && Math.abs(theirs.y - stood.y) < 1e-9,
+      m.armies.has(theirs.id)
+        ? `(${stood.x.toFixed(1)},${stood.y.toFixed(1)}) -> (${theirs.x.toFixed(1)},${theirs.y.toFixed(1)})`
+        : 'the group was deleted');
+    check('  and has not been quietly told it arrived', theirs.order === 'move', theirs.order);
+
+    for (let t = 0; t < 60; t++) m.tick(0.2);       // past the 10s duration
+    check('  it wears off', armySpeedOf(theirs) === base && !theirs.speedSpell);
+    check('  and the march it was on picks straight back up',
+      Math.hypot(theirs.x - stood.x, theirs.y - stood.y) > 1,
+      `moved ${Math.hypot(theirs.x - stood.x, theirs.y - stood.y).toFixed(1)} tiles after thawing`);
+  }
+
+  // The 'return' branch of the same bug, on its own, because losing an army to
+  // an enemy spell that is supposed to slow it down is the one a player would
+  // report as troops vanishing.
+  {
+    const { m, a, d } = fresh(0);
+    a.spells.entangle = 1;
+    d.idleUnits.swordsman = 6;
+    m.cmdDeployUnits('d', { swordsman: 6 }, d.baseX, d.baseY);
+    const theirs = [...m.armies.values()].find(x => x.ownerId === 'd');
+    theirs.x = d.baseX - 30; theirs.y = d.baseY;
+    m.cmdRecallArmy('d', theirs.id);
+    m.cmdCastSpell('a', 'entangle', Math.round(theirs.x), Math.round(theirs.y));
+    const garrison = d.idleUnits.swordsman;
+    for (let t = 0; t < 20; t++) m.tick(0.2);
+    check('a frozen group marching home is not teleported into the garrison',
+      m.armies.has(theirs.id) && d.idleUnits.swordsman === garrison,
+      m.armies.has(theirs.id) ? `${d.idleUnits.swordsman} at home` : 'the group was banked');
   }
 
   // Every spell that touches another empire spares an ally, and refunds the
@@ -2426,25 +2461,26 @@ function facingOff(aCount, bCount) {
     m.start();
     for (const p of m.players.values()) { p.draft = null; p.gold = 999999; }
     b.idleUnits = { swordsman: 10, knight: 0, catapult: 0 };
-    a.spells.withering = 1;
-    m.cmdCastSpell('a', 'withering', b.baseX, b.baseY);
-    check('Withering spares a teammate', b.idleUnits.swordsman === 10 && a.spells.withering === 1);
+    a.spells.curseOfSickness = 1;
+    m.cmdCastSpell('a', 'curseOfSickness', b.baseX, b.baseY);
+    check('Curse of Sickness spares a teammate', b.idleUnits.swordsman === 10 && a.spells.curseOfSickness === 1);
 
     const tiles = [];
     for (let i = -1; i <= 1; i++) tiles.push({ x: b.baseX + i, y: b.baseY + 3 });
     m.cmdBuildWall('b', tiles);
-    a.spells.sunder = 1;
-    m.cmdCastSpell('a', 'sunder', b.baseX, b.baseY + 3);
+    a.spells.sabotageDefenses = 1;
+    m.cmdCastSpell('a', 'sabotageDefenses', b.baseX, b.baseY + 3);
     const intact = Object.values(b.buildings).every(x => x.hp === x.maxHp);
-    check('Sunder spares a teammate\'s walls', intact && a.spells.sunder === 1);
+    check('Sabotage Defenses spares a teammate\'s walls', intact && a.spells.sabotageDefenses === 1);
 
     b.idleUnits.swordsman = 5;
     m.cmdDeployUnits('b', { swordsman: 5 }, b.baseX, b.baseY);
     const ally = [...m.armies.values()].find(x => x.ownerId === 'b');
-    a.spells.forcedMarch = 1;
-    m.cmdCastSpell('a', 'forcedMarch', ally.x, ally.y);
-    check('and Forced March carries a teammate along with you',
-      armySpeedOf(ally) > cfg.UNIT_TYPES.swordsman.speed, `${armySpeedOf(ally).toFixed(2)}`);
+    a.spells.entangle = 1;
+    m.cmdCastSpell('a', 'entangle', Math.round(ally.x), Math.round(ally.y));
+    check('and Entangle does not root a teammate',
+      armySpeedOf(ally) === cfg.UNIT_TYPES.swordsman.speed && a.spells.entangle === 1,
+      `${armySpeedOf(ally).toFixed(2)}`);
   }
 }
 
@@ -2456,13 +2492,13 @@ function facingOff(aCount, bCount) {
   const p = m.addPlayer('p', 'human', 'P');
   m.start(); p.draft = null;
   m.takeCard(p, 'meteor');
-  m.takeCard(p, 'bulwark');
-  p.spells.meteor = 0; p.spells.bulwark = 0;
+  m.takeCard(p, 'terraform');
+  p.spells.meteor = 0; p.spells.terraform = 0;
   let meteorBack = null, otherBack = null;
   for (let t = 0; t < 2000 && (meteorBack === null || otherBack === null); t++) {
     m.tick(0.2);
     if (meteorBack === null && p.spells.meteor > 0) meteorBack = t * 0.2;
-    if (otherBack === null && p.spells.bulwark > 0) otherBack = t * 0.2;
+    if (otherBack === null && p.spells.terraform > 0) otherBack = t * 0.2;
   }
   check('a spell with no clock of its own uses the common rate',
     Math.abs(otherBack - cfg.SPELL_RECHARGE_SEC) < 1, `${otherBack}s vs ${cfg.SPELL_RECHARGE_SEC}s`);
@@ -3068,14 +3104,14 @@ function fightOut(m, ours, theirs) {
 // nothing.
 {
   const rest = Object.entries(cfg.CARDS)
-    .filter(([id, c]) => c.spell && id !== 'farsight')
+    .filter(([id, c]) => c.spell && id !== 'revealTheHeathens')
     .map(([, c]) => c.spell.rechargeSec || cfg.SPELL_RECHARGE_SEC);
-  const far = cfg.CARDS.farsight.spell.rechargeSec || cfg.SPELL_RECHARGE_SEC;
-  check('Farsight recharges faster than every other spell',
+  const far = cfg.CARDS.revealTheHeathens.spell.rechargeSec || cfg.SPELL_RECHARGE_SEC;
+  check('Reveal the Heathens recharges faster than every other spell',
     rest.every(s => far < s), `${far}s against ${Math.min(...rest)}-${Math.max(...rest)}s`);
   check('  and its card still says what it does in one line',
-    cfg.CARDS.farsight.desc.length < 130 && !cfg.CARDS.farsight.desc.includes('—'),
-    `${cfg.CARDS.farsight.desc.length} characters`);
+    cfg.CARDS.revealTheHeathens.desc.length < 130 && !cfg.CARDS.revealTheHeathens.desc.includes('—'),
+    `${cfg.CARDS.revealTheHeathens.desc.length} characters`);
 }
 
 // --- losing is the end of playing, not of watching --------------------------

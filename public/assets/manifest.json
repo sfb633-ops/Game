@@ -2604,12 +2604,12 @@
     "h": 79
    }
   },
-  "warChest": {
-   "file": "cards/warChest.png",
+  "spoilsOfWar": {
+   "file": "cards/spoilsOfWar.png",
    "w": 153,
    "h": 237,
    "small": {
-    "file": "cards/warChest-sm.png",
+    "file": "cards/spoilsOfWar-sm.png",
     "w": 51,
     "h": 79
    }
@@ -2624,12 +2624,12 @@
     "h": 79
    }
   },
-  "forgeFires": {
-   "file": "cards/forgeFires.png",
+  "deadlyTactics": {
+   "file": "cards/deadlyTactics.png",
    "w": 153,
    "h": 237,
    "small": {
-    "file": "cards/forgeFires-sm.png",
+    "file": "cards/deadlyTactics-sm.png",
     "w": 51,
     "h": 79
    }
@@ -2644,32 +2644,32 @@
     "h": 79
    }
   },
-  "thrift": {
-   "file": "cards/thrift.png",
+  "barteringTactics": {
+   "file": "cards/barteringTactics.png",
    "w": 153,
    "h": 237,
    "small": {
-    "file": "cards/thrift-sm.png",
+    "file": "cards/barteringTactics-sm.png",
     "w": 51,
     "h": 79
    }
   },
-  "surveyors": {
-   "file": "cards/surveyors.png",
+  "profoundInfluence": {
+   "file": "cards/profoundInfluence.png",
    "w": 153,
    "h": 237,
    "small": {
-    "file": "cards/surveyors-sm.png",
+    "file": "cards/profoundInfluence-sm.png",
     "w": 51,
     "h": 79
    }
   },
-  "masonry": {
-   "file": "cards/masonry.png",
+  "defensiveSavant": {
+   "file": "cards/defensiveSavant.png",
    "w": 153,
    "h": 237,
    "small": {
-    "file": "cards/masonry-sm.png",
+    "file": "cards/defensiveSavant-sm.png",
     "w": 51,
     "h": 79
    }
@@ -2694,52 +2694,32 @@
     "h": 60
    }
   },
-  "bulwark": {
-   "file": "cards/bulwark.png",
-   "w": 144,
-   "h": 180,
-   "small": {
-    "file": "cards/bulwark-sm.png",
-    "w": 48,
-    "h": 60
-   }
-  },
-  "farsight": {
-   "file": "cards/farsight.png",
+  "revealTheHeathens": {
+   "file": "cards/revealTheHeathens.png",
    "w": 126,
    "h": 186,
    "small": {
-    "file": "cards/farsight-sm.png",
+    "file": "cards/revealTheHeathens-sm.png",
     "w": 42,
     "h": 62
    }
   },
-  "withering": {
-   "file": "cards/withering.png",
+  "curseOfSickness": {
+   "file": "cards/curseOfSickness.png",
    "w": 144,
    "h": 180,
    "small": {
-    "file": "cards/withering-sm.png",
+    "file": "cards/curseOfSickness-sm.png",
     "w": 48,
     "h": 60
    }
   },
-  "sunder": {
-   "file": "cards/sunder.png",
+  "sabotageDefenses": {
+   "file": "cards/sabotageDefenses.png",
    "w": 138,
    "h": 180,
    "small": {
-    "file": "cards/sunder-sm.png",
-    "w": 46,
-    "h": 60
-   }
-  },
-  "forcedMarch": {
-   "file": "cards/forcedMarch.png",
-   "w": 138,
-   "h": 180,
-   "small": {
-    "file": "cards/forcedMarch-sm.png",
+    "file": "cards/sabotageDefenses-sm.png",
     "w": 46,
     "h": 60
    }

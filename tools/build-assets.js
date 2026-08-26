@@ -1057,27 +1057,25 @@ function buildBanner() {
 // divinatory meaning — which is why Deep Masonry gets the Tower and Thrift
 // gets the Hermit. Tomes are [row, column] into the spellbook sheet, picked
 // from the row whose colour matches the spell: fire for the meteor, green for
-// reshaping the ground, pale stone for the bulwark.
+// reshaping the ground and for the briars.
 const CARD_ART = {
-  prosperity:  { tarot: '19_The Sun' },
-  warChest:    { tarot: '10_Wheel of Fortune' },
-  drillmaster: { tarot: '7_The Chariot' },
-  forgeFires:  { tarot: '8_Strength' },
-  ironhide:    { tarot: '4_The Emperor' },
-  thrift:      { tarot: '9_The Hermit' },
-  surveyors:   { tarot: '21_The World' },
-  masonry:     { tarot: '16_The Tower' },
-  meteor:      { tome: [1, 1] },
-  terraform:   { tome: [6, 3] },
-  bulwark:     { tome: [5, 6] },
+  prosperity:        { tarot: '19_The Sun' },
+  spoilsOfWar:       { tarot: '10_Wheel of Fortune' },
+  drillmaster:       { tarot: '7_The Chariot' },
+  deadlyTactics:     { tarot: '8_Strength' },
+  ironhide:          { tarot: '4_The Emperor' },
+  barteringTactics:  { tarot: '9_The Hermit' },
+  profoundInfluence: { tarot: '21_The World' },
+  defensiveSavant:   { tarot: '16_The Tower' },
+  meteor:            { tome: [1, 1] },
+  terraform:         { tome: [6, 3] },
   // Picked for how different the covers read from each other and from the
   // three above, which matters more on a card the size of a thumbnail than
   // any literal match between a book and what it does.
-  farsight:    { tome: [7, 8] },   // blue spiral
-  withering:   { tome: [3, 5] },   // dark occult
-  sunder:      { tome: [1, 7] },   // fire, distinct from the meteor's comet
-  forcedMarch: { tome: [5, 2] },   // gold radiant
-  entangle:    { tome: [6, 4] },   // green vine
+  revealTheHeathens: { tome: [7, 8] },   // blue spiral
+  curseOfSickness:   { tome: [3, 5] },   // dark occult
+  sabotageDefenses:  { tome: [1, 7] },   // fire, distinct from the meteor's comet
+  entangle:          { tome: [6, 4] },   // green vine
 };
 
 // Both are magnified by whole pixels to the size the draft actually draws them
