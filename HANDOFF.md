@@ -1940,6 +1940,143 @@ split by side, at which point the 22 turned out to be teammates and the enemies
 were 50 to 191 tiles away. A spacing number that does not say whose seat it is
 measuring is not worth reading.
 
+### One group, one swing
+
+The worst bug the project has had, and it was invisible because nothing about
+it looked like a bug.
+
+Fights are resolved a pair at a time. Each pair charged **both** sides their
+full output, so a group being set upon from three directions dealt its damage
+three times over. Measured:
+
+| the same thirty knights, against the same three golems | result |
+| --- | --- |
+| sent as one group of 30 | golems dead, **19 knights left** |
+| sent as three groups of 10 | **every knight dead**, golems survive |
+
+Same gold, same soldiers, same ground, opposite outcome — decided by nothing
+but how they were packed. It made one enormous doom-stack the only correct
+formation in the game and quietly punished every player who manoeuvred, and it
+is very likely where a 219-strong stack of knights nobody remembers building
+came from. The same rule was in `stepCampBattle` (a camp met each raiding party
+with a fresh garrison) and `stepPlayerBattle` (three groups at the gate were
+answered by three garrisons).
+
+Fixing it took four passes, and the wrong turns are worth writing down because
+each looked right:
+
+1. **Divide the defender's swing among its attackers.** Correct as far as it
+   goes, and it fixed the headline case. But a side's output is the number of
+   soldiers still standing, so damage spread thin kills nobody for a long time
+   and only the spreader loses strength. Six groups of five then beat one of
+   thirty with twelve men to spare — the doom-stack problem again with the sign
+   flipped.
+2. **Concentrate instead.** `buildFocus` picks one opponent per combatant: what
+   it was ordered to fight, or failing that whoever is nearest. Both sides
+   concentrate, so neither is punished for the other's formation.
+3. **Standing off and being able to hit were the same number.** A group parked
+   at exactly its own fighting distance sat one hair inside its own reach, and
+   the moment anything nudged anybody it was outside. Six groups placed one
+   after another around one defender left four of them drifting a quarter tile
+   in and out of range, landing nothing. `standoffOf` is now where a group
+   stands and `reachOf` is that plus `COMBAT.reachSlack`.
+4. **A march at an enemy group never ended.** Arriving meant getting within half
+   a tile; squaring up pushed you back out to arm's length every tick. So a
+   group ordered onto another marched in, was pushed out, and marched in again
+   for the whole fight — never entering `fight`, and dragging whatever it was
+   chasing across the map. `stopAt` for an army target is the standoff now.
+
+Result: 30 v 30 is a draw whether the thirty are one group, three, or six, and
+whether they start two tiles apart or ten.
+
+### Enemy troops are ground to go round
+
+A marching column used to walk clean over the top of a group it had not been
+told to fight and out the other side, both sides untouched — a wing of knights
+went straight through the three golems at a shrine without either side breaking
+stride. Defensible as a rule and unreadable on screen.
+
+`enemyInTheWay` plus a steer in the march loop. Three things keep it safe:
+
+- **It is a turn, not a wall.** The step keeps its length and only changes
+  direction, so nothing can be teleported.
+- **If no turn is clear the march goes straight through**, exactly as before.
+  Troops that could stop a march dead would let anyone pen an army in by parking
+  one soldier in a gap, which is far worse than two sprites overlapping.
+- **A turn has to still be progress.** Without this the sidestep became a way to
+  shove people around: a group ordered onto an enemy that had two more groups
+  beside it was pushed off by the neighbours every tick and circled the fight it
+  had been sent to. Turning away from your destination is not avoiding an
+  obstacle, it is being herded.
+
+It looks two and a half tiles ahead (`AVOID_LOOKAHEAD`) rather than at where the
+next foot lands. Checking only the next step is far too late — one step is a
+fraction of a tile and a group takes up two, so by the time the step itself is
+blocked no turn clears.
+
+### Squaring up is a walk, and happens once
+
+Two more things that read as teleporting:
+
+- **A group was placed once per attacker.** Squaring up is per pair, so a group
+  set upon from three directions was dragged to a different midpoint for each of
+  them — three shoves a tick, and the golems at a shrine skidded nearly a tile a
+  tick when they can only walk a third of one. `positioned` makes whoever was
+  placed first the anchor; each further attacker takes its own station around
+  them, which is also what surrounded ought to look like.
+- **The stance was reached in one jump.** A catapult meeting swordsmen is
+  dragged from its four tiles in to arm's length, and as a single step that is
+  two and a half tiles in a tick by a crew that walks a third of one. `walkTo`
+  caps it at walking pace; closing now takes a couple of ticks and reads as
+  closing.
+
+`beginBattle` no longer backs a melee group off to arm's length when the target
+is another group, because squaring up does that properly. Doing both meant a
+group marched up, was yanked a tile closer, and was walked a tile back out on
+the very next tick.
+
+Still outstanding, and small: a group that is marching *and* being squared up in
+the same tick can cover up to twice its pace for a tick or two, because those
+are two separate movements and neither knows about the other. Fixing it needs a
+per-tick movement budget shared between the march loop and `squareUp`.
+
+### A race is a slant, not a handicap
+
+The race table was wildly out, and the reason is worth stating because it will
+happen again to anyone who tunes it by reading rather than by fighting.
+
+**Both sides deal damage in proportion to how many soldiers they still have, so
+a fight is decided by the square of each side's strength.** Every multiplier in
+`RACES` is squared on the way to the result, the economic ones included —
+cheaper soldiers and faster training both mean *more* soldiers, and more
+soldiers is the term that gets squared.
+
+The old table had orcs at 1.25 attack and 1.05 health. That is 1.31 worth per
+soldier, which does not win by 31%: an even fight of twenty a side left the orcs
+with **ten men standing**. It had undead at 0.80 cost, a count of 1.25, a result
+of 1.56 — so at equal gold the undead beat those same orcs just as hard the
+other way. Every race was either dominant or hopeless depending only on whether
+you counted soldiers or gold, and elves were hopeless on both counts.
+
+The new numbers are all within a few percent of even, and they still produce a
+visible winner. Measured across all six matchups in three fights each — same
+number of soldiers, same gold, same time spent building up — the winner walks
+off with **10–30%** of their army. The old table's worst was 72%.
+
+`rules.test.js` pins that band. Any change to `RACES` should be checked by
+running it, not by looking at the numbers and deciding they seem fair.
+
+### Merging has to be meant
+
+Groups merge and never split, so merging must not be something a player can do
+by accident. It was. Right-click sends the selection somewhere; if the cursor
+landed within 0.9 tiles of one of your own groups, the whole selection fused
+into it instead. Drag a box round your army, right-click on the army to move it,
+and you had one group and no way back.
+
+A group you have selected is somewhere to go. A group you have not selected is
+something to join.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

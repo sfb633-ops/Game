@@ -152,5 +152,25 @@ if (geomStart > 0 && geomEnd > geomStart) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Merging is one-way — groups never split again — so it must not be something a
+// player can do by accident. It was: right-click sends the selection somewhere,
+// and if the cursor happened to land on one of your own groups the whole
+// selection fused into it instead. Drag a box round your army, right-click on
+// the army, and you had one group. That is how a stack of two hundred and
+// nineteen knights nobody meant to build appears.
+//
+// The rule is that a group you have selected is somewhere to go, and a group
+// you have not selected is something to join. Checked here by reading the
+// guard, because the whole branch is DOM work that will not run outside a page.
+{
+  const at = client.indexOf('const friend = nearestMyArmy(');
+  check('right-click still offers to merge onto one of your own groups', at > 0);
+  const guard = client.slice(at, at + 400);
+  check('  but never onto a group that is part of the selection',
+    /!ids\.includes\(friend\)/.test(guard),
+    guard.split('\n').find(l => l.includes('if (friend')) || 'guard not found');
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall client checks pass');
 process.exit(failures ? 1 : 0);

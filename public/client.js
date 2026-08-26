@@ -2290,8 +2290,19 @@ function onCanvasRightClick(e) {
     const ids = commanding.map(a => a.id);
     // One of my own groups, and not one that is itself being commanded: join
     // the whole selection into it.
+    //
+    // "Not one that is itself being commanded" used to mean only the single
+    // group case, which made merging far too easy to do by accident. Drag a box
+    // round your army, right-click on it to send it somewhere, and every group
+    // in the box fused into whichever one happened to be under the cursor —
+    // silently, and with no way to undo it. Groups do not split. That is how an
+    // army of two hundred and nineteen knights nobody meant to build turns up.
+    //
+    // Right-clicking a group you have selected now means what it means
+    // everywhere else: go there. Merging is right-clicking a group you have
+    // NOT selected, which is a thing you have to mean.
     const friend = nearestMyArmy(fx, fy, 0.9);
-    if (friend && !(ids.length === 1 && ids[0] === friend)) {
+    if (friend && !ids.includes(friend)) {
       for (const id of ids) if (id !== friend) send({ type: 'mergeArmy', armyId: id, targetId: friend });
       // Follow the survivor: the groups being commanded are the ones that cease
       // to exist, and a selection pointing at nothing is a dead panel.

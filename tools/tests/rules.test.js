@@ -152,7 +152,8 @@ for (const how of ['army', 'direct']) {
     Math.abs(ser.incomePerSec - m.incomePerSec(p)) < 0.06 && Math.abs(ser.incomePerSec - raw) > 0.01,
     `raw ${raw} vs sent ${ser.incomePerSec}`);
   check('serialized mods carry the cost multiplier',
-    ser.mods && Math.abs(ser.mods.costMult - (0.8 * 0.85)) < 1e-9, `costMult ${ser.mods && ser.mods.costMult}`);
+    ser.mods && Math.abs(ser.mods.costMult - (cfg.RACES.undead.costMult * 0.85)) < 1e-9,
+    `costMult ${ser.mods && ser.mods.costMult}`);
 }
 
 // --- 7. boons actually change the numbers they claim to ------------------
@@ -470,8 +471,12 @@ function abilityMatch(myRace, theirRace) {
   m.damageArmy(army, armyMaxHp(army) * 0.6);
   const fallen = armyCount(army);
   m.cmdUseAbility('me', Math.round(army.x), Math.round(army.y));
+  // Health compared with a tolerance, not exactly: armyHp adds twenty soldiers
+  // up one at a time and armyMaxHp multiplies once, so the two disagree in the
+  // last bit or two the moment a race's hpMult is not a round binary fraction.
   check('Reincarnation raises an army back to the strength it mustered',
-    fallen < 20 && armyCount(army) === 20 && armyHp(army) === armyMaxHp(army),
+    fallen < 20 && armyCount(army) === 20 &&
+    Math.abs(armyHp(army) - armyMaxHp(army)) < 1e-6,
     fallen + ' -> ' + armyCount(army));
   check('and never conjures more than marched out',
     armyCount(army) === army.mustered && armyWounded(army) === 0);
@@ -2583,6 +2588,204 @@ function facingOff(aCount, bCount) {
   }
   check('and in a team game your nearest neighbour is always a teammate',
     bad.length === 0, bad.join('  ') || 'every map and team count');
+}
+
+// --- one group, one swing --------------------------------------------------
+//
+// Fights are resolved a pair at a time, and each pair used to charge both sides
+// their full output — so a group set upon from three directions dealt its
+// damage three times over. The whole shape of the game hung on it: packing
+// everything into a single doom-stack was not a good idea, it was the only
+// idea, and any player who manoeuvred was quietly fighting at a fraction of
+// strength.
+//
+// The pin is the one a player would notice: the same soldiers, sent the same
+// distance at the same enemy, must get the same result whether they march as
+// one block or as several.
+function field(m, playerId, type, n, x, y) {
+  const p = m.players.get(playerId);
+  p.idleUnits[type] = (p.idleUnits[type] || 0) + n;
+  const before = new Set(m.armies.keys());
+  m.cmdDeployUnits(playerId, { [type]: n }, p.baseX, p.baseY);
+  const army = [...m.armies.values()].find(a => !before.has(a.id));
+  army.x = x; army.y = y; army.destX = x; army.destY = y; army.order = 'hold';
+  return army;
+}
+function twoSides(rA = 'human', rB = 'human') {
+  const m = new Match({ started: false, map: 'openfield' });
+  const a = m.addPlayer('a', rA, 'A'), b = m.addPlayer('b', rB, 'B');
+  m.start(); a.draft = null; b.draft = null;
+  return m;
+}
+function fightOut(m, ours, theirs) {
+  for (const A of ours) m.cmdAttackArmy('a', A.id, 'army', theirs[0].id);
+  for (const B of theirs) m.cmdAttackArmy('b', B.id, 'army', ours[0].id);
+  for (let t = 0; t < 9000; t++) {
+    m.tick(0.2);
+    if (!ours.some(x => m.armies.has(x.id)) || !theirs.some(x => m.armies.has(x.id))) break;
+  }
+  const live = (list) => list.filter(x => m.armies.has(x.id)).reduce((s, x) => s + armyCount(x), 0);
+  return { ours: live(ours), theirs: live(theirs) };
+}
+{
+  const asOneBlock = () => {
+    const m = twoSides();
+    return fightOut(m, [field(m, 'a', 'knight', 30, 60, 60)], [field(m, 'b', 'golem', 3, 63, 60)]);
+  };
+  const asThreeGroups = () => {
+    const m = twoSides();
+    return fightOut(m,
+      [field(m, 'a', 'knight', 10, 60, 59), field(m, 'a', 'knight', 10, 60, 60), field(m, 'a', 'knight', 10, 60, 61)],
+      [field(m, 'b', 'golem', 3, 63, 60)]);
+  };
+  const one = asOneBlock(), three = asThreeGroups();
+  check('thirty knights beat three golems as one block', one.ours > 0 && one.theirs === 0,
+    `${one.ours} knights left`);
+  check('and the same thirty do it as three groups too', three.ours > 0 && three.theirs === 0,
+    `${three.ours} knights left`);
+  // Some difference is honest — a group that is wiped out stops contributing
+  // sooner than the same men would inside a bigger one — but it has to be a
+  // detail, not the whole result. Before this was fixed the three groups lost
+  // every man and the golems walked away without a scratch.
+  check('  and splitting up costs less than a quarter of the survivors',
+    Math.abs(one.ours - three.ours) <= Math.max(one.ours, three.ours) * 0.25,
+    `one block ${one.ours}, three groups ${three.ours}`);
+}
+
+// The same rule, stated directly: a defender fighting three groups swings once,
+// not three times, so an even fight stays even however either side is packed.
+{
+  const together = () => {
+    const m = twoSides();
+    return fightOut(m, [field(m, 'a', 'swordsman', 30, 60, 60)], [field(m, 'b', 'swordsman', 30, 63, 60)]);
+  };
+  const surrounded = () => {
+    const m = twoSides();
+    return fightOut(m, [field(m, 'a', 'swordsman', 10, 60, 59),
+                        field(m, 'a', 'swordsman', 10, 60, 60),
+                        field(m, 'a', 'swordsman', 10, 60, 61)],
+                       [field(m, 'b', 'swordsman', 30, 63, 60)]);
+  };
+  const t = together(), s = surrounded();
+  check('thirty against thirty is close however the thirty are packed',
+    t.ours <= 3 && t.theirs <= 3 && s.ours <= 8 && s.theirs <= 8,
+    `one block ${t.ours}-${t.theirs}, three groups ${s.ours}-${s.theirs}`);
+}
+
+// A camp's garrison is the same rule again: one defence divided among everyone
+// at the stockade, not a fresh garrison for each party that turns up.
+{
+  const raid = (groups) => {
+    const m = twoSides();
+    const camp = m.aiCamps.find(c => !c.shrine);
+    const per = Math.floor(60 / groups);
+    const ours = [];
+    for (let i = 0; i < groups; i++) ours.push(field(m, 'a', 'swordsman', per, camp.x - 3, camp.y - 1 + i));
+    for (const A of ours) m.cmdAttackArmy('a', A.id, 'camp', camp.id);
+    for (let t = 0; t < 9000 && !camp.defeated && ours.some(x => m.armies.has(x.id)); t++) m.tick(0.2);
+    return { took: camp.defeated, left: ours.filter(x => m.armies.has(x.id)).reduce((s, x) => s + armyCount(x), 0) };
+  };
+  const one = raid(1), three = raid(3);
+  check('sixty men take a camp whether they arrive as one party or three',
+    one.took && three.took, `one party ${one.took}, three ${three.took}`);
+  check('  and pay about the same for it',
+    Math.abs(one.left - three.left) <= 10, `${one.left} left vs ${three.left} left`);
+}
+
+// --- enemy troops are ground to go round -----------------------------------
+{
+  const m = twoSides();
+  const them = field(m, 'b', 'golem', 3, 60, 60);
+  const us = field(m, 'a', 'knight', 20, 50, 60);
+  m.cmdMoveArmy('a', us.id, 70, 60);
+  let closest = Infinity;
+  for (let t = 0; t < 900 && m.armies.has(us.id); t++) {
+    m.tick(0.2);
+    closest = Math.min(closest, Math.hypot(us.x - them.x, us.y - them.y));
+    if (Math.abs(us.x - 70) < 0.3) break;
+  }
+  check('a march goes round a group in its way rather than over it',
+    closest > cfg.COMBAT.faceOff, `passed ${closest.toFixed(2)} tiles clear`);
+  // ...and still gets where it was going. Troops that could stop a march dead
+  // would let anyone pen an army in by parking one soldier in a gap, which is a
+  // far worse bug than two sprites overlapping.
+  check('  and still arrives', Math.abs(us.x - 70) < 1 && armyCount(us) === 20,
+    `x=${us.x.toFixed(1)}, ${armyCount(us)} of 20`);
+}
+
+// A group is shoved into position once a tick, not once per attacker: being set
+// upon from three sides used to drag the group in the middle to a different
+// midpoint for each of them, and three golems were seen skidding most of a tile
+// a tick when they can only walk a third of one.
+{
+  const m = twoSides();
+  const them = field(m, 'b', 'golem', 3, 60, 60);
+  const ours = [field(m, 'a', 'knight', 10, 64, 58),
+                field(m, 'a', 'knight', 10, 64, 60),
+                field(m, 'a', 'knight', 10, 64, 62)];
+  for (const A of ours) m.cmdAttackArmy('a', A.id, 'army', them.id);
+  //
+  // Squaring up is a real move and the golems are entitled to exactly one of
+  // them, on the tick contact is made. What they are not entitled to is a
+  // second: every tick after that they are standing in a fight they cannot
+  // walk out of, and a group that is standing still should be standing still.
+  const walkingPace = cfg.UNIT_TYPES.golem.speed * 0.2;
+  let prev = { x: them.x, y: them.y }, shoves = 0, worst = 0;
+  for (let t = 0; t < 400 && m.armies.has(them.id); t++) {
+    m.tick(0.2);
+    const jump = Math.hypot(them.x - prev.x, them.y - prev.y);
+    if (jump > walkingPace) { shoves++; worst = Math.max(worst, jump); }
+    prev = { x: them.x, y: them.y };
+  }
+  check('a group surrounded by three is shoved into place once, not once per attacker',
+    shoves <= 1,
+    `${shoves} shove(s), worst ${worst.toFixed(3)} against a walking pace of ${walkingPace.toFixed(3)}`);
+}
+
+// --- a race is a slant, not a handicap -------------------------------------
+//
+// See the comment over RACES. Both sides deal damage in proportion to how many
+// they have left, so every multiplier in that table is squared on its way to
+// the result — which is why the numbers there are so much smaller than they
+// look, and why they have to be checked by fighting rather than by reading.
+//
+// Three fights, because a race can be ahead on one and behind on another: the
+// same number of soldiers, the same gold spent, and the same time spent
+// building up. In all of them the winner should walk off with a slice of their
+// army rather than most of it.
+{
+  const duel = (xr, yr, nx, ny) => {
+    const m = twoSides(xr, yr);
+    const r = fightOut(m, [field(m, 'a', 'swordsman', nx, 60, 60)],
+                          [field(m, 'b', 'swordsman', ny, 62, 60)]);
+    return Math.max(r.ours, r.theirs) / (r.ours >= r.theirs ? nx : ny);
+  };
+  const u = cfg.UNIT_TYPES.swordsman;
+  // What an empire can put in the field in seven minutes: gold buys them, and
+  // the barracks queue is the other ceiling. Whichever binds first is the
+  // answer, and which one that is differs by race — which is the point.
+  const fielded = (r, sec = 420, barracks = 2) => Math.floor(Math.min(
+    (cfg.CASTLE.incomePerSec[1] + 2 * cfg.BUILDING_TYPES.bank.incomePerSec) * r.incomeMult * sec / (u.cost * r.costMult),
+    barracks * sec / (u.trainTimeSec * r.buildTimeMult)));
+  const ids = Object.keys(cfg.RACES);
+  let worst = 0, worstAt = '';
+  for (let i = 0; i < ids.length; i++) {
+    for (let j = i + 1; j < ids.length; j++) {
+      const x = ids[i], y = ids[j], rx = cfg.RACES[x], ry = cfg.RACES[y];
+      for (const [what, nx, ny] of [
+        ['at equal numbers', 20, 20],
+        ['at equal gold', Math.floor(800 / (u.cost * rx.costMult)), Math.floor(800 / (u.cost * ry.costMult))],
+        ['after seven minutes', fielded(rx), fielded(ry)],
+      ]) {
+        const kept = duel(x, y, nx, ny);
+        if (kept > worst) { worst = kept; worstAt = `${x} v ${y} ${what}`; }
+      }
+    }
+  }
+  check('no race beats another with most of its army still standing',
+    worst <= 0.35, `worst is ${worstAt} — winner keeps ${(worst * 100).toFixed(0)}%`);
+  check('  and every matchup is still decided by somebody',
+    worst >= 0.05, `worst ${(worst * 100).toFixed(0)}%`);
 }
 
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');

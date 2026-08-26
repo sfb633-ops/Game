@@ -129,11 +129,52 @@ const OUTPOST = {
   radius: BUILD.radius / 2,
 };
 
+// A race is meant to be a slant, not a handicap — and these numbers have to be
+// far smaller than they look to stay one.
+//
+// Both sides of a fight deal damage in proportion to how many soldiers they
+// still have, so a fight is decided by the SQUARE of each side's strength, not
+// by its strength. That is Lanchester's square law and it is unforgiving here:
+// a 31% edge per soldier does not win by 31%, it wins with half the army still
+// standing. Every multiplier below is squared on its way to the result,
+// including the economic ones — cheaper soldiers and faster training both mean
+// MORE soldiers, and more soldiers is the term that gets squared.
+//
+// So the honest way to read this table is: how many soldiers does each race
+// have on the field, and how good is each of them.
+//
+//   count  ~ incomeMult / costMult, and 1 / buildTimeMult once the queue binds
+//   worth  ~ attackMult * hpMult
+//   result ~ count^2 * worth
+//
+// The old table had orcs at 1.25 attack and 1.05 health — 1.31 worth, which
+// took an even fight of twenty a side and left orcs with ten men standing. It
+// had undead at 0.80 cost, which is a count of 1.25, which is a result of 1.56,
+// so at equal gold the undead beat those same orcs just as hard in the other
+// direction. Every race was either dominant or hopeless depending only on
+// whether you counted soldiers or gold, and elves were hopeless on both.
+//
+// Everything here is now inside a few percent of even, and it still produces a
+// visible winner: across all six matchups, at equal numbers, at equal gold and
+// at equal time spent building up, whoever wins walks off the field with 10-30%
+// of their army — a close fight that a small edge decided. That is the target.
+// Any new number here should be checked against tools/tests/rules.test.js,
+// which pins that band, before it is believed.
+//
+// The identities, then, are small and deliberate:
+//   Orc    hits hardest and falls fastest, and is slower and poorer at raising
+//          the next lot. The brute.
+//   Elf    frailer, richer, quicker to train. Wins by having more of them, and
+//          its ability makes what it has in the field hard to hit.
+//   Undead cheaper and quicker to raise, slightly frailer, poorer per second.
+//          Wins by getting them back — see Reincarnation.
+//   Human  the flat baseline, with the best ability of the four to make up for
+//          having no numbers of its own.
 const RACES = {
   human:  { name: 'Human',  incomeMult: 1.00, attackMult: 1.00, hpMult: 1.00, buildTimeMult: 1.00, costMult: 1.00 },
-  orc:    { name: 'Orc',    incomeMult: 0.90, attackMult: 1.25, hpMult: 1.05, buildTimeMult: 1.00, costMult: 1.00 },
-  elf:    { name: 'Elf',    incomeMult: 1.10, attackMult: 0.90, hpMult: 0.85, buildTimeMult: 0.85, costMult: 1.00 },
-  undead: { name: 'Undead', incomeMult: 0.85, attackMult: 1.00, hpMult: 1.00, buildTimeMult: 0.80, costMult: 0.80 },
+  orc:    { name: 'Orc',    incomeMult: 0.97, attackMult: 1.13, hpMult: 0.93, buildTimeMult: 1.03, costMult: 1.00 },
+  elf:    { name: 'Elf',    incomeMult: 1.04, attackMult: 1.00, hpMult: 0.96, buildTimeMult: 0.95, costMult: 1.00 },
+  undead: { name: 'Undead', incomeMult: 0.97, attackMult: 1.00, hpMult: 0.98, buildTimeMult: 0.95, costMult: 0.97 },
 };
 
 // One active ability per race, on a cooldown of its own. Abilities are not
@@ -367,6 +408,21 @@ const COMBAT = {
   // standing inside it and two groups fighting each other were one pile of
   // sprites. They now settle at this distance and face each other across it.
   faceOff: 0.95,
+  // A little further than a group stands off what it is fighting, and the
+  // difference between a brawl and a shoving match.
+  //
+  // Standing off and being able to hit used to be the same number, so a group
+  // parked at exactly its own fighting distance was exactly one hair inside
+  // its own reach — and the moment anything nudged anybody, it was outside it.
+  // Six groups closing on one were placed at that distance one after another,
+  // and four of them spent the fight drifting a quarter tile in and out of
+  // range, landing nothing and taking nothing. The fight was decided by two
+  // groups while four watched.
+  //
+  // It is deliberately far smaller than the gap between arm's length and a
+  // catapult's four tiles: swordsmen still cannot touch artillery that has
+  // stopped short of them, which is the whole reason artillery has a range.
+  reachSlack: 0.55,
 };
 
 // ---------------------------------------------------------------------------

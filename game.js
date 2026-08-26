@@ -100,6 +100,22 @@ function armyWounded(army) {
   return n;
 }
 
+// The sidesteps a marching group tries when another group is standing where it
+// wanted to put its foot. Precomputed because this runs for every group every
+// tick. Nothing beyond a quarter turn is here: a half turn is sideways, which
+// never gets the group any nearer to where it is going, and the caller throws
+// those away anyway.
+const AVOID_TURNS = [Math.PI / 6, -Math.PI / 6, Math.PI / 4, -Math.PI / 4, Math.PI / 3, -Math.PI / 3]
+  .map(a => ({ cos: Math.cos(a), sin: Math.sin(a) }));
+
+// How far ahead a marching group looks for somebody standing in its road.
+// Checking only where its next foot lands is far too late: one step is a
+// fraction of a tile and a group takes up two, so by the time the step itself
+// is blocked there is no turn left that clears — the column simply walked into
+// them and through. Looking a couple of tiles ahead lets a small turn, taken
+// early, build the room to pass.
+const AVOID_LOOKAHEAD = 2.5;
+
 // A breadth-first route comes out one tile at a time; only the corners are
 // worth walking to. Drops every point the army would pass straight through.
 function simplifyRoute(route) {
@@ -242,6 +258,13 @@ class Match {
     // "a|b" for every pair of groups whose exchange has already been resolved
     // this tick. Lives for one tick; see the top of tick().
     this.resolvedPairs = new Set();
+    // Who is swinging at whom this tick, and who has already been shoved into
+    // position. Both are rebuilt at the top of every tick; both are empty
+    // outside one, which is what makes a Match stepped by hand in a test
+    // behave the same as one stepped by the server.
+    this.engagements = new Map();
+    this.focused = new Map();
+    this.positioned = new Set();
     // "x,y" -> seconds of rubble left on a tile whose wall or tower was broken.
     // Nothing may be built there until it clears. See razeBuilding.
     this.rubble = new Map();
@@ -1973,6 +1996,26 @@ class Match {
     return null;
   }
 
+  // Enemy troops take up ground. A marching column used to walk clean over the
+  // top of a group it had not been told to fight and out the other side, both
+  // sides untouched — defensible as a rule, since a group fights what it is
+  // ordered to fight and nothing else, and unreadable on screen, where it is
+  // simply two squads standing in the same square. A wing of knights went
+  // straight through the three golems at a shrine without either side breaking
+  // stride.
+  //
+  // Whatever the group has been sent to fight is the one thing it is allowed to
+  // walk up to; that is the whole point of an attack order.
+  enemyInTheWay(army, x, y) {
+    for (const other of this.armies.values()) {
+      if (other === army || armyCount(other) === 0) continue;
+      if (this.allied(army.ownerId, other.ownerId)) continue;
+      if (army.targetType === 'army' && army.targetId === other.id) continue;
+      if (Math.hypot(other.x - x, other.y - y) < COMBAT.faceOff * 2) return other;
+    }
+    return null;
+  }
+
   blockingWall(army, worldX, worldY) {
     const x = Math.round(worldX), y = Math.round(worldY);
     // Already standing on the tile — a bulwark dropped on top of it, say — is
@@ -2459,6 +2502,11 @@ class Match {
     // written by stepArmyBattle, which resolves a pair once whichever of the
     // two the loop reaches first.
     this.resolvedPairs.clear();
+    // ...and nobody is shoved into position more than once a tick — see
+    // squareUp.
+    this.positioned.clear();
+    this.buildEngagements();
+    this.buildFocus();
 
     for (const player of this.players.values()) {
       if (!player.alive) continue;
@@ -2561,9 +2609,21 @@ class Match {
       const dx = army.destX - army.x, dy = army.destY - army.y;
       const dist = Math.hypot(dx, dy);
       const speed = armySpeed(army);
-      const stopAt = army.order === 'attack'
-        ? Math.max(COMBAT.engageRange, armyRange(army))
-        : 0.15;
+      // Where a march ends. Marching onto a spot of ground means standing on
+      // it; marching onto an enemy means stopping where you will fight them
+      // from, which for anyone without a range is arm's length rather than the
+      // enemy's own tile.
+      //
+      // That last part was missing, and it deadlocked: a group ordered onto
+      // another group was pushed back out to arm's length by squaring up every
+      // tick and then told it had not arrived yet, because arriving meant
+      // getting within half a tile. It marched in, was pushed out, and marched
+      // in again for the whole fight — never entering 'fight', never stopping,
+      // and dragging whatever it was chasing across the map.
+      const stopAt = army.order !== 'attack' ? 0.15
+        : army.targetType === 'army'
+          ? Math.max(COMBAT.engageRange, this.standoffOf(army))
+          : Math.max(COMBAT.engageRange, armyRange(army));
       if (dist < stopAt || speed <= 0) {
         if (army.order === 'attack') {
           this.beginBattle(army);
@@ -2593,8 +2653,39 @@ class Match {
       const legDist = Math.hypot(lx, ly);
       if (legDist < 1e-6) continue;
       const step = Math.min(legDist, speed * dt);
-      const nx = army.x + (lx / legDist) * step;
-      const ny = army.y + (ly / legDist) * step;
+      const ux = lx / legDist, uy = ly / legDist;
+      let nx = army.x + ux * step, ny = army.y + uy * step;
+      // Go round a group standing in the way rather than through it. This is a
+      // steer and not a wall: the step keeps its length and only turns, so
+      // nothing here can teleport anyone, and if no turn is clear the march
+      // goes straight through exactly as it used to. That last part is
+      // deliberate — troops that could stop a march dead would let anyone pen
+      // an army in by parking one soldier in a gap, which is a far worse bug
+      // than two sprites overlapping.
+      //
+      // A turn is only taken if it still gets the group NEARER to where it is
+      // walking. Without that condition the sidestep quietly became a way to
+      // shove people around: a group ordered onto an enemy that had two more
+      // groups standing beside it was pushed off by the neighbours every tick,
+      // so it circled the fight it had been sent to instead of ever closing,
+      // and the three groups it was fighting each fought it alone. Turning away
+      // from your destination is not avoiding an obstacle, it is being herded.
+      const probe = Math.max(step, Math.min(AVOID_LOOKAHEAD, legDist));
+      if (this.enemyInTheWay(army, army.x + ux * probe, army.y + uy * probe)) {
+        let best = null;
+        for (const turn of AVOID_TURNS) {
+          const hx = ux * turn.cos - uy * turn.sin, hy = ux * turn.sin + uy * turn.cos;
+          // Clear where the turn leads, not merely where it starts.
+          if (this.enemyInTheWay(army, army.x + hx * probe, army.y + hy * probe)) continue;
+          const tx = army.x + hx * step, ty = army.y + hy * step;
+          if (this.enemyInTheWay(army, tx, ty)) continue;
+          if (!this.validMoveTile(Math.round(tx), Math.round(ty))) continue;
+          const d = Math.hypot(leg.x - tx, leg.y - ty);
+          if (d >= legDist) continue;                 // sideways or backwards
+          if (!best || d < best.d) best = { x: tx, y: ty, d };
+        }
+        if (best) { nx = best.x; ny = best.y; }
+      }
       // The route is planned round walls, so this only fires when there was no
       // way round to plan — a sealed compound, or a wall raised across the path
       // between one tick and the next.
@@ -2637,7 +2728,15 @@ class Match {
     // Artillery already stopped at its own range. Everyone else closes to arm's
     // length and squares up, rather than being snapped onto the thing they are
     // hitting and drawn standing inside it.
-    if (!armyRange(army)) this.faceOff(army, army.destX, army.destY, COMBAT.faceOff);
+    //
+    // Not for a fight with another group, though: that one has squareUp, which
+    // arranges both sides properly and now walks them there. Backing off to
+    // arm's length here as well meant a group marched up, was yanked a tile
+    // closer by this, and was walked a tile back out again by squaring up on
+    // the very next tick — a jump and a shuffle in place of an approach.
+    if (!armyRange(army) && army.targetType !== 'army') {
+      this.faceOff(army, army.destX, army.destY, COMBAT.faceOff);
+    }
     army.order = 'fight';
     army.plunder = 0;
     if (army.targetType === 'player') {
@@ -2662,12 +2761,128 @@ class Match {
   // artillery, which is exactly what melee is for. Without this a ballista that
   // attacked anything was dragged from its four tiles in to one, which threw
   // away the whole point of making it ranged.
-  // How far a group can hit. Artillery has its own range; everyone else can
-  // reach exactly as far as squaring up puts them, which is what makes melee
-  // melee.
-  reachOf(army) {
+  // ---- One group, one swing ------------------------------------------------
+  //
+  // Everything anyone is swinging at this tick, built once before the army
+  // loop runs. `engagements` maps a combatant to the set of things it is
+  // actually landing blows on; `share` turns that into the fraction of its
+  // one swing each of them gets.
+  //
+  // Fights are resolved a pair at a time, and each pair used to charge both
+  // sides their FULL output — so a group set upon from three directions dealt
+  // its damage three times over. That is not a rounding error, it is the whole
+  // shape of a fight: thirty knights sent as one block beat a shrine's three
+  // golems with nineteen still standing, and the same thirty knights sent as
+  // three groups of ten were wiped out to a man by the same three golems. Same
+  // gold, same soldiers, opposite result, decided by nothing but how they were
+  // packed. It made one enormous doom-stack the only correct formation in the
+  // game and quietly punished every player who manoeuvred.
+  //
+  // The rule now is the obvious one: a group has one swing per tick however
+  // many people are hitting it, and it divides that swing between them.
+  //
+  // Only blows that actually land are counted. A ballista parked outside a
+  // keep's reach is not in the garrison's fight and must not dilute what the
+  // garrison lands on the swordsmen at its gate — the same reach test
+  // stepArmyBattle and defendersCanReach already use decides who is in.
+  buildEngagements() {
+    const opp = this.engagements;
+    opp.clear();
+    // "`a` is swinging at `b`". Keyed by kind so armies, camps and keeps can
+    // all share one table: a:<armyId>, c:<campId>, p:<playerId>.
+    const swingsAt = (a, b) => {
+      let set = opp.get(a);
+      if (!set) { set = new Set(); opp.set(a, set); }
+      set.add(b);
+    };
+    for (const army of this.armies.values()) {
+      if (army.order !== 'fight' || armyCount(army) === 0) continue;
+      const me = 'a:' + army.id;
+      if (army.targetType === 'army') {
+        const foe = this.armies.get(army.targetId);
+        if (!foe || armyCount(foe) === 0) continue;
+        const gap = Math.hypot(foe.x - army.x, foe.y - army.y);
+        if (gap <= this.reachOf(army) + 0.05) swingsAt(me, 'a:' + foe.id);
+        if (gap <= this.reachOf(foe) + 0.05) swingsAt('a:' + foe.id, me);
+      } else if (army.targetType === 'camp') {
+        const camp = this.aiCamps.find(c => c.id === army.targetId);
+        if (!camp || camp.defeated) continue;
+        // Siege lands whatever the range; the garrison only answers in reach.
+        swingsAt(me, 'c:' + camp.id);
+        if (this.defendersCanReach(army, camp.x, camp.y)) swingsAt('c:' + camp.id, me);
+      } else if (army.targetType === 'player') {
+        const foe = this.players.get(army.targetId);
+        if (!foe || !foe.alive) continue;
+        swingsAt(me, 'p:' + foe.id);
+        if (this.defendersCanReach(army, foe.baseX, foe.baseY)) swingsAt('p:' + foe.id, me);
+      }
+    }
+  }
+
+  // Who each combatant is actually swinging at, out of everything it is in a
+  // fight with. One opponent, not a share of each.
+  //
+  // Dividing a defender's damage evenly among its attackers was the first
+  // answer here and it is wrong in an interesting way. A side's output is the
+  // number of soldiers it still has standing, so damage that is spread thin
+  // kills nobody for a long time and the spreader is the only one losing
+  // strength: six groups of five beat one of thirty with twelve men to spare,
+  // which is the doom-stack problem again with the sign flipped. Concentrating
+  // is what both sides do, so both sides do it.
+  //
+  // A group fights what it was told to fight. Anything that was told nothing —
+  // a garrison, a camp, a group set upon while it was holding ground — fights
+  // whoever is nearest, which is also the one that has closed on it.
+  buildFocus() {
+    const focus = this.focused;
+    focus.clear();
+    const at = (key) => {
+      if (key[0] === 'a') { const a = this.armies.get(key.slice(2)); return a && { x: a.x, y: a.y }; }
+      if (key[0] === 'c') { const c = this.aiCamps.find(v => v.id === key.slice(2)); return c && { x: c.x, y: c.y }; }
+      const p = this.players.get(key.slice(2));
+      return p && { x: p.baseX, y: p.baseY };
+    };
+    for (const [key, opponents] of this.engagements) {
+      if (opponents.size === 1) { focus.set(key, opponents.values().next().value); continue; }
+      const army = key[0] === 'a' ? this.armies.get(key.slice(2)) : null;
+      const ordered = army && army.targetType === 'army' ? 'a:' + army.targetId : null;
+      if (ordered && opponents.has(ordered)) { focus.set(key, ordered); continue; }
+      const here = at(key);
+      let best = null, bestD = Infinity;
+      for (const other of opponents) {
+        const there = at(other);
+        if (!there) continue;
+        const d = here && there ? Math.hypot(there.x - here.x, there.y - here.y) : 0;
+        // Ties broken by id so a fight plays out the same way twice.
+        if (d < bestD || (d === bestD && (best === null || other < best))) { bestD = d; best = other; }
+      }
+      if (best) focus.set(key, best);
+    }
+  }
+
+  // Is this the opponent that combatant is swinging at this tick?
+  swingingAt(key, opponentKey) {
+    return this.focused.get(key) === opponentKey;
+  }
+
+  // What a group lands on one opponent: everything, if that is who it is
+  // fighting this tick, and nothing if its attention is elsewhere.
+  outputAgainst(army, dt, opponentKey) {
+    return this.swingingAt('a:' + army.id, opponentKey) ? this.attackOutput(army, dt) : 0;
+  }
+
+  // How far a group stands off the thing it is fighting: its own range if it
+  // has one, and arm's length if it has not. This is where squaring up puts it.
+  standoffOf(army) {
     const r = armyRange(army);
     return r > 0 ? r : COMBAT.faceOff * 2;
+  }
+
+  // How far a group can actually land a blow — its standoff plus a little
+  // slack, so a crowded fight does not fall apart the moment somebody drifts.
+  // See COMBAT.reachSlack.
+  reachOf(army) {
+    return this.standoffOf(army) + COMBAT.reachSlack;
   }
 
   // Can what is being attacked hit back from where the attackers are standing?
@@ -2678,21 +2893,33 @@ class Match {
   // in stepTowers, out to five tiles, so a keep that wants an answer to
   // artillery builds one rather than relying on the people standing inside it.
   defendersCanReach(army, tx, ty) {
-    return Math.hypot(army.x - tx, army.y - ty) <= COMBAT.faceOff * 2 + 0.05;
+    return Math.hypot(army.x - tx, army.y - ty) <= COMBAT.faceOff * 2 + COMBAT.reachSlack;
   }
 
   stanceBetween(a, b) {
     const pulling = [];
-    if (a.targetType === 'army' && a.targetId === b.id) pulling.push(this.reachOf(a));
-    if (b.targetType === 'army' && b.targetId === a.id) pulling.push(this.reachOf(b));
-    if (!pulling.length) return Math.max(this.reachOf(a), this.reachOf(b));
+    if (a.targetType === 'army' && a.targetId === b.id) pulling.push(this.standoffOf(a));
+    if (b.targetType === 'army' && b.targetId === a.id) pulling.push(this.standoffOf(b));
+    if (!pulling.length) return Math.max(this.standoffOf(a), this.standoffOf(b));
     return Math.min(...pulling);
   }
 
   // Push two groups to opposite sides of the ground between them and turn them
   // to face each other. Idempotent: once they are the right distance apart this
   // changes nothing, so it is safe to call every tick of a fight.
-  squareUp(a, b) {
+  //
+  // A group only gets placed once a tick. Squaring up is per pair, so a group
+  // being set upon from three directions was dragged to a different midpoint
+  // for each of them: three shoves a tick, and the three golems at a shrine
+  // were seen skidding nearly a tile a tick when they can only walk a third of
+  // one. Whoever was placed first is the anchor after that, and each further
+  // attacker takes its own station around them — which is also what "surrounded"
+  // ought to look like.
+  squareUp(a, b, dt) {
+    const anchorA = this.positioned.has(a.id);
+    const anchorB = this.positioned.has(b.id);
+    this.positioned.add(a.id); this.positioned.add(b.id);
+    if (anchorA && anchorB) { this.lookAt(a, b.x, b.y); this.lookAt(b, a.x, a.y); return; }
     let dx = b.x - a.x, dy = b.y - a.y;
     let len = Math.hypot(dx, dy);
     if (len < 1e-3) {
@@ -2703,23 +2930,46 @@ class Match {
       if (len < 1e-3) { dx = 1; dy = 0; len = 1; }
     }
     const ux = dx / len, uy = dy / len;
-    const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
     const want = this.stanceBetween(a, b);
     // Widest stance the ground will take, narrowing until both ends land on
     // something troops can stand on. A brawl in a mountain pass ends up tighter
     // than one in open field, which is correct.
     for (let sep = want; sep > 0.1; sep -= 0.15) {
-      const h = sep / 2;
-      const ax = midX - ux * h, ay = midY - uy * h;
-      const bx = midX + ux * h, by = midY + uy * h;
+      let ax, ay, bx, by;
+      if (anchorA) {
+        ax = a.x; ay = a.y; bx = ax + ux * sep; by = ay + uy * sep;
+      } else if (anchorB) {
+        bx = b.x; by = b.y; ax = bx - ux * sep; ay = by - uy * sep;
+      } else {
+        const h = sep / 2, midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
+        ax = midX - ux * h; ay = midY - uy * h;
+        bx = midX + ux * h; by = midY + uy * h;
+      }
       if (!this.validMoveTile(Math.round(ax), Math.round(ay))) continue;
       if (!this.validMoveTile(Math.round(bx), Math.round(by))) continue;
-      a.x = ax; a.y = ay;
-      b.x = bx; b.y = by;
+      // Walk into the stance rather than appearing in it. Groups engage from
+      // wherever they happened to stop, and a catapult meeting swordsmen is
+      // dragged from its four tiles in to arm's length — as one jump that is
+      // two and a half tiles in a single tick by a crew that walks a third of
+      // one, which on screen is the engine flicking across the field. Taking it
+      // at walking pace costs a couple of ticks and reads as closing.
+      this.walkTo(a, ax, ay, dt);
+      this.walkTo(b, bx, by, dt);
       break;
     }
     this.lookAt(a, b.x, b.y);
     this.lookAt(b, a.x, a.y);
+  }
+
+  // Move a group towards a spot, no faster than it walks.
+  walkTo(army, x, y, dt) {
+    const dx = x - army.x, dy = y - army.y;
+    const d = Math.hypot(dx, dy);
+    const cap = armySpeed(army) * (dt || 0);
+    if (d < 1e-9) return;
+    if (!(cap > 0) || d <= cap) { army.x = x; army.y = y; return; }
+    army.x += (dx / d) * cap;
+    army.y += (dy / d) * cap;
   }
 
   // Turn a group to look at a point. destX/destY doubles as both "where this
@@ -2776,7 +3026,7 @@ class Match {
     // order and come back, and because the group being attacked may never have
     // entered 'fight' at all — it is standing on 'hold' being shot at, and it
     // should still turn to face what is hitting it.
-    this.squareUp(army, foe);
+    this.squareUp(army, foe, dt);
 
     // A blow only lands if the thing being hit is inside the swing. Both sides
     // used to trade at whatever distance they happened to be standing, which
@@ -2790,10 +3040,15 @@ class Match {
     // stance to whoever has the shorter reach, so a group that marches on a
     // ballista drags it down to arm's length and kills it there. Cramped ground
     // does the same, because squaring up narrows the stance to fit.
+    //
+    // Each side swings once and divides it among everything it is fighting —
+    // see buildEngagements. For a straight one-on-one that is the whole swing
+    // and nothing here changes; it is the group in the middle of three that
+    // stops fighting all three at full strength.
     const gap = Math.hypot(foe.x - army.x, foe.y - army.y);
     const inReach = (attacker) => gap <= this.reachOf(attacker) + 0.05;
-    const onFoe = inReach(army) ? this.mitigate(foe.ownerId, this.attackOutput(army, dt), army.race, false) : 0;
-    const onUs  = inReach(foe)  ? this.mitigate(army.ownerId, this.attackOutput(foe, dt), foe.race, false)  : 0;
+    const onFoe = inReach(army) ? this.mitigate(foe.ownerId, this.outputAgainst(army, dt, 'a:' + foe.id), army.race, false) : 0;
+    const onUs  = inReach(foe)  ? this.mitigate(army.ownerId, this.outputAgainst(foe, dt, 'a:' + army.id), foe.race, false)  : 0;
 
     const foeOwner = this.players.get(foe.ownerId);
     const ourOwner = this.players.get(army.ownerId);
@@ -2873,14 +3128,19 @@ class Match {
   stepCampBattle(army, dt) {
     const camp = this.aiCamps.find(c => c.id === army.targetId);
     if (!camp || camp.defeated) { this.finishRaid(army, false); return; }
-    const outgoing = this.attackOutput(army, dt);
+    const outgoing = this.outputAgainst(army, dt, 'c:' + camp.id);
 
     if (standingHp(camp, camp.garrison, null) > 0) {
       // A camp is nobody's race, so it is foreign to every empire — which is
       // the answer a defence "against all other races" should give for it.
       // Bandits with hand weapons cannot answer a ballista parked outside the
       // stockade, the same as anyone else with no reach.
-      const incoming = this.defendersCanReach(army, camp.x, camp.y)
+      //
+      // The garrison gets one swing between however many parties are storming
+      // the stockade, the same as anyone else. Two groups sent at a camp used
+      // to be met by two full garrisons.
+      const incoming = this.defendersCanReach(army, camp.x, camp.y) &&
+                       this.swingingAt('c:' + camp.id, 'a:' + army.id)
         ? this.mitigate(army.ownerId,
             totalAttack(camp.garrison, null) * COMBAT.tempo * dt, 'bandit', false)
         : 0;
@@ -2955,14 +3215,20 @@ class Match {
     // whether it lands on their walls, their garrison or their town center.
     const pool = this.homeDefense(defender);
     // Towers cut the blow down; they no longer stand in front of it.
-    let outgoing = this.mitigate(defender.id, this.attackOutput(army, dt), army.race, true)
+    let outgoing = this.mitigate(defender.id, this.outputAgainst(army, dt, 'p:' + defender.id), army.race, true)
       * (1 - pool.reduction);
 
     // The garrison, then the keep. Towers are not in this chain — see
     // applyDefenderLosses for why — so a tower line no longer reads as a health
     // bar the attacker has to chew through before reaching anybody.
     if (pool.hp > 0) {
-      const incoming = this.defendersCanReach(army, defender.baseX, defender.baseY)
+      // One garrison, one swing, divided among everyone at the gate. It used
+      // to meet each besieging group at full strength, so an attack pressed
+      // home by three groups was answered by three garrisons — which is the
+      // same "it depends how you split your troops" the outgoing side below
+      // was already fixed for.
+      const incoming = this.defendersCanReach(army, defender.baseX, defender.baseY) &&
+                       this.swingingAt('p:' + defender.id, 'a:' + army.id)
         ? this.mitigate(army.ownerId, pool.power * COMBAT.tempo * dt, defender.race, false)
         : 0;
       // Whatever gets past the defence carries on into the keep, in the same
