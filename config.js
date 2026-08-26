@@ -250,7 +250,7 @@ const RACE_ABILITIES = {
     // it mends the garrison at home as well — so the low end of the band is
     // the right place for it.
     raiseFraction: 0.6,
-    desc: 'Raise the fallen anywhere on the map. Half of everyone lost from your armies in the zone stands up again, and the wounded at home are made whole.',
+    desc: 'Raise the fallen anywhere on the map. 60% of the soldiers lost from your armies in the zone stand up again, and the wounded at home are made whole.',
   },
   orc: {
     id: 'warband', name: 'Warband', sigil: '⚔',

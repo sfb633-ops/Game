@@ -3380,5 +3380,68 @@ function fightOut(m, ours, theirs) {
     bad.length === 0, bad.join('  ') || 'every map and size');
 }
 
+// --- a card says what it does ----------------------------------------------
+//
+// Every percentage printed on a card has to be a percentage the card actually
+// applies. This is not pedantry: Reincarnation was bumped from raising half the
+// fallen to raising 60% of them, the number changed and the card kept saying
+// "half", and the only thing a player has to go on is the card. A balance pass
+// that leaves the text behind is worse than no balance pass, because it makes
+// the game lie.
+//
+// Every figure in the text is matched against every number the card carries,
+// read the four ways these things are written: a multiplier up (1.28 is "28%
+// more"), a multiplier down (0.89 is "11% less"), a plain fraction (0.6 is
+// "60%"), and a flat amount (400 gold is "400"). One match is enough — a card
+// may mention a figure more than one of its numbers could explain.
+{
+  const claims = (text) => {
+    const out = [];
+    for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*%/g)) out.push({ raw: m[0], pct: Number(m[1]) });
+    for (const m of text.matchAll(/\b(\d{2,})\b(?!\s*%)/g)) out.push({ raw: m[0], flat: Number(m[1]) });
+    return out;
+  };
+  // Every number a card carries, wherever it lives.
+  const numbers = (card) => {
+    const out = [];
+    const walk = (o) => {
+      for (const v of Object.values(o || {})) {
+        if (typeof v === 'number') out.push(v);
+        else if (v && typeof v === 'object') walk(v);
+      }
+    };
+    walk(card.mods); walk(card.grant); walk(card.spell);
+    return out;
+  };
+  const explains = (n, claim) => {
+    const near = (a, b) => Math.abs(a - b) < 0.51;
+    if (claim.flat !== undefined) return near(n, claim.flat);
+    return near(Math.abs(n - 1) * 100, claim.pct)     // 1.28 -> 28%, 0.89 -> 11%
+        || near(n * 100, claim.pct)                    // 0.6  -> 60%
+        || near((1 / n - 1) * 100, claim.pct);         // 0.8  -> 25% more of something
+  };
+
+  const wrong = [];
+  const check1 = (label, text, nums) => {
+    for (const claim of claims(text)) {
+      if (!nums.some(n => explains(n, claim))) {
+        wrong.push(`${label} says "${claim.raw}" and carries ${nums.join(', ')}`);
+      }
+    }
+  };
+  for (const [id, card] of Object.entries(cfg.CARDS)) check1(id, card.desc, numbers(card));
+  for (const [race, ab] of Object.entries(cfg.RACE_ABILITIES)) {
+    const nums = [];
+    for (const [k, v] of Object.entries(ab)) {
+      if (typeof v === 'number') nums.push(v);
+      else if (k === 'mods') nums.push(...Object.values(v));
+    }
+    check1(`${race}'s ${ab.name}`, ab.desc, nums);
+  }
+  check('every figure printed on a card is one the card actually applies',
+    wrong.length === 0, wrong.join('  |  ') ||
+    `${Object.keys(cfg.CARDS).length} cards and ${Object.keys(cfg.RACE_ABILITIES).length} abilities read clean`);
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');
 process.exit(failures ? 1 : 0);
