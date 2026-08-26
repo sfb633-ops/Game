@@ -58,7 +58,12 @@ const TILE_WATER = 2;
 // Neither mountains nor lakes can be built on, marched to, or garrisoned.
 const isPassable = (tile) => tile === TILE_LAND;
 
-function emptyUnits() { return { swordsman: 0, knight: 0, catapult: 0, golem: 0 }; }
+// One slot per unit type in the config, so adding a unit there is enough.
+function emptyUnits() {
+  const out = {};
+  for (const type in UNIT_TYPES) out[type] = 0;
+  return out;
+}
 
 function totalAttack(units, race) {
   let sum = 0;
@@ -499,9 +504,6 @@ class Match {
     }
   }
 
-  // Every empire opens on ground it can actually build on: the level-1 border
-  // disc around each starting position is levelled to plain land, so nothing
-  // inside your opening circle can block a building or a wall drag.
   // Where the seats want to be, before the map is consulted about whether the
   // ground there is any good. Every layout tags its seats with a `group`: the
   // question a team game asks of a map is "which of these are neighbours", and
@@ -699,6 +701,9 @@ class Match {
     return null;
   }
 
+  // Every empire opens on ground it can actually build on: the level-1 border
+  // disc around each starting position is levelled to plain land, so nothing
+  // inside your opening circle can block a building or a wall drag.
   prepareSpawns() {
     const spawns = [];
     const clearRadius = CASTLE.buildRadius[0] + 0.5;
@@ -824,8 +829,6 @@ class Match {
     return camps;
   }
 
-  // Returns null when the map has no seat left; the caller reports that as a
-  // full game rather than crowding two empires onto one spot.
   // How full each team is right now, indexed by team number.
   teamCounts() {
     const counts = new Array(this.teamCount || 0).fill(0);
@@ -850,6 +853,8 @@ class Match {
     return best;
   }
 
+  // Returns null when the map has no seat left; the caller reports that as a
+  // full game rather than crowding two empires onto one spot.
   addPlayer(id, race, name, team = null) {
     if (!defOf(RACES, race)) race = 'human';
     let seat;
@@ -916,10 +921,6 @@ class Match {
     return player;
   }
 
-  // The lobby is over. Everyone waiting is dealt their opening hand in the same
-  // instant, which is the whole point of having a lobby — a draft that began
-  // thirty seconds before yours is a thirty-second head start. Returns false if
-  // the match was already running, so a double-press of Start does nothing.
   // Switch a seated player to another team, before the match starts. Their
   // keep moves with them, which is the whole point — teammates start together,
   // so changing team has to change where you are standing.
@@ -1138,6 +1139,10 @@ class Match {
     shrine.x = best.x; shrine.y = best.y;
   }
 
+  // The lobby is over. Everyone waiting is dealt their opening hand in the same
+  // instant, which is the whole point of having a lobby — a draft that began
+  // thirty seconds before yours is a thirty-second head start. Returns false if
+  // the match was already running, so a double-press of Start does nothing.
   start() {
     if (this.started) return false;
     this.started = true;
@@ -1267,6 +1272,13 @@ class Match {
     for (const [armyId, army] of this.armies) {
       if (army.ownerId === id) this.armies.delete(armyId);
     }
+    // Their buildings went with them, so the map an army is routing across just
+    // opened up — the same announcement eliminate makes.
+    this.wallVersion++;
+    // And a fallen teammate whose last living ally just walked out has nobody
+    // left to watch through: the live checks (spectatesAll) already answer that,
+    // but the map itself is only handed over here.
+    for (const other of this.players.values()) this.grantSpectatorView(other);
   }
 
   incomePerSec(player) {
@@ -1499,20 +1511,10 @@ class Match {
     return best;
   }
 
-  // Fortifications soak an assault before the garrison does — that is what
-  // they are for — and only once they are rubble do the defenders themselves
-  // start dying. Building health is kept fractional so a slow grind lands.
-  // The garrison is cut down first and the towers fall after it — the opposite
-  // of the old order, where fortifications were chewed through before a single
-  // defender was touched. A tower earns its keep by cutting down what arrives
-  // (see homeDefense) and by shooting on its own account, not by being a wall
-  // of health standing in front of the people it is meant to be helping.
-  // Returns whatever the defence could not absorb, for the caller to pass on to
-  // the keep behind it. Returning it rather than dropping it on the floor is
-  // the point: a blow that finished the last defender used to do nothing else,
-  // however big it was.
-  // The garrison, and then whatever is left over goes back to the caller for
-  // the keep behind them.
+  // The garrison takes the blow, and whatever it could not absorb goes back to
+  // the caller for the keep behind it. Returning the remainder rather than
+  // dropping it on the floor is the point: a blow that finished the last
+  // defender used to do nothing else, however big it was.
   //
   // Towers used to stand in this chain and no longer do. Their health was a
   // wall of hitpoints in front of the town center that an attacker had to grind
@@ -1605,8 +1607,6 @@ class Match {
     return false;
   }
 
-  // Is (x,y) a legal tile for `player` to place a building on right now?
-  // (Shared by cmdBuild so the same rules are enforced server-side only.)
   // The ground the town center's sprite stands on. Bigger than the one tile it
   // occupies, because the art is: see CASTLE.footprint.
   inCastleFootprint(player, x, y) {
@@ -1615,6 +1615,9 @@ class Match {
     return dx >= -f.left && dx <= f.right && dy >= -f.up && dy <= f.down;
   }
 
+  // Is (x,y) a legal tile for `player` to place a building on right now? The
+  // client's isMyBuildable mirrors it for the hover highlight; this is the one
+  // that decides.
   canBuildAt(player, x, y) {
     if (!Number.isInteger(x) || !Number.isInteger(y)) return false;
     if (x < 0 || y < 0 || x >= MAP.width || y >= MAP.height) return false;
@@ -1964,7 +1967,12 @@ class Match {
       if (camp.defeated || Math.hypot(camp.x - x, camp.y - y) > spec.radius) continue;
       camp.hp -= spec.damage;
       hits++;
-      if (camp.hp <= 0) { camp.hp = 0; camp.defeated = true; camp.respawnRemaining = AI_CAMP.respawnSec; }
+      // Knocked flat rather than taken: nobody gets the outpost or the golems,
+      // and it comes back on its own clock — the shrine's own, not a camp's.
+      if (camp.hp <= 0) {
+        camp.hp = 0; camp.defeated = true;
+        camp.respawnRemaining = camp.shrine ? SHRINE.dormantSec : AI_CAMP.respawnSec;
+      }
     }
     this.effects.push({ kind: 'meteor', x, y, radius: spec.radius });
     this.emit(player.id, hits ? `Meteor struck ${hits} target${hits === 1 ? '' : 's'}.`
@@ -2275,27 +2283,24 @@ class Match {
 
   // ---- Walls stand in the way ---------------------------------------------
 
-  // A wall is the one building that is not only something to knock down: it is
-  // something to walk round. Everything an army needs to know about that is
-  // here.
+  // Buildings are not only things to knock down; they are things to walk
+  // round. Everything an army needs to know about that is in this block.
   //
-  // Two rules about whose wall stops whom. Your own never stops you — a gate
-  // you hold is a gate you can use, and without that rule sealing your compound
-  // would seal your own troops inside it. And a fallen empire's walls stop
-  // stopping anyone: ruins should not go on fencing the map off for the rest of
-  // the match.
-  // Whatever is standing on this tile, and whose it is.
+  // Whose building stops whom: your own never stops you — a gate you hold is a
+  // gate you can use, and without that rule sealing your compound would seal
+  // your own troops inside it — and neither does an ally's. A fallen empire's
+  // stop stopping anyone: ruins should not go on fencing the map off for the
+  // rest of the match (buildingAt skips the dead).
   //
-  // This used to find walls and nothing else, which is why an army could march
-  // straight through a barracks: a wall was ground and every other building was
-  // scenery painted on the floor. They are all ground now — a keep with four
-  // buildings round it is a place with a shape, and getting into it means going
-  // round them or knocking one down.
-  //
-  // The town center is the exception, and deliberately: it is what an assault
-  // on an empire is aimed AT (see stepPlayerBattle), so making it something to
-  // walk round would put a wall in front of the one thing every attack is
-  // trying to reach.
+  // Whatever is standing on this tile, and whose it is. This used to find
+  // walls and nothing else, which is why an army could march straight through
+  // a barracks: a wall was ground and every other building was scenery painted
+  // on the floor. They are all ground now — a keep with four buildings round it
+  // is a place with a shape, and getting into it means going round them or
+  // knocking one down. The town center is the exception, and deliberately: it
+  // is what an assault on an empire is aimed AT (see stepPlayerBattle), so
+  // making it something to walk round would put a wall in front of the one
+  // thing every attack is trying to reach.
   solidAt(x, y) {
     return this.buildingAt(tileKey(x, y));
   }
@@ -2541,7 +2546,8 @@ class Match {
   // gone.
   hitBuilding(army, owner, b, dt) {
     const def = BUILDING_TYPES[b.type] || {};
-    b.hp -= this.mitigate(owner.id, this.attackOutput(army, dt), army.race, true);
+    // Its share of one swing, not a swing of its own — see buildEngagements.
+    b.hp -= this.mitigate(owner.id, this.outputAgainst(army, dt, 'b:' + tileKey(b.x, b.y)), army.race, true);
     if (b.hp <= 0.5) {
       this.razeBuilding(owner, b);
       this.emit(owner.id, b.type === 'wall'
@@ -2679,15 +2685,6 @@ class Match {
     return army.roster.length > 0;
   }
 
-  // A group holds whatever ground it is standing on until it is given another
-  // order. This is the whole shape of an army now: it is deployed, it stays,
-  // and it moves when it is told to. Marching home is no longer something that
-  // happens *to* a group at the end of a fight — it is an order of its own
-  // (cmdRecallArmy), because a group that has just taken a camp is usually
-  // exactly where you wanted it.
-  //
-  // Nothing is lost by staying: plunder is banked the moment a raid or an
-  // assault finishes, not when the survivors get home. See finishRaid.
   // Settle a group at arm's length from what it is fighting, looking at it.
   // `destX/destY` is left pointing at the target rather than at the ground the
   // group is standing on, which is what the client reads to work out which way
@@ -2718,6 +2715,15 @@ class Match {
     army.destX = tx; army.destY = ty;
   }
 
+  // A group holds whatever ground it is standing on until it is given another
+  // order. This is the whole shape of an army now: it is deployed, it stays,
+  // and it moves when it is told to. Marching home is no longer something that
+  // happens *to* a group at the end of a fight — it is an order of its own
+  // (cmdRecallArmy), because a group that has just taken a camp is usually
+  // exactly where you wanted it.
+  //
+  // Nothing is lost by staying: plunder is banked the moment a raid or an
+  // assault finishes, not when the survivors get home. See finishRaid.
   holdPosition(army) {
     army.order = 'hold';
     army.breach = null;
@@ -2837,6 +2843,14 @@ class Match {
     for (const hp of from.roster) into.roster.push(Math.min(hp, into.unitMaxHp));
     into.mustered += from.mustered;
     into.plunder += from.plunder;
+    // Roots come along too. A group frozen by Entangle could otherwise step out
+    // of it by joining a free group standing beside it — the merge test runs
+    // before the rooted check in tick(), so the frozen group did not have to
+    // move to be gone. Whichever of the two is held longer holds the result.
+    if (from.speedSpell && from.speedSpell.mult === 0 &&
+        (!into.speedSpell || into.speedSpell.remaining < from.speedSpell.remaining)) {
+      into.speedSpell = { ...from.speedSpell };
+    }
     this.armies.delete(from.id);
     const def = UNIT_TYPES[into.type];
     const name = !def ? into.type : (joined === 1 ? def.name : def.plural);
@@ -3159,15 +3173,6 @@ class Match {
     if (this.armies.has(army.id)) this.stepProjectiles(army, dt);
   }
 
-  // How far apart two groups end up, and it is decided by whoever is trying to
-  // close. A group with an order on the other wants its own fighting distance —
-  // arm's length for melee, its full reach for artillery. A group that is only
-  // in the fight because it was attacked does not pull the line anywhere.
-  //
-  // When both are pulling, the shorter reach wins: that is melee closing on
-  // artillery, which is exactly what melee is for. Without this a ballista that
-  // attacked anything was dragged from its four tiles in to one, which threw
-  // away the whole point of making it ranged.
   // ---- One group, one swing ------------------------------------------------
   //
   // Everything anyone is swinging at this tick, built once before the army
@@ -3203,9 +3208,20 @@ class Match {
       set.add(b);
     };
     for (const army of this.armies.values()) {
-      if (army.order !== 'fight' || armyCount(army) === 0) continue;
+      if (armyCount(army) === 0) continue;
       const me = 'a:' + army.id;
-      if (army.targetType === 'army') {
+      // Buildings are in the table too, keyed b:<x,y>. A group taking one
+      // apart — walked into on the march, or sent at it — used to hit it with
+      // its whole swing from hitBuilding directly, outside this table, so a
+      // group that was jumped while it battered a bank hit the bank AND the
+      // group that jumped it at full strength, both in the same tick. That is
+      // the doom-stack bug in a different coat, and with a building in the
+      // table it falls out: buildFocus already prefers whoever is hitting back.
+      if (army.breach) { swingsAt(me, 'b:' + tileKey(army.breach.x, army.breach.y)); continue; }
+      if (army.order !== 'fight') continue;
+      if (army.targetType === 'building') {
+        swingsAt(me, 'b:' + army.targetId);
+      } else if (army.targetType === 'army') {
         const foe = this.armies.get(army.targetId);
         if (!foe || armyCount(foe) === 0) continue;
         const gap = Math.hypot(foe.x - army.x, foe.y - army.y);
@@ -3246,6 +3262,7 @@ class Match {
     const at = (key) => {
       if (key[0] === 'a') { const a = this.armies.get(key.slice(2)); return a && { x: a.x, y: a.y }; }
       if (key[0] === 'c') { const c = this.aiCamps.find(v => v.id === key.slice(2)); return c && { x: c.x, y: c.y }; }
+      if (key[0] === 'b') { const [x, y] = key.slice(2).split(',').map(Number); return { x, y }; }
       const p = this.players.get(key.slice(2));
       return p && { x: p.baseX, y: p.baseY };
     };
@@ -3326,6 +3343,15 @@ class Match {
     return Math.hypot(army.x - tx, army.y - ty) <= COMBAT.faceOff * 2 + COMBAT.reachSlack;
   }
 
+  // How far apart two groups end up, and it is decided by whoever is trying to
+  // close. A group with an order on the other wants its own fighting distance —
+  // arm's length for melee, its full reach for artillery. A group that is only
+  // in the fight because it was attacked does not pull the line anywhere.
+  //
+  // When both are pulling, the shorter reach wins: that is melee closing on
+  // artillery, which is exactly what melee is for. Without this a ballista that
+  // attacked anything was dragged from its four tiles in to one, which threw
+  // away the whole point of making it ranged.
   stanceBetween(a, b) {
     const pulling = [];
     if (a.targetType === 'army' && a.targetId === b.id) pulling.push(this.standoffOf(a));
@@ -3880,8 +3906,6 @@ class Match {
   }
 }
 
-// The army accessors go out with the class: a roster is the army's shape, and
-// anything reading an army (tests today, tooling tomorrow) needs the same four
 // ---------------------------------------------------------------------------
 // Lobby previews
 // ---------------------------------------------------------------------------
@@ -3987,6 +4011,8 @@ function teamSeatPreviews() {
   return out;
 }
 
+// The army accessors go out with the class: a roster is the army's shape, and
+// anything reading an army (tests today, tooling tomorrow) needs the same four
 // answers the rules use rather than its own copy of the arithmetic.
 module.exports = {
   Match, TILE_LAND, TILE_MOUNTAIN, TILE_WATER,

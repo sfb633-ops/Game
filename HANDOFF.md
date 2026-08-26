@@ -123,38 +123,51 @@ preserved — never let the client decide outcomes, only request them.
 
 ### Current data model
 
+This file is a log as much as a reference: sections were added as things were
+built, and a later section supersedes an earlier one where they disagree. This
+one is the summary as of the latest pass, so a reader has the shape before the
+history.
+
 Buildings are a coordinate-keyed map on each player (`player.buildings`,
 keyed `"x,y"`); the town center sits on the base tile and everything else
-is placed freely on any land tile inside the border (see below). There are
-no fixed plots — an earlier version had 7, and stale references to
-`PLOT_OFFSETS` or slot indices anywhere would be a leftover.
+is placed freely on any land tile inside the border. There are no fixed plots
+— an earlier version had 7, and stale references to `PLOT_OFFSETS` or slot
+indices anywhere would be a leftover. Every building is ground an enemy army
+has to walk round or knock down (`solidAt`, `blockingBuilding`); only the town
+center is exempt, because it is what an assault is aimed at.
 
-Armies move by linear interpolation between two points at a fixed speed
-per tick; there's no pathfinding, and combat resolves on arrival
-(`resolveArrival` in game.js). Armies can be redirected or recalled
-mid-march.
+An army is a group of **one kind of soldier**, and its `roster` is one health
+number per living soldier — there is no pooled hp and no separate count. It is
+deployed onto a tile inside the owner's territory, holds there, and takes
+orders from where it stands: march (`move`), attack a keep, camp, building or
+enemy group (`attack` → `fight`), join another group of the same kind
+(`merge`), or go home (`return`, the only way to heal short of Reincarnation).
+Marching is a straight line unless water, rock or somebody else's building is
+in the way, in which case `findRoute` plans a four-connected detour; ground
+with no way round stops the march (`strand`), a wall with no way round gets
+battered (`breach`).
 
-Combat is hp-based and runs over time. Every unit type has `attack`
-(damage per second) and `hp`. Reaching an attack target puts an army into
-`order: 'fight'` (`beginBattle`) and `stepBattle` then trades damage once
-per tick until one side's pool is empty. `COMBAT.tempo` scales the damage
-both sides deal, so it stretches a fight out to something watchable
-without changing who wins.
+Combat runs a tick at a time. Every unit has `attack` (damage per second) and
+`hp`; `COMBAT.tempo` scales both sides equally so a fight is watchable without
+changing who wins. **One group, one swing**: `buildEngagements` tabulates who
+is hitting whom this tick — groups, camps, keeps *and buildings* — and
+`buildFocus` picks one opponent per combatant, preferring whoever is hitting
+back over masonry that is not. A blow only lands inside the swinger's reach
+(`reachOf`), which is what gives artillery its range. Damage lands on soldiers
+front-first (`damageArmy`); the garrison at home is still a tally
+(`idleUnits`), cut down cheapest-first with the remainder carried on
+`woundCarry`.
 
-An army carries `hp`/`maxHp` plus the `musteredUnits` it left home with;
-`damageArmy` re-derives the surviving unit counts from its share of the
-health pool, which is why the squad on screen thins out in step with its
-bar. Stationed troops can't work that way — their counts are the state —
-so `damageUnits` kills whole soldiers weakest-first and carries the
-remainder on `owner.woundCarry`. That carry matters: a tick's damage is
-usually a fraction of one soldier's health, and rounding it away would
-mean a garrison never dies at all.
+On the defending side `homeDefense` is the garrison's punch plus every
+tower's `defensePower`, and its hp is the garrison's alone: towers cut
+incoming damage (capped by `TOWER_REDUCTION_CAP`) and shoot on their own
+account, but they are not hitpoints the keep hides behind. Walls are fought
+where they stand. Building health is kept fractional (rounded only in
+`serialize`) for the same reason the wound carry exists.
 
-On the defending side `homeDefense` pools the garrison *and* every finished
-tower — damage and hp both. `applyDefenderLosses` spends incoming damage on
-the towers first and only then on the troops, so they genuinely shield a
-garrison rather than just adding a number. Building health is kept fractional
-(rounded only in `serialize`) for the same reason the wound carry exists.
+Everything a player is — race, drafted boons, a running ability — is folded
+into `player.mods` by `computeMods`, and nothing downstream reads the tables
+directly. Anything read with a key off the wire goes through `defOf`.
 
 ### Walls are ground, not a number
 
@@ -273,12 +286,12 @@ prerendered ground and the fog mask for no gameplay gain.
     sides     two facing columns, group 0 west and 1 east       (The Divide)
     corners   four clusters, one group per corner               (Four Corners)
 
-**Nothing reads `group` yet.** It is there because teams are coming, and the
-question a team game asks of a map is "which of these seats are neighbours" — a
-question that has to be answered when the seats are laid out, not reverse-engineered
-from coordinates afterwards. Seating teammates will mean preferring seats that
-share a group; The Divide already gives two blocks of six and Four Corners four
-blocks of three.
+`group` answers the question a team game asks of a map — "which of these seats
+are neighbours" — and it has to be answered when the seats are laid out, not
+reverse-engineered from coordinates afterwards. Teams have since landed (see
+"Teams" below): with sides on, `teamSeatTargets` overrides the map's own layout
+and `group` is the team; in a free-for-all it only shapes how The Divide hands
+out its seats.
 
 Two details that are easy to undo by accident:
 
@@ -600,10 +613,10 @@ silence, which reads as a broken button rather than a refusal. `isMarchable` is
 the client-side echo of `Match.validMoveTile` that turns it into a log line.
 As everywhere else, the server still decides.
 
-Note what is *not* here: groups still cannot attack each other in the field.
-`nearestTarget` finds keeps and camps only, and `stepBattle` has branches for
-those two and nothing else. Field combat between armies is the next thing, and
-the roster model makes it much cheaper than it would have been.
+(At the time this was written groups could not attack each other in the field.
+They can now — see "Groups fight each other in the field" above and "One
+group, one swing" below — and `nearestTarget` offers keeps, camps, buildings
+and enemy groups.)
 
 #### Joining groups
 
@@ -843,13 +856,13 @@ Two shapes:
   clocks down and recomputes `player.mods` on expiry to take the buff back
   out again.
 - `aim: 'point'` is aimed at a tile. Undead **Reincarnation** is the only
-  one, and it leans on a rule that was already there: an army's surviving
-  unit counts are `musteredUnits` scaled by its share of remaining health
-  (see `damageArmy`), so restoring an army to full hp literally stands its
-  dead back up, in the ranks they fell from, without conjuring anyone who
-  never marched out. An army wiped out entirely is off the map and cannot be
-  raised. At home only `woundCarry` can be undone — `idleUnits` are whole
-  soldiers, struck off one at a time.
+  one. An army remembers how many marched out (`mustered`) after its roster
+  has been cut down, so raising the fallen is pushing entries back onto the
+  roster — `raiseFraction` (60%) of the missing, see the balance pass — and
+  making the survivors whole. `mustered` is the ceiling, so nobody is conjured
+  who never marched out, and an army wiped out entirely is off the map and
+  cannot be raised. At home only `woundCarry` can be undone — `idleUnits` are
+  whole soldiers, struck off one at a time.
 
 Human **Strength in Unity** and Elf **Agility of the Woods** are not
 multipliers on the owner's own stats but reductions on what is done to them,
@@ -1162,8 +1175,9 @@ The flat-rectangle placeholder rendering is gone. What replaced it:
   each card id with a picture in `CARD_ART`: boons get a tarot arcanum, spells
   get a tome off the spellbook sheet. The arcana were picked so the *image*
   says what the card does rather than the divinatory meaning — players read the
-  picture — which is why Deep Masonry is the Tower and Thrift is the Hermit;
-  tomes come from the row whose colour matches the spell.
+  picture — which is why Deep Masonry (now Defensive Savant) is the Tower and
+  Thrift (now Bartering Tactics) is the Hermit; tomes come from the row whose
+  colour matches the spell.
 
   Both are magnified by a whole factor to the exact size the draft displays
   them at, and `.card-face` in style.css is pinned to that size with
@@ -1786,11 +1800,32 @@ Every one that touches another empire spares an ally and **refunds the charge
 when there was nothing legitimate to hit**, which is the existing contract:
 `cmdCastSpell` only decrements when the cast returns something other than false.
 
-Worth knowing for balance: the draft is 16 cards now, half of them spells, so an
-offer of six carries about three where it used to carry one and a half. Spells
-went from a thing you occasionally saw to a thing you usually have. If that
-proves too swingy the lever is `CARD_DRAFT.offer`, or weighting `rollDraft`
-rather than shuffling the pool flat.
+Worth knowing for balance: the draft was 16 cards after this, half of them
+spells, so an offer of six carried about three where it used to carry one and a
+half. Spells went from a thing you occasionally saw to a thing you usually have.
+If that proves too swingy the lever is `CARD_DRAFT.offer`, or weighting
+`rollDraft` rather than shuffling the pool flat.
+
+**Renamed and trimmed since** (the playtest pass of 26 Aug 2026; the sections
+above use the old names). Bulwark and Forced March were cut, so the pool is 14
+cards — eight boons, six spells:
+
+| was | is now |
+| --- | --- |
+| Farsight | Reveal the Heathens |
+| Withering | Curse of Sickness |
+| Sunder | Sabotage Defenses |
+| Forge Fires | Deadly Tactics |
+| Thrift | Bartering Tactics |
+| War Chest | Spoils of War (income bonus dropped) |
+| Surveyor's Charter | Profound Influence |
+| Deep Masonry | Defensive Savant |
+
+The ids in `config.js` follow the new names (`revealTheHeathens`,
+`curseOfSickness`, `sabotageDefenses`, `deadlyTactics`, `barteringTactics`,
+`spoilsOfWar`, `profoundInfluence`, `defensiveSavant`), and so do the
+`cast_<id>` handlers and `CARD_ART`. Entangle became a freeze (speed 0) rather
+than a slow, which is why the rooted check in `tick()` exists.
 
 ### The unused art packs, and why four of the five stayed unused
 
@@ -2698,6 +2733,54 @@ screenshot and no error at all.
 a one-time cached cost and it is the single biggest lever in the asset
 pipeline: `FX_MAX` (192) is the pixel size each frame is stored at, and
 dropping it is a straight trade of sharpness at high zoom for bytes.
+
+### The all-round bug pass, third time (26 Aug 2026)
+
+Read every file against the rules the docs claim, wrote a script for each
+suspicion, and fixed what reproduced. Every one is pinned at the end of
+`rules.test.js`. Nothing threw and nothing looked wrong on screen; each was a
+rule quietly not being what the game says it is.
+
+- **A group knocking down a building swung twice.** `hitBuilding` charged the
+  building the group's whole `attackOutput` directly, outside the engagement
+  table, so a group jumped while it battered a bank hit the bank *and* the group
+  that jumped it, both at full strength, in the same tick. That is the doom-stack
+  bug wearing a different coat. Buildings are in `buildEngagements` now, keyed
+  `b:<x,y>` — both routes in, a breach on the march and a building sent for —
+  and `hitBuilding` takes its share through `outputAgainst`. `buildFocus`
+  already prefers whoever is hitting back over masonry that is not, so the
+  "siege that gets jumped fights the people" rule now holds for buildings for
+  free.
+- **Entangle could be walked out of by merging.** The merge test in `tick()`
+  runs before the rooted check, and a rooted group beside a free one of its own
+  kind did not have to move to be gone. `mergeArmies` carries the roots across,
+  longer remaining wins.
+- **Quitting did not bump `wallVersion`.** A player who walked out took their
+  buildings with them and every army routing round those buildings kept its
+  detour. `eliminate` already bumped it; `removePlayer` now does too.
+- **A fallen teammate whose last living ally quit never got the map.**
+  `spectatesAll` is computed live, so the army list opened up, but the fog is
+  only handed over by `grantSpectatorView`, which `eliminate` called and
+  `removePlayer` did not.
+- **A meteor that flattened the shrine put it to sleep for a camp's minute**
+  rather than `SHRINE.dormantSec`.
+
+Client side: every player but the host kept the game-over banner over a
+rematch, because the host's click was the only thing that ever removed it and
+everyone else learned of the rematch through `init`. The room list now says how
+many seats are held for dropped players (the README claimed it did) and marks a
+finished room as such. And the smoke puff where a group "vanished" fired every
+time an enemy patrol walked out of vision, saying "a fight" where there was
+none — it only fires on ground still being watched now, and not for a group of
+ours folded back into the keep.
+
+Server: the static-file guard was `startsWith(public)`, which is also a prefix
+of a sibling called `public-anything`. Tightened to the directory plus a
+separator; nothing was reachable through it, but it was wrong.
+
+`npm test` now runs everything that needs no server — invariants, fuzz and the
+browser check were outside it and are the three that find the most. About half
+a minute.
 
 ### Verifying rules changes
 

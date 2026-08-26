@@ -13,9 +13,10 @@ node tools/tests/exit.test.js        # ditto
 node tools/tests/lobby.test.js       # ditto — host/join/start over real sockets
 ```
 
-`npm run test:net` runs the last three, and does **not** start a server for you:
-without one already listening on :3000 it fails with `ECONNREFUSED`, which
-looks like a broken test and is not one.
+`npm test` runs everything that needs no server — the first seven, about half a
+minute. `npm run test:net` runs the last three, and does **not** start a server
+for you: without one already listening on :3000 it fails with `ECONNREFUSED`,
+which looks like a broken test and is not one.
 
 ## browser.test.js — for anything the cascade decides
 

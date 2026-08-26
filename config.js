@@ -43,11 +43,11 @@ const MAP = {
 //   sides    two facing columns, group 0 west and group 1 east
 //   corners  four clusters, one group per corner
 //
-// Nothing reads `group` yet. It is here because teams are coming, and the
-// question a team game asks of a map is "which of these seats are neighbours" —
-// a question that has to be answered when the seats are laid out, not guessed at
-// afterwards from coordinates. Seating teammates then means preferring seats
-// that share a group.
+// `group` answers "which of these seats are neighbours", which is the question
+// a team game asks of a map, and it has to be answered when the seats are laid
+// out rather than guessed at afterwards from coordinates. With sides on, the
+// map's own layout is overridden by Match.teamSeatTargets, and `group` there is
+// the team; in a free-for-all it only shapes how The Divide hands out seats.
 const MAPS = {
   wilds: {
     name: 'The Wilds',
@@ -331,24 +331,26 @@ const BUILDING_TYPES = {
   barracks: { name: 'Barracks',      cost: 100, buildTimeSec: 0, hp: 150, trains: 'swordsman' },
   stable:   { name: 'Stable',        cost: 200, buildTimeSec: 0, hp: 150, trains: 'knight' },
   siege:    { name: 'Siege Factory', cost: 300, buildTimeSec: 0, hp: 150, trains: 'catapult' },
-  // The one building that fights on its own account. `defensePower` is what it
-  // adds to the garrison when the empire itself is stormed (walls do not — see
-  // below); `shot*` is the
-  // archer on top loosing at whatever comes within range, whether or not it is
-  // headed for the town center. 12 every 3s is 4 damage a second — a tower
-  // harasses a passing army and wears a besieging one down, but three of them
-  // still take the better part of a minute to break a real assault.
-  // `damageReduction` is what a tower is worth to a last stand now. It used to
-  // pour its own 220hp into the garrison's pool and be chewed through *before*
-  // the defenders were touched, so three towers were about a thousand extra
-  // health an attacker had to grind off before reaching a single defender. Now
-  // the towers cut down what gets through and the garrison takes the blow, with
-  // the towers falling last — the same buildings, a much less spongy job.
+  // The one building that fights on its own account, three ways:
+  //   defensePower    what it adds to the garrison's punch when the empire is
+  //                   stormed (walls do not — see below).
+  //   damageReduction what it takes off every blow that lands on the empire,
+  //                   summed across towers and capped by TOWER_REDUCTION_CAP.
+  //   shot*           the archer on top loosing at whatever comes within range,
+  //                   whether or not it is headed for the town center. 12 every
+  //                   3s is 4 damage a second — a tower harasses a passing army
+  //                   and wears a besieging one down, but three of them still
+  //                   take the better part of a minute to break a real assault.
+  // Its hp is its own: a tower used to pour its 220 into the garrison's pool
+  // and be chewed through *before* the defenders were touched, so three towers
+  // were a thousand extra health to grind off. Now the towers cut down what
+  // gets through and the garrison takes the blow — much less spongy.
   tower:    { name: 'Archer Tower',  cost: 120, buildTimeSec: 0, hp: 220, defensePower: 15,
               damageReduction: 0.08,
               range: 5, shotSec: 3, shotDamage: 12 },
-  // Walls are placed by click-and-drag (one building per dragged tile). Cheap
-  // per tile; cost scales with how many tiles you drag across.
+  // Walls are placed by click-and-drag, one building per dragged tile, so the
+  // price is per tile. `isWall` is what tells the client to offer the drag tool
+  // rather than a palette cell.
   //
   // A wall is not a number added to the garrison — it is ground an army cannot
   // walk on. It has to be gone round, and if there is no way round, broken
@@ -356,14 +358,11 @@ const BUILDING_TYPES = {
   // what a segment hits back with while it is being broken through, and that is
   // all it is: walls are deliberately absent from `homeDefense`.
   //
-  // isWall flags the client to place it via the drag tool instead of the
-  // single-tile build menu.
-  // 260, up from 120. Walls are the hitpoints of a defence now that towers are
-  // not: a tower shoots and cuts damage down but no longer stands in front of
-  // the town center, so the thing an attacker grinds through is the stonework
-  // they have to break to get in at all. At 120 a wall was a speed bump — one
-  // group of knights was through a segment in seconds — which is what pushed
-  // everybody towards stacking towers instead.
+  // hp is 260, up from 120. Walls are the hitpoints of a defence now that towers
+  // are not, so the thing an attacker grinds through is the stonework they have
+  // to break to get in at all. At 120 a wall was a speed bump — one group of
+  // knights was through a segment in seconds — which is what pushed everybody
+  // towards stacking towers instead.
   wall:     { name: 'Wall',          cost: 15,  buildTimeSec: 0, hp: 260, defensePower: 4, isWall: true },
 };
 
@@ -661,18 +660,6 @@ const CARDS = {
   },
 };
 
-// The training queue for one kind of unit, across every building that makes
-// it. The first such building brings TRAIN_QUEUE_MAX; each one after that adds
-// TRAIN_QUEUE_PER_EXTRA on top, so a second barracks is worth building and a
-// fifth is not — which matters now that BUILD limits how many you may have at
-// all. A single building still never holds more than TRAIN_QUEUE_MAX itself.
-// How long a tile stays choked with rubble after a wall or a tower is broken
-// on it. Without this, a besieged player simply re-drags the wall the instant
-// it falls and an attacker can never actually get in — the gold cost is far too
-// small to be the limit. Rubble makes a breach worth something for a while.
-//
-// Walls and towers only: they are the two things that are broken *in place* as
-// part of an assault. A bank you demolish yourself leaves the ground clear.
 // However many towers are crammed in, they can never cut more than this off an
 // assault. Without a ceiling, twelve towers is simply immunity.
 //
@@ -693,6 +680,11 @@ const TOWER_REDUCTION_CAP = 0.35;
 // card you drafted should stay worth more than a cheque anyone can write.
 const TERRAIN_CLEAR_COST = 140;
 
+// How long a tile stays choked with rubble after a building is broken on it.
+// Without this, a besieged player simply re-drags the wall the instant it falls
+// and an attacker can never actually get in — the gold cost is far too small to
+// be the limit. Rubble makes a breach worth something for a while. Anything an
+// army breaks leaves it; a building you demolish yourself leaves clear ground.
 const RUBBLE_SEC = 25;
 
 // What you get back for pulling your own building down. A third: enough that a
@@ -700,6 +692,11 @@ const RUBBLE_SEC = 25;
 // layout every time the border grows is a real cost rather than free.
 const DEMOLISH_REFUND = 1 / 3;
 
+// The training queue for one kind of unit, across every building that makes
+// it. The first such building brings TRAIN_QUEUE_MAX; each one after that adds
+// TRAIN_QUEUE_PER_EXTRA on top, so a second barracks is worth building and a
+// fifth is not — which matters now that CASTLE.buildLimit caps how many you may
+// have at all. A single building still never holds more than TRAIN_QUEUE_MAX.
 const TRAIN_QUEUE_MAX = 5;
 const TRAIN_QUEUE_PER_EXTRA = 2;
 // Most sides a match can be split into. Twelve seats divide evenly by two,

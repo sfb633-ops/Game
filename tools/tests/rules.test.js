@@ -3479,5 +3479,97 @@ function fightOut(m, ours, theirs) {
     `${Object.keys(cfg.CARDS).length} cards and ${Object.keys(cfg.RACE_ABILITIES).length} abilities read clean`);
 }
 
+// --- the all-round bug pass, third time ------------------------------------
+// Five things reading found and a script confirmed. Each was silent: nothing
+// threw, nothing looked wrong, the rule was simply not what the game says.
+{
+  const fresh = () => {
+    const m = new Match({ map: 'openfield' });
+    const a = m.addPlayer('a', 'human', 'A');
+    const d = m.addPlayer('d', 'human', 'D');
+    a.draft = d.draft = null;
+    a.gold = d.gold = 99999;
+    return { m, a, d };
+  };
+  const park = (m, owner, type, n, x, y) => {
+    const id = m.spawnArmy(owner, type, n, 'hold', { x, y });
+    const ar = m.armies.get(id); ar.x = x; ar.y = y; m.holdPosition(ar);
+    return id;
+  };
+
+  // A group taking a building apart hits it with the same one swing it hits
+  // everything else with. Jumped by an enemy group, it turns on the people and
+  // the masonry waits — not both at full strength in the same tick.
+  {
+    const { m, a, d } = fresh();
+    const bx = d.baseX + 3, by = d.baseY;
+    m.cmdBuild('d', bx, by, 'bank');
+    const A = park(m, a, 'swordsman', 20, bx - 1, by);
+    m.cmdAttackArmy('a', A, 'building', `${bx},${by}`);
+    const D = park(m, d, 'swordsman', 20, bx - 1, by + 1);
+    m.cmdAttackArmy('d', D, 'army', A);
+    const bank = d.buildings[`${bx},${by}`];
+    const hp0 = bank.hp, dHp0 = armyHp(m.armies.get(D));
+    for (let i = 0; i < 5; i++) m.tick(0.2);
+    const onBank = hp0 - (d.buildings[`${bx},${by}`] ? d.buildings[`${bx},${by}`].hp : 0);
+    const onD = dHp0 - armyHp(m.armies.get(D));
+    check('a sieging group that is jumped swings at the people and not the building as well',
+      onD > 1 && onBank < 0.01, `${onD.toFixed(1)} on the group, ${onBank.toFixed(1)} on the bank`);
+  }
+
+  // A rooted group does not walk out of Entangle by merging into a free one.
+  {
+    const { m, a } = fresh();
+    const x = a.baseX + 3, y = a.baseY;
+    const A1 = park(m, a, 'swordsman', 5, x, y);
+    const A2 = park(m, a, 'swordsman', 5, x, y);
+    m.armies.get(A1).speedSpell = { mult: 0, remaining: 10 };
+    m.cmdMergeArmy('a', A1, A2);
+    m.tick(0.2);
+    const into = m.armies.get(A2);
+    check('merging a rooted group carries the roots across',
+      !m.armies.has(A1) && !!(into && into.speedSpell && into.speedSpell.mult === 0),
+      into && into.speedSpell ? `rooted for ${into.speedSpell.remaining.toFixed(1)}s more` : 'walked free');
+  }
+
+  // Quitting takes your buildings off the map, and routes planned round them
+  // have to know.
+  {
+    const { m } = fresh();
+    const v0 = m.wallVersion;
+    m.removePlayer('d');
+    check('a player walking out invalidates every route planned round their buildings', m.wallVersion !== v0);
+  }
+
+  // A meteor that flattens the shrine puts it to sleep for the shrine's own
+  // while, not a bandit camp's minute.
+  {
+    const { m, a } = fresh();
+    const shrine = m.aiCamps.find(c => c.shrine);
+    a.cards.push('meteor'); a.spells.meteor = 10;
+    for (let i = 0; i < 6 && !shrine.defeated; i++) m.cmdCastSpell('a', 'meteor', shrine.x, shrine.y);
+    check('a meteored shrine sleeps for SHRINE.dormantSec',
+      shrine.defeated && shrine.respawnRemaining === cfg.SHRINE.dormantSec,
+      `${shrine.respawnRemaining}s against ${cfg.SHRINE.dormantSec}`);
+  }
+
+  // A fallen teammate whose last living ally walks out is handed the map, the
+  // same as if that ally had been beaten.
+  {
+    const m = new Match({ map: 'openfield', teams: 2 });
+    const a = m.addPlayer('a', 'human', 'A', 0);
+    m.addPlayer('b', 'human', 'B', 0);
+    m.addPlayer('e', 'human', 'E', 1);
+    m.start();
+    for (const p of m.players.values()) p.draft = null;
+    m.eliminate(a, 'dead');
+    const before = a.explored.reduce((n, v) => n + v, 0);
+    m.removePlayer('b');
+    const after = a.explored.reduce((n, v) => n + v, 0);
+    check('a spectator whose side empties by a quit sees the whole map',
+      m.spectatesAll(a) && after === a.explored.length, `${before} -> ${after} of ${a.explored.length} tiles`);
+  }
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');
 process.exit(failures ? 1 : 0);

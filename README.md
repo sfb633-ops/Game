@@ -99,10 +99,13 @@ The MUSIC toggle in the corner is remembered between visits.
 Plain node scripts, no framework — see `tools/tests/README.md`.
 
 ```
-npm test           # game rules and map generation, no server needed
+npm test           # invariants, fuzz, rules, maps, client, smoke, browser — no server needed
 npm start          # in one terminal...
-npm run test:net   # ...then the reconnect and room-isolation checks
+npm run test:net   # ...then the reconnect, exit and lobby checks over real sockets
 ```
+
+The whole of `npm test` is about half a minute. The browser check drives a
+headless Chrome and skips loudly if none is installed.
 
 ## Art assets
 
@@ -151,8 +154,8 @@ sprite anchors and layering can be eyeballed as a PNG.
 - **Every race has one ability**, free, on its own cooldown, listed on the
   race card before you pick and driven from the Ability panel or the **Q**
   key once you're in. Undead **Reincarnation** is aimed at a zone anywhere
-  on the map and puts the fallen of every army of yours inside it back in
-  the ranks they fell from. Orc **Warband** is 30 seconds of 60% harder
+  on the map and puts 60% of the fallen of every army of yours inside it back
+  in the ranks they fell from, and heals the wounded. Orc **Warband** is 30 seconds of 60% harder
   hitting. Human **Strength in Unity** is a minute of taking 35% less damage
   from every race but your own. Elf **Agility of the Woods** is a minute of
   your armies in the field slipping 30% of every blow.
@@ -161,7 +164,9 @@ sprite anchors and layering can be eyeballed as a PNG.
   for you. Boons are permanent — more income, faster training, tougher walls,
   a wider border. Spells are charges you aim at the map: call a **Meteor**
   down on an enemy, **Reshape the Land** to level rock and drain water inside
-  your border, or raise a free ring of wall with **Bulwark**.
+  your border, or root an enemy army where it stands with **Entangle**. Spent
+  charges come back on a timer, so a spell is something you use rather than
+  hoard.
 - **Troops muster on ground you hold, then go where you like.** Deploy drops
   them inside your border or into an outpost you have taken; from there they can
   be sent anywhere on the map. So a captured camp is a forward staging post as
@@ -223,11 +228,15 @@ sprite anchors and layering can be eyeballed as a PNG.
   through and harasses what walks past, but its health is not a wall in front
   of your keep, so building ten of them is not a defence. Walls are the thing
   an attacker has to break, and they are twice as tough as they were.
-- **Eight spells in the draft.** Meteor, Reshape the Land and Bulwark are
-  joined by Farsight (lay a circle of the map bare), Withering (a plague on one
-  empire's garrison, buildings untouched), Sunder (shatters walls and towers and
-  nothing else), Forced March (your groups move half again as fast) and Entangle
-  (enemy groups crawl).
+- **Six spells and eight boons in the draft.** The spells: Meteor (wrecks
+  buildings and armies, never a town center), Reshape the Land, Reveal the
+  Heathens (lay a wide circle of the map bare), Curse of Sickness (a plague on
+  one empire's garrison, buildings untouched), Sabotage Defenses (shatters walls
+  and towers and nothing else) and Entangle (enemy groups in the circle are
+  frozen for ten seconds). The boons are small on purpose — a few percent of
+  income, attack, health, cost or training time, a wider border, tougher
+  stonework, or a lump of gold up front — because anything that changes how
+  many soldiers you field is squared on its way to a result.
 - **A shrine sits somewhere on the map.** Storm it and three golems rise for
   you on the spot — no gold, no outpost, just the golems, and they beat more
   than their weight in anything you could have bought. Then it goes quiet for a
@@ -313,10 +322,10 @@ sprite anchors and layering can be eyeballed as a PNG.
   separate fences. Anything below full health wears a red bar, which is how
   you find out which section someone is working on.
 - Your troops sit in a bar across the bottom of the map — each unit's own
-  sprite, idling, with how many you have. Right-click a portrait to stage all
-  of them for sending (again for none), or type a number. Then click an enemy keep or
-  a neutral AI camp to target it and hit Send Army. Units march there in real
-  time, visible to everyone.
+  sprite, idling, with how many you have. Left-click a portrait to train one;
+  right-click it to stage all of them for deploying (again for none), or type a
+  number. Then press Deploy and click inside your territory, and they march out
+  and hold that ground, visible to everyone whose vision reaches it.
 - **Battles play out over time.** The two sides trade damage tick by tick
   until one health pool is empty, so you can watch your troops swinging,
   see the squad thin out as its health bar drops, and pull them back out
@@ -325,7 +334,8 @@ sprite anchors and layering can be eyeballed as a PNG.
 - Raiding an AI camp pays gold for every point of damage put into it, plus
   the loot and a clear bonus for razing it outright. **Raze one and you keep
   it**: the ruins become an outpost, a second disc of buildable ground half
-  the size of your starting border, anchored wherever the camp stood. When an
+  the size of your starting border, anchored wherever the camp stood, and worth
+  three more building slots for as long as you hold it. When an
   outpost is close enough to overlap your border, the two are drawn as one
   outline — your territory is one country, not two circles on top of each
   other. A captured camp never respawns, so the handful on the map are worth
@@ -337,15 +347,16 @@ sprite anchors and layering can be eyeballed as a PNG.
 
 Races are stat multipliers, one active ability and their own troop sprites,
 not unique units with unique rules. There's no capturing enemy bases outright
-(raids damage/loot, they don't take ownership), no fog of war, no
-alliances, and no resource types beyond gold. Armies still don't fight each
-other in the field — only garrisons, fortifications and structures. Walls
-are positional and towers are not: a wall has to be gone round or broken
-through where it stands, but every tower you own adds to the last stand no
-matter which side of the map it is on. Water and rock still don't stop an
-army that has no way round, so a wall anchored to a lake doesn't seal.
-None of the sprite sheets carry a death animation, so units simply
-disappear from a squad as it takes losses.
+(raids damage/loot, they don't take ownership), no alliances beyond the teams
+the host sets in the lobby, and no resource types beyond gold. A tower's
+arrows are positional — it shoots what comes within five tiles of it — but its
++15 to the garrison's punch is not: every tower you own counts in the last
+stand no matter which side of the map it is on. Groups never split once
+merged. A group that is marching and being squared up in the same tick can
+briefly move faster than it walks, because the two movements do not share a
+budget. None of the sprite sheets carry a death animation, so units simply
+disappear from a squad as it takes losses, and the elves' one attack
+animation faces the camera whichever way they are swinging.
 
 ## Deploy to Render
 
@@ -382,7 +393,10 @@ public/assets/       — generated sprite sheets, UI frames + manifest.json
 public/media/        — hand-supplied menu background and music
 tools/build-assets.js— slices the raw art packs into public/assets/
 tools/preview.js     — renders a real match to a PNG, no browser needed
-tools/canvas-shim.js — the software Canvas2D that makes that possible
+tools/shoot-ui.js    — screenshots the real page in headless Chrome at several states
+tools/shoot-spell-fx.js — the same for the spell animations
+tools/canvas-shim.js — the software Canvas2D that makes the preview possible
 tools/png.js         — dependency-free PNG read/write
 tools/imageops.js    — crop / resize / recolour helpers
+tools/tests/         — the test scripts, and a README on what each one is for
 ```

@@ -445,13 +445,17 @@ function renderRoomList(list) {
       '<span class="room-name">' + escapeText(room.name) + '</span>' +
       // In its lobby you get an equal start; running, you would be arriving
       // late into a map somebody else has had ten minutes in.
-      (room.started ? '<span class="room-live">IN PLAY</span>'
-                    : '<span class="room-open">LOBBY</span>') +
+      (room.gameOver ? '<span class="room-open">FINISHED</span>'
+        : room.started ? '<span class="room-live">IN PLAY</span>'
+                       : '<span class="room-open">LOBBY</span>') +
       (room.map ? '<span class="room-map">' + escapeText(room.map) + '</span>' : '') +
-      '<span class="sub">' + room.players + 'p</span>';
+      // Seats held for somebody whose connection dropped: "3p" and "3p, 2 away"
+      // are very different games to walk into.
+      '<span class="sub">' + room.players + 'p' + (room.away ? ', ' + room.away + ' away' : '') + '</span>';
     const btn = document.createElement('button');
     btn.className = 'btn btn-sm';
-    btn.textContent = room.started ? 'Join late' : 'Join';
+    // A finished room reopens as a fresh lobby for whoever joins it.
+    btn.textContent = room.started && !room.gameOver ? 'Join late' : 'Join';
     btn.addEventListener('click', () => joinRoom(room.code));
     row.appendChild(btn);
     roomListEl.appendChild(row);
@@ -496,6 +500,11 @@ function onInit(msg) {
   defeatShown = false;
   document.getElementById('defeat-screen').classList.add('hidden');
   document.getElementById('spectating-chip').classList.add('hidden');
+  // The last match's banner too. The host's own click takes it down before the
+  // restart goes out, but every other player in the room only learns of the
+  // rematch through this init — and nothing else ever removes it, because
+  // renderPanel only ever puts it up.
+  document.getElementById('game-over-banner').classList.remove('show');
   const rejoining = inputsBound;   // a rematch reuses the same socket and DOM
   myId = msg.playerId;
   mapCfg = msg.map;
@@ -3111,7 +3120,7 @@ function renderPanel() {
     document.getElementById('game-over-text').textContent = won ? 'VICTORY' : 'DEFEATED';
     document.getElementById('game-over-sub').textContent =
       latestState.teamCount && side != null
-        ? (won ? `${teamName(side)} holds the map.` : `${teamName(side)} holds the map.`)
+        ? `${teamName(side)} holds the map.`
         : won ? 'The map is yours.'
               : `${playerNameOf(latestState.winnerId)} holds the map.`;
     banner.classList.add('show');
@@ -3234,13 +3243,22 @@ function trackArmies(msg) {
     if (Math.abs(dx) > 0.02 || Math.abs(dy) > 0.02) {
       armyFacing[a.id] = ArtDefs.facingFrom(dx, dy, armyFacing[a.id] || 'down');
     }
-    armyPrev[a.id] = { x: a.x, y: a.y };
+    armyPrev[a.id] = { x: a.x, y: a.y, order: a.order };
     seenArmies.add(a.id);
   }
+  // A group gone from the state was wiped out, merged, or — since the fog —
+  // simply walked out of view, and a puff of smoke on the far edge of your
+  // vision every time an enemy patrol turns round says "a fight" where there
+  // was none. So the puff only goes where the ground is still being watched,
+  // and not where a group of ours was marched home and folded into the keep.
+  const eyes = myEyes();
+  const watched = (x, y) => eyes.some(e => Math.hypot(e.x - x, e.y - y) <= e.r);
   for (const id of [...seenArmies]) {
     if (live.has(id)) continue;
     const last = armyPrev[id];
-    if (last) effects.push({ x: last.x * ts, y: last.y * ts, start: clock, scale: 0.8, life: 0.5 });
+    if (last && last.order !== 'return' && watched(last.x, last.y)) {
+      effects.push({ x: last.x * ts, y: last.y * ts, start: clock, scale: 0.8, life: 0.5 });
+    }
     delete armyPrev[id];
     delete armyFacing[id];
     seenArmies.delete(id);

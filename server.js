@@ -50,8 +50,11 @@ function serveStatic(req, res) {
   } catch {
     res.writeHead(400); res.end('bad request'); return;   // a malformed escape
   }
-  filePath = path.join(__dirname, 'public', filePath);
-  if (!filePath.startsWith(path.join(__dirname, 'public'))) { res.writeHead(403); res.end(); return; }
+  const publicDir = path.join(__dirname, 'public');
+  filePath = path.join(publicDir, filePath);
+  // Inside public/, not merely prefixed by it: "public" is also a prefix of a
+  // sibling called "public-anything", which a bare startsWith would let through.
+  if (filePath !== publicDir && !filePath.startsWith(publicDir + path.sep)) { res.writeHead(403); res.end(); return; }
 
   fs.stat(filePath, (err, stat) => {
     if (err || !stat.isFile()) { res.writeHead(404); res.end('not found'); return; }
