@@ -162,6 +162,12 @@ const AVOID_TURNS = [Math.PI / 6, -Math.PI / 6, Math.PI / 4, -Math.PI / 4, Math.
 // early, build the room to pass.
 const AVOID_LOOKAHEAD = 2.5;
 
+// Groups are bucketed into squares this many tiles across so that "is anybody
+// standing here" reads a few buckets rather than every group on the map. Has
+// to exceed the stance plus a tick's walk — see bucketArmies.
+const ARMY_CELL = 4;
+const ARMY_GRID_W = Math.ceil(MAP.width / ARMY_CELL) + 2;   // +2: a probe may lie a cell off-map
+
 // A breadth-first route comes out one tile at a time; only the corners are
 // worth walking to. Drops every point the army would pass straight through.
 function simplifyRoute(route) {
@@ -331,6 +337,8 @@ class Match {
     this.engagements = new Map();
     this.focused = new Map();
     this.positioned = new Set();
+    // cell key -> groups standing in it this tick. See bucketArmies.
+    this.armyGrid = new Map();
     // "x,y" -> seconds of rubble left on a tile whose wall or tower was broken.
     // Nothing may be built there until it clears. See razeBuilding.
     this.rubble = new Map();
@@ -2370,13 +2378,40 @@ class Match {
   // Whatever the group has been sent to fight is the one thing it is allowed to
   // walk up to; that is the whole point of an attack order.
   enemyInTheWay(army, x, y) {
-    for (const other of this.armies.values()) {
-      if (other === army || armyCount(other) === 0) continue;
-      if (this.allied(army.ownerId, other.ownerId)) continue;
-      if (army.targetType === 'army' && army.targetId === other.id) continue;
-      if (Math.hypot(other.x - x, other.y - y) < COMBAT.faceOff * 2) return other;
+    const cx = Math.floor(x / ARMY_CELL), cy = Math.floor(y / ARMY_CELL);
+    for (let oy = -1; oy <= 1; oy++) {
+      for (let ox = -1; ox <= 1; ox++) {
+        const bucket = this.armyGrid.get((cy + oy) * ARMY_GRID_W + cx + ox);
+        if (!bucket) continue;
+        for (const other of bucket) {
+          if (other === army || armyCount(other) === 0) continue;
+          if (this.allied(army.ownerId, other.ownerId)) continue;
+          if (army.targetType === 'army' && army.targetId === other.id) continue;
+          if (Math.hypot(other.x - x, other.y - y) < COMBAT.faceOff * 2) return other;
+        }
+      }
     }
     return null;
+  }
+
+  // Every group, bucketed by the ARMY_CELL square it stands in at the top of
+  // the tick. enemyInTheWay asks seven times per marching group per tick and
+  // used to walk every group on the map each time; now it reads nine buckets.
+  //
+  // Positions are as of the start of the tick, so a group already stepped
+  // this tick is up to one tile off its bucket. Harmless: a bucket outside the
+  // 3x3 begins at least ARMY_CELL from the probe, and nothing walks more than
+  // a tile a tick, so a group that has left its bucket is still further away
+  // than the stance it is being checked against.
+  bucketArmies() {
+    const grid = this.armyGrid;
+    grid.clear();
+    for (const army of this.armies.values()) {
+      const key = Math.floor(army.y / ARMY_CELL) * ARMY_GRID_W + Math.floor(army.x / ARMY_CELL);
+      let bucket = grid.get(key);
+      if (!bucket) { bucket = []; grid.set(key, bucket); }
+      bucket.push(army);
+    }
   }
 
   blockingBuilding(army, worldX, worldY) {
@@ -3005,6 +3040,7 @@ class Match {
     // group before any of them is stepped, because squareUp moves the *other*
     // side of a fight too, which may not have been reached by this loop yet.
     for (const army of this.armies.values()) army.moved = 0;
+    this.bucketArmies();
 
     for (const army of Array.from(this.armies.values())) {
       if (armyCount(army) === 0) { this.armies.delete(army.id); continue; }
