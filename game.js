@@ -340,10 +340,17 @@ class Match {
     this.routeStamp = 0;
   }
 
-  emit(playerId, text) {
+  // `alert` is for the handful of things the page should do more than write a
+  // line about. It is a small object rather than a flag so the client never has
+  // to read the English: telling a player who is attacking them by matching
+  // "(.*) is attacking your empire" would break the first time somebody is
+  // called "is attacking your empire", and would need translating twice.
+  emit(playerId, text, alert) {
     if (!playerId) return;
     if (this.events.length > 200) return;   // nothing is draining these; don't hoard
-    this.events.push({ playerId, text });
+    const e = { playerId, text };
+    if (alert) e.alert = alert;
+    this.events.push(e);
   }
 
   // Grow a connected blob field: seed noise, then smooth it a few times so
@@ -2902,7 +2909,9 @@ class Match {
     army.plunder = 0;
     if (army.targetType === 'player') {
       const attacker = this.players.get(army.ownerId);
-      this.emit(army.targetId, `${attacker ? attacker.name : 'An enemy'} is attacking your empire!`);
+      const who = attacker ? attacker.name : 'An enemy';
+      this.emit(army.targetId, `${who} is attacking your empire!`,
+        { kind: 'attack', by: who, race: army.race });
     }
   }
 

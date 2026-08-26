@@ -66,6 +66,30 @@
       <div class="hud-stat"><span class="hud-label">Code</span><span class="gold" id="room-code">—</span></div>
     </div>
 
+    <!-- The one number on screen that decides whether you still have an empire.
+         It sits under the stat row rather than in it because a bar you read at
+         a glance and a figure you read on purpose are different jobs. The crest
+         is a separate image so it can stay centred while the trough stretches
+         — see buildKeepBar. -->
+    <div id="keep-bar" class="hidden">
+      <div id="keep-trough">
+        <img id="keep-crest" src="assets/ui/keepbar-crest.png" alt="">
+        <div id="keep-track"><div id="keep-fill" class="hp-green"></div></div>
+      </div>
+      <div id="keep-cap">
+        <span id="keep-name">Town Center</span>
+        <span id="keep-hp">—</span>
+      </div>
+    </div>
+
+    <!-- Somebody is storming your empire. Loud on purpose and gone on its own:
+         it is worth interrupting whatever you were doing, and not worth a
+         click to dismiss. -->
+    <div id="attack-alert" class="hidden" role="status" aria-live="assertive">
+      <div id="attack-alert-line1">UNDER ATTACK</div>
+      <div id="attack-alert-line2"></div>
+    </div>
+
     <!-- Leaving is destructive, so it asks first and says what it will do. -->
     <div id="exit-wrap">
       <button id="exit-btn" class="btn btn-sm">Exit</button>

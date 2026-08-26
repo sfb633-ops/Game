@@ -2310,6 +2310,62 @@ a foreign army has to be to beat a race using its ability than one that is not.
 Warband 1.25, Strength in Unity 1.24, Agility 1.20, Reincarnation 1.19 — a
 spread of 1.06x, where Reincarnation alone had been worth about double.
 
+### The keep's health bar, and the banner when you are attacked
+
+Two pieces of interface, from two packs.
+
+**The bar** is the Dark Ages UI sheet (`DarkAgesUi_v1.0/32x32-Tilesheet.png`).
+The art is one piece — an ornate trough with a small crest above its middle —
+and it has to be cut before it is any use, because a bar has to stretch and a
+crest must not. The rows say exactly where: rows 0–6 of the frame are the crest
+and nothing else, rows 7–14 are the trough at full width. So `buildKeepBar`
+emits three things: the trough as a horizontal 9-slice, the crest as its own
+sprite for the page to centre, and the fill line in three colours.
+
+Everything is at **three times** the source rather than the `MINI_SCALE` the
+panel frames use. That is on purpose: it is the one number on screen that
+decides whether you still have an empire.
+
+The pack has no amber, so the middle of the ramp is the **red** line turned
+towards gold rather than the green one — green is a teal, and shifting its hue
+lands on olive. The ramp is the same green/amber/red the health bar over every
+group already uses, so a keep in trouble reads the way a group in trouble does.
+
+**The banner** is `UI_Flat_Banner01a` from the flat UI pack, sliced 13 either
+side because that is where its folded tabs end and its flat body begins.
+
+Three things about it were wrong first time and are worth keeping written down,
+because all three are invisible in a syntax check and obvious the moment the
+pieces are composed and looked at:
+
+- **`repeat` was the wrong slice mode.** The middle of each of these carries its
+  own left-hand edge, so tiling redraws that edge every tile: a black seam down
+  the banner, a hard line across the bar. Their middles are uniform along the
+  axis that stretches, so `stretch` is both seamless and exact.
+- **The banner needs a fixed height.** The slice has no top or bottom, so any
+  height but the art's own stretches the ribbon vertically, and a two-pixel
+  outline scaled by a fraction is a blurred one. It is 60px, the art at x3, with
+  the text laid out inside it.
+- **The crest had to be anchored to the trough**, not to the bar element, and
+  with no overlap: rows 0–6 sit directly on row 7 in the source and that is
+  where they belong on screen.
+
+There is no browser in this environment, so the check that found all three was
+`stretch()` in a scratch script: compose the PNGs by hand with the same slice
+numbers the CSS uses, write the result out, and look at it. Worth repeating for
+any future 9-slice.
+
+**The alert carries data, not English.** `Match.emit` takes an optional third
+argument, and the assault raises `{ kind: 'attack', by, race }`. The page reads
+`e.alert.by`. Pulling the name back out of "X is attacking your empire" with a
+regular expression would work until somebody is called "is attacking your
+empire", and would need doing again in every language.
+
+`client.test.js` pins the parts that can drift: that every id the stylesheet
+styles exists in the page and every id in the page is styled, that every image
+a URL names was actually built, that each 9-slice's border-width equals its
+slice number, and that none of them went back to `repeat`.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

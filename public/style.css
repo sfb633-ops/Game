@@ -206,6 +206,134 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
   pointer-events: none;
 }
 .hud-stat { white-space: nowrap; color: var(--parchment); }
+
+/* ---- The town center's health bar -----------------------------------------
+   Drawn from the Dark Ages UI sheet at three times its source size, which is
+   larger than the rest of the interface on purpose: it is the one number on
+   screen that decides whether you still have an empire.
+
+   Three pieces, because a bar has to stretch and a crest must not. The trough
+   is a horizontal 9-slice — its rounded ends held, its middle repeated — the
+   fill is another one inside it, and the crest is its own image centred over
+   the join. Every size below is a multiple of 3 for that reason: the art is
+   pixel art at 1:1 inside a x3 box, and a fractional height would resample it.
+
+   The variable --keep-cap is the width of the trough's rounded end in the source art (6px)
+   times that scale. It is a variable because the border-width and the slice
+   have to agree, and them disagreeing is the one way to get this wrong. */
+#keep-bar {
+  --keep-cap: 18px;
+  --keep-fill-cap: 9px;
+  position: absolute; top: 82px; left: 10px;
+  width: 288px;
+  pointer-events: none;
+}
+#keep-cap {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 0.72rem; letter-spacing: 0.04em;
+  padding: 3px 4px 0;
+}
+#keep-name { color: var(--ink); }
+#keep-hp { color: var(--gold); font-weight: bold; }
+
+#keep-trough {
+  height: 24px;                         /* the art is 8px tall at x3 */
+  border: 0 solid transparent;
+  border-left-width: var(--keep-cap);
+  border-right-width: var(--keep-cap);
+  border-image: url("assets/ui/keepbar.png") 0 18 fill stretch;
+  image-rendering: pixelated;
+  position: relative;
+}
+/* The interior the fill runs along, inset off the trough's own stonework. */
+#keep-track {
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  transform: translateY(-50%);
+  height: 12px;                          /* the fill art is 4px tall at x3 */
+}
+#keep-fill {
+  height: 100%;
+  width: 0;
+  border: 0 solid transparent;
+  border-left-width: var(--keep-fill-cap);
+  border-right-width: var(--keep-fill-cap);
+  image-rendering: pixelated;
+  /* Health drops in one direction, so the bar only ever needs to catch up
+     downwards. Quick enough not to lie about the current number. */
+  transition: width 140ms linear;
+}
+#keep-fill.hp-green { border-image: url("assets/ui/keepbar-fill-green.png") 0 9 fill stretch; }
+#keep-fill.hp-amber { border-image: url("assets/ui/keepbar-fill-amber.png") 0 9 fill stretch; }
+#keep-fill.hp-red   { border-image: url("assets/ui/keepbar-fill-red.png")   0 9 fill stretch; }
+/* Below the width of its own two end caps the fill has nothing left to draw
+   but squashed caps, which reads as a bar that never quite empties. */
+#keep-fill.empty { display: none; }
+
+/* The crest sits ON the trough's top lip, which is where it sits in the source
+   art: rows 0-6 of the original are the crest and row 7 is the top of the bar.
+   Anchored to the trough rather than to the bar so it cannot drift if the
+   caption's font ever changes. */
+#keep-crest {
+  position: absolute;
+  left: 50%; bottom: 100%;
+  transform: translateX(-50%);
+  margin-bottom: 0;                      /* base on the lip, as in the art */
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+/* The keep is in trouble: the whole bar takes the same slow pulse the alert
+   banner uses, so the two read as one piece of news. */
+#keep-bar.critical #keep-trough { animation: keep-throb 900ms ease-in-out infinite; }
+@keyframes keep-throb {
+  0%, 100% { filter: none; }
+  50%      { filter: brightness(1.5) drop-shadow(0 0 6px rgba(217, 83, 79, 0.9)); }
+}
+
+/* ---- "You are under attack" -----------------------------------------------
+   The ribbon is from the flat UI pack, sliced 13 either side because that is
+   where its folded tabs end and its flat body begins. It is loud and it leaves
+   on its own: worth interrupting you for, not worth a click to dismiss. */
+#attack-alert {
+  position: absolute;
+  top: 64px; left: 50%;
+  transform: translateX(-50%);
+  min-width: 340px;
+  /* Exactly the height of the art at x3. The slice has no top or bottom, so
+     any other height would stretch the ribbon vertically — and a two-pixel
+     outline scaled by a fraction is a blurred one. The width is free to
+     stretch: the middle of the ribbon is a flat field. */
+  height: 60px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 10px 30px 4px;                /* clear of the folded tabs at the top */
+  border: 0 solid transparent;
+  border-left-width: 39px;
+  border-right-width: 39px;
+  border-image: url("assets/ui/banner.png") 0 39 fill stretch;
+  image-rendering: pixelated;
+  text-align: center;
+  pointer-events: none;
+  z-index: 40;
+  animation: alert-in 260ms cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+#attack-alert-line1 {
+  font-size: 0.95rem; font-weight: bold; letter-spacing: 0.16em;
+  color: #a32b1c; line-height: 1.1;
+}
+#attack-alert-line2 {
+  font-size: 0.78rem; margin-top: 2px; color: #4a3722; line-height: 1.1;
+  white-space: nowrap;
+}
+#attack-alert.leaving { animation: alert-out 320ms ease-in forwards; }
+@keyframes alert-in {
+  from { transform: translateX(-50%) translateY(-18px) scale(0.94); opacity: 0; }
+  to   { transform: translateX(-50%) translateY(0) scale(1); opacity: 1; }
+}
+@keyframes alert-out {
+  from { opacity: 1; }
+  to   { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+}
 .hud-label { color: var(--ink); margin-right: 0.35rem; }
 .gold { color: var(--gold); font-weight: bold; }
 

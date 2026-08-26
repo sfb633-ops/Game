@@ -25,6 +25,10 @@ const MINI = path.join(SRC, 'MiniWorldSprites');
 // Kenney's UI pack: 9-slice panel frames the stylesheet stretches with
 // border-image. Nothing in the canvas renderer touches these.
 const UI = path.join(SRC, 'UI', '9-Slice');
+// The keep's health bar. One tilesheet, 12x11 tiles of 32.
+const DARKAGES = path.join(SRC, 'DarkAgesUi_v1.0', '32x32-Tilesheet.png');
+// The ribbon the "you are under attack" alert is drawn on.
+const BANNER = path.join(SRC, 'Ui Pack', '01_Flat_Theme', 'Sprites', 'UI_Flat_Banner01a.png');
 // Faces for the draft. Boons are tarot arcana, spells are spellbook tomes.
 const TAROT = path.join(SRC, 'Tarot Cards [Free]', 'Tarot Cards [Free]', 'Tarot_Original', '1X');
 const TOMES = path.join(SRC, 'SpellBooks', 'TomesMaster32.png');
@@ -734,7 +738,78 @@ function buildUi() {
     img = ops.scaleUp(img, MINI_SCALE);
     manifest.ui[name] = { file: write(img, 'ui', `${name}.png`), size: img.width, slice: 16 };
   }
-  console.log(`  ui: ${Object.keys(UI_FRAMES).length} 9-slice frames`);
+  buildKeepBar();
+  buildBanner();
+  console.log(`  ui: ${Object.keys(manifest.ui).length} pieces`);
+}
+
+// The town center's health bar, from the Dark Ages UI sheet.
+//
+// Everything here is bigger than the rest of the interface on purpose. The
+// panel frames are drawn at MINI_SCALE; this is the one number on screen that
+// decides whether you still have an empire, so it is drawn at three and given
+// the room to be read at a glance.
+//
+// The art is one piece — an ornate trough with a small crest sitting above its
+// middle — and it has to be split before it is any use, because a bar has to
+// stretch and a crest must not. The rows say exactly where to cut: rows 0-6 of
+// the frame are the crest and nothing else, rows 7-14 are the trough at full
+// width. So the trough goes out as a horizontal 9-slice with its rounded ends
+// held and its middle repeated, and the crest goes out as its own sprite for
+// the page to centre over it.
+const UI_BAR_SCALE = 3;
+const DARKAGES_BAR = { x: 197, y: 135, w: 86, h: 15 };   // frame incl. crest
+const DARKAGES_CREST_H = 7;                               // rows 0-6 of it
+const DARKAGES_FILLS = {
+  // Two of the three lines under the frame on the sheet. The pack has no amber,
+  // so the middle of the ramp is the RED line turned towards gold rather than
+  // the green one: green is a teal and shifting it lands on olive, while red is
+  // already warm and shifting it lands where it should. Same three-colour ramp
+  // the health bar over every group uses, so a keep in trouble reads the same
+  // way a group in trouble does.
+  green: { x: 295, y: 176, w: 82, h: 4 },
+  red:   { x: 199, y: 176, w: 82, h: 4 },
+};
+const AMBER_FROM_RED = { hueShift: 0.12, lightAdd: 0.10 };
+
+function buildKeepBar() {
+  const sheet = decodePNG(need(DARKAGES));
+  const d = DARKAGES_BAR;
+
+  const trough = ops.scaleUp(
+    ops.crop(sheet, d.x, d.y + DARKAGES_CREST_H, d.w, d.h - DARKAGES_CREST_H), UI_BAR_SCALE);
+  manifest.ui.keepbar = { file: write(trough, 'ui', 'keepbar.png'), w: trough.width, h: trough.height, slice: [0, 6 * UI_BAR_SCALE] };
+
+  // The crest, trimmed to itself so the page can centre it without knowing how
+  // much empty sheet was around it.
+  const crestBand = ops.crop(sheet, d.x, d.y, d.w, DARKAGES_CREST_H);
+  const cb = ops.bbox(crestBand);
+  const crest = ops.scaleUp(ops.crop(crestBand, cb.x0, 0, cb.x1 - cb.x0 + 1, DARKAGES_CREST_H), UI_BAR_SCALE);
+  manifest.ui.keepbarCrest = { file: write(crest, 'ui', 'keepbar-crest.png'), w: crest.width, h: crest.height };
+
+  const fills = { ...DARKAGES_FILLS, amber: DARKAGES_FILLS.red };
+  for (const [name, f] of Object.entries(fills)) {
+    let img = ops.crop(sheet, f.x, f.y, f.w, f.h);
+    if (name === 'amber') img = ops.recolor(img, AMBER_FROM_RED);
+    img = ops.scaleUp(img, UI_BAR_SCALE);
+    manifest.ui[`keepbarFill_${name}`] = {
+      file: write(img, 'ui', `keepbar-fill-${name}.png`), w: img.width, h: img.height,
+      slice: [0, 3 * UI_BAR_SCALE],
+    };
+  }
+}
+
+// The ribbon the attack alert is written on.
+//
+// 64x20, and the shape decides the slice: the first and last thirteen columns
+// are the folded tabs at each end and must never stretch, while everything
+// between them is a flat body that can. Hence a horizontal 9-slice of 13.
+function buildBanner() {
+  const img = ops.scaleUp(decodePNG(need(BANNER)), UI_BAR_SCALE);
+  manifest.ui.banner = {
+    file: write(img, 'ui', 'banner.png'), w: img.width, h: img.height,
+    slice: [0, 13 * UI_BAR_SCALE],
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -172,5 +172,69 @@ if (geomStart > 0 && geomEnd > geomStart) {
     guard.split('\n').find(l => l.includes('if (friend')) || 'guard not found');
 }
 
+// ---------------------------------------------------------------------------
+// The keep bar and the attack banner
+//
+// Both are pure DOM and CSS, so there is nothing here to run. What can go wrong
+// is that the three sides drift apart — an id renamed in the page but not the
+// stylesheet, art referenced by a URL that no longer exists, or a 9-slice whose
+// border-width and slice number stop agreeing, which is the one way to get a
+// border-image subtly wrong and the hardest to see.
+{
+  const html = fs.readFileSync(path.join(SRC, 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(SRC, 'style.css'), 'utf8');
+
+  const ids = ['keep-bar', 'keep-trough', 'keep-track', 'keep-fill', 'keep-crest',
+    'keep-name', 'keep-hp', 'attack-alert', 'attack-alert-line2'];
+  const orphanCss = ids.filter(id => css.includes('#' + id) && !html.includes(`id="${id}"`));
+  const orphanHtml = ids.filter(id => html.includes(`id="${id}"`) && !css.includes('#' + id));
+  check('every id the keep bar and the banner style exists in the page',
+    orphanCss.length === 0, orphanCss.join(', ') || `${ids.length} checked`);
+  check('  and every one in the page is styled', orphanHtml.length === 0, orphanHtml.join(', '));
+
+  check('the page draws the keep bar and raises the banner',
+    /renderKeepBar\(me\)/.test(client) && /raiseAttackAlert\(/.test(client));
+  // The server sends who is attacking as data. If that is ever read back out of
+  // the sentence instead, it breaks for a player called "is attacking".
+  check('  and takes the attacker\'s name from the event, not from its English',
+    /e\.alert\.by/.test(client) && !/is attacking your empire/.test(client));
+
+  // Every picture the stylesheet asks for has to have been built.
+  const urls = [...css.matchAll(/url\("(assets\/[^"]+)"\)/g)].map(m => m[1]);
+  const absent = urls.filter(u => !fs.existsSync(path.join(SRC, u)));
+  check('every image the stylesheet references was built',
+    absent.length === 0, absent.join(', ') || `${urls.length} files`);
+
+  // A 9-slice is two numbers that have to be the same: the slice, and the
+  // border-width reserved for it. Different, and the art is scaled into the
+  // wrong box — which looks like blurry pixel art and reads as a bad asset.
+  const slices = [
+    ['keepbar.png', 18, /border-left-width: var\(--keep-cap\)/, /--keep-cap: (\d+)px/],
+    ['banner.png', 39, /border-left-width: 39px/, null],
+  ];
+  const wrong = [];
+  for (const [file, slice, widthRe, varRe] of slices) {
+    const rule = new RegExp(`url\\("assets/ui/${file.replace('.', '\\.')}"\\) 0 (\\d+) fill`);
+    const m = css.match(rule);
+    if (!m) { wrong.push(`${file}: no border-image rule`); continue; }
+    if (Number(m[1]) !== slice) wrong.push(`${file}: slice ${m[1]}, expected ${slice}`);
+    if (!widthRe.test(css)) wrong.push(`${file}: no matching border-width`);
+    if (varRe) {
+      const v = css.match(varRe);
+      if (!v || Number(v[1]) !== slice) wrong.push(`${file}: variable is ${v && v[1]}, slice is ${slice}`);
+    }
+  }
+  check('every 9-slice reserves exactly the border it slices', wrong.length === 0,
+    wrong.join(' | ') || 'slice and border-width agree');
+
+  // Stretch, not repeat. The middle of each of these carries its own left-hand
+  // edge, so tiling it redraws that edge every tile: a seam down the banner and
+  // a line across the bar. Found by composing the pieces and looking at them.
+  const repeats = ['keepbar.png', 'banner.png', 'keepbar-fill-green.png']
+    .filter(f => new RegExp(`assets/ui/${f.replace('.', '\\.')}"\\) 0 \\d+ fill repeat`).test(css));
+  check('  and stretches its middle rather than tiling it',
+    repeats.length === 0, repeats.join(', ') || 'all stretch');
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall client checks pass');
 process.exit(failures ? 1 : 0);

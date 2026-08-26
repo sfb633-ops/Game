@@ -2536,6 +2536,56 @@
    "file": "ui/danger.png",
    "size": 96,
    "slice": 16
+  },
+  "keepbar": {
+   "file": "ui/keepbar.png",
+   "w": 258,
+   "h": 24,
+   "slice": [
+    0,
+    18
+   ]
+  },
+  "keepbarCrest": {
+   "file": "ui/keepbar-crest.png",
+   "w": 51,
+   "h": 21
+  },
+  "keepbarFill_green": {
+   "file": "ui/keepbar-fill-green.png",
+   "w": 246,
+   "h": 12,
+   "slice": [
+    0,
+    9
+   ]
+  },
+  "keepbarFill_red": {
+   "file": "ui/keepbar-fill-red.png",
+   "w": 246,
+   "h": 12,
+   "slice": [
+    0,
+    9
+   ]
+  },
+  "keepbarFill_amber": {
+   "file": "ui/keepbar-fill-amber.png",
+   "w": 246,
+   "h": 12,
+   "slice": [
+    0,
+    9
+   ]
+  },
+  "banner": {
+   "file": "ui/banner.png",
+   "w": 192,
+   "h": 60,
+   "slice": [
+    0,
+    39
+   ]
   }
  },
  "cards": {

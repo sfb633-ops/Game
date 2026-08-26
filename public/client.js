@@ -364,6 +364,7 @@ function abandonSession(reason) {
   document.getElementById('game-ui').classList.add('hidden');
   document.getElementById('draft').classList.add('hidden');
   document.getElementById('game-over-banner').classList.remove('show');
+  clearAttackAlert();
   showExitConfirm(false);
   menuEl.classList.remove('hidden');
   syncSound();
@@ -2774,6 +2775,7 @@ function renderPanel() {
 
   document.getElementById('gold-val').textContent = me.gold;
   const castle = me.buildings.find(b => b.type === 'castle');
+  renderKeepBar(me);
   document.getElementById('income-val').textContent = me.incomePerSec;
   const marching = latestState.armies
     .filter(a => a.ownerId === myId)
@@ -3175,7 +3177,13 @@ function onState(msg) {
   if (inLobby) showLobby(false);
   trackArmies(msg);
   trackBuildings(msg);
-  if (msg.events) for (const e of msg.events) if (e.playerId === myId) log(e.text);
+  if (msg.events) {
+    for (const e of msg.events) {
+      if (e.playerId !== myId) continue;
+      log(e.text);
+      if (e.alert && e.alert.kind === 'attack') raiseAttackAlert(e.alert.by);
+    }
+  }
   // Ground just uncovered. Only ever new tiles, so this is a handful even while
   // an army is crossing open country.
   if (msg.explored && msg.explored.length && explored) {
@@ -3237,6 +3245,93 @@ function towerOwnerAt(x, y) {
 // looked wrong on screen — it just grew a DOM node per battle report for the
 // whole match, and a long game produces thousands.
 const LOG_LINES = 80;
+
+// Write text into an element only when it has actually changed. This runs on
+// every state message, five times a second.
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el && el.textContent !== text) el.textContent = text;
+}
+
+// ---------------------------------------------------------------------------
+// The town center's health bar
+// ---------------------------------------------------------------------------
+//
+// Read straight off the state — the castle is a building like any other in
+// `me.buildings` and the server already sends its health and its maximum — so
+// there is nothing here to keep in step with the rules.
+//
+// Hidden rather than emptied when there is no keep: a player who has just been
+// knocked out should not be left staring at a bar reading zero.
+const KEEP_AMBER = 0.5, KEEP_RED = 0.25;
+
+function renderKeepBar(me) {
+  const bar = document.getElementById('keep-bar');
+  if (!bar) return;
+  const castle = me && me.alive && me.buildings && me.buildings.find(b => b.type === 'castle');
+  if (!castle) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+
+  const frac = castle.maxHp ? Math.max(0, Math.min(1, castle.hp / castle.maxHp)) : 0;
+  const fill = document.getElementById('keep-fill');
+  const pct = `${(frac * 100).toFixed(1)}%`;
+  if (fill.style.width !== pct) fill.style.width = pct;
+
+  // The same three-colour ramp the health bar over every group uses, so a keep
+  // in trouble reads the way a group in trouble does.
+  const tone = frac > KEEP_AMBER ? 'hp-green' : frac > KEEP_RED ? 'hp-amber' : 'hp-red';
+  if (!fill.classList.contains(tone)) {
+    fill.classList.remove('hp-green', 'hp-amber', 'hp-red');
+    fill.classList.add(tone);
+  }
+  fill.classList.toggle('empty', frac <= 0.005);
+  bar.classList.toggle('critical', frac > 0 && frac <= KEEP_RED);
+
+  setText('keep-name', castle.level > 1 ? `Town Center \u00b7 Level ${castle.level}` : 'Town Center');
+  setText('keep-hp', `${Math.round(castle.hp)} / ${castle.maxHp}`);
+}
+
+// ---------------------------------------------------------------------------
+// "You are under attack"
+// ---------------------------------------------------------------------------
+//
+// The server says who, in `alert.by`, rather than the page reading the name back
+// out of the English — see Match.emit for why.
+//
+// One banner at a time, and a fresh assault only pushes its clock back rather
+// than stacking: an attack pressed home by four groups raises four of these,
+// and four banners is not four times the news.
+const ATTACK_ALERT_MS = 4200, ATTACK_ALERT_FADE_MS = 320;
+let attackAlertTimer = null, attackAlertFade = null;
+
+function raiseAttackAlert(who) {
+  const el = document.getElementById('attack-alert');
+  if (!el) return;
+  clearTimeout(attackAlertTimer);
+  clearTimeout(attackAlertFade);
+  el.classList.remove('hidden', 'leaving');
+  setText('attack-alert-line2', `${who || 'An enemy'} is storming your empire`);
+  // Restart the entrance even if the banner was already up, so a second
+  // attacker is something you see arrive rather than a line that quietly
+  // changed while you were looking somewhere else.
+  el.style.animation = 'none';
+  void el.offsetWidth;                       // reflow, or the restart is ignored
+  el.style.animation = '';
+  attackAlertTimer = setTimeout(() => {
+    el.classList.add('leaving');
+    attackAlertFade = setTimeout(() => el.classList.add('hidden'), ATTACK_ALERT_FADE_MS);
+  }, ATTACK_ALERT_MS);
+}
+
+// Leaving a match must not leave the banner hanging over the menu.
+function clearAttackAlert() {
+  clearTimeout(attackAlertTimer);
+  clearTimeout(attackAlertFade);
+  const el = document.getElementById('attack-alert');
+  if (!el) return;
+  el.classList.remove('leaving');
+  el.classList.add('hidden');
+}
 
 function log(text) {
   const el = document.getElementById('log');
