@@ -2981,6 +2981,14 @@ class Match {
       }
     }
 
+    // One movement budget per group per tick, shared by the march below and
+    // by squaring up (walkTo). They used to be two separate movements that knew
+    // nothing of each other, so a group that marched and was then shoved into
+    // its stance in the same tick covered up to twice its pace. Reset for every
+    // group before any of them is stepped, because squareUp moves the *other*
+    // side of a fight too, which may not have been reached by this loop yet.
+    for (const army of this.armies.values()) army.moved = 0;
+
     for (const army of Array.from(this.armies.values())) {
       if (armyCount(army) === 0) { this.armies.delete(army.id); continue; }
       // Forced March and Entangle both wear off here, and the field is dropped
@@ -3083,7 +3091,9 @@ class Match {
       const lx = leg.x - army.x, ly = leg.y - army.y;
       const legDist = Math.hypot(lx, ly);
       if (legDist < 1e-6) continue;
-      const step = Math.min(legDist, speed * dt);
+      const allowance = speed * dt - (army.moved || 0);
+      if (allowance <= 1e-9) continue;          // already walked its fill this tick
+      const step = Math.min(legDist, allowance);
       const ux = lx / legDist, uy = ly / legDist;
       let nx = army.x + ux * step, ny = army.y + uy * step;
       // Go round a group standing in the way rather than through it. This is a
@@ -3134,8 +3144,8 @@ class Match {
         // would shuffle on the spot for ever instead of giving up.
         const rx = Math.round(nx), ry = Math.round(ny);
         const cx = Math.round(army.x), cy = Math.round(army.y);
-        if (rx !== cx && this.validMoveTile(rx, cy)) { army.x = nx; army.blockedTicks = 0; continue; }
-        if (ry !== cy && this.validMoveTile(cx, ry)) { army.y = ny; army.blockedTicks = 0; continue; }
+        if (rx !== cx && this.validMoveTile(rx, cy)) { army.x = nx; army.moved += step; army.blockedTicks = 0; continue; }
+        if (ry !== cy && this.validMoveTile(cx, ry)) { army.y = ny; army.moved += step; army.blockedTicks = 0; continue; }
         // Genuinely stopped. Think again — the plan may simply be out of date —
         // but not for ever: a group that cannot get anywhere for this long is
         // not going to, and swimming is not the alternative.
@@ -3147,6 +3157,7 @@ class Match {
       army.blockedTicks = 0;
       army.x = nx;
       army.y = ny;
+      army.moved += step;
     }
 
     this.checkWinCondition();
@@ -3434,15 +3445,20 @@ class Match {
     this.lookAt(b, a.x, a.y);
   }
 
-  // Move a group towards a spot, no faster than it walks.
+  // Move a group towards a spot, no faster than it walks — counting whatever it
+  // has already walked this tick (see the budget in tick). Called without a dt,
+  // as the tests do when they only want the stance, it simply places the group.
   walkTo(army, x, y, dt) {
     const dx = x - army.x, dy = y - army.y;
     const d = Math.hypot(dx, dy);
-    const cap = armySpeed(army, this.modsFor(army)) * (dt || 0);
     if (d < 1e-9) return;
-    if (!(cap > 0) || d <= cap) { army.x = x; army.y = y; return; }
+    if (!(dt > 0)) { army.x = x; army.y = y; return; }
+    const cap = Math.max(0, armySpeed(army, this.modsFor(army)) * dt - (army.moved || 0));
+    if (cap <= 1e-9) return;
+    if (d <= cap) { army.x = x; army.y = y; army.moved = (army.moved || 0) + d; return; }
     army.x += (dx / d) * cap;
     army.y += (dy / d) * cap;
+    army.moved = (army.moved || 0) + cap;
   }
 
   // Turn a group to look at a point. destX/destY doubles as both "where this
