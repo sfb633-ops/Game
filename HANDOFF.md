@@ -2807,6 +2807,77 @@ keep. Castle regeneration alone touches hp every tick. The stringify-and-compare
 costs one encode per player per tick and cannot drift. Leave it unless a
 profile says otherwise.
 
+### A second shrine, and the colossus
+
+Two shrines now, and `SHRINE.kinds` is the whole of the difference between
+them: the same stonework, the same guard, the same dormancy, and a different
+thing asleep inside. The dark mausoleum holds three golems; the pale one holds
+two colossi.
+
+**Why the same guard and the same cost.** Two shrines that cost differently are
+not a choice — they are one good shrine and one nobody bothers with. Making them
+identical to fight and different to win is what turns "which shrine" into a
+question about where you are and who else is near it.
+
+**The prizes are measured against each other, not eyeballed.** The first guess
+at a colossus was 200 attack and 1550 health, which reads like "half again a
+golem" and is worth a third more: it beat 2400 gold of knights against the
+golems' 1880, and took the three golems without losing a body. The reason is the
+square law that governs everything else in this project — a side's output is how
+many of it are still standing, so **two** bodies lose half their damage on the
+first casualty where **three** lose a third. Matching three golems therefore
+costs *more* than three golems' worth of stats spread across two bodies, not
+less.
+
+At 155/1230 both prizes beat exactly 47 knights and, set on each other, the
+colossi win with one of the two left on 2% health. `rules.test.js` walks the
+knight count one at a time to find those numbers; at the step of five it started
+with, the two prizes looked identical while one was in fact worth a third more.
+
+**Placement.** `placeShrineFairly` now places each shrine in turn through
+`fairestSpot`, which is the old body with the shrines already placed added to
+what it keeps clear of. Measured on Open Field with two empires: 120 and 121
+tiles from each, and 146 tiles apart — one north, one south, with the empires
+east and west.
+
+#### The art
+
+The colossus is `assets/Golems/New GOlem/Gollux`, and three things about it are
+worth knowing before touching `buildColossus`.
+
+- **The pack has a frame size per animation.** The idle sits in a 128px cell and
+  everything that strides or swings gets 384, which is where the reach and the
+  flung debris live. Nothing else in the pipeline does this, so the three
+  animations have to be lined up on the body rather than on the cell — the
+  builder takes the median x of each sheet's first frame and cuts a window
+  around that. Aligning on the cell centre instead drifts several pixels between
+  the idle and the walk, which reads as a hop the moment a group takes a step.
+- **It is drawn facing right**, and that was read off the attack — the debris
+  flies from the fist on the right-hand side of the body — not off the
+  silhouette, which is a shoulder hump whichever way you read it. Left is that
+  mirrored, and the cut window is symmetric about the anchor so mirroring the
+  cell leaves the anchor where it was. Up and down get the right-facing view,
+  the same compromise the first golem makes by being front-on for all four.
+  Getting the facing backwards is silent in exactly the way `BALLISTA_ROWS` was,
+  so there is a pin that the left row really is the mirror of the right and not
+  a copy of it.
+- **It is used at 1:1**, alone among the character art, which is the call the
+  archer tower's pack got and for the same reason. Its body is 71x62 in the
+  source against the first golem's 38x38 doubled to 76x76 — so at 1:1 the two
+  prizes are already the same size on the map, and putting `MINI_SCALE` through
+  it would give a five-tile monster. Its pixels are finer than the units beside
+  it; that is the trade. There is a pin comparing the **shipped** idle frames of
+  the two prizes, because that is the measurement the skeletons pass skipped.
+
+The second shrine's building is the second cell of the mausoleum sheet — the
+pack draws it twice, a dark tomb and a pale one, which is exactly what two
+shrines holding different things want. No recolour and nothing invented.
+
+`SHRINE.kinds` reaches the client in `init` so the page can draw the right
+stonework from `art`, and each camp carries its own `kind` on the wire. A shrine
+whose kind the client does not recognise falls back to the first one's art
+rather than drawing nothing.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

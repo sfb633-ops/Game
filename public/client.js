@@ -26,6 +26,7 @@ let myRace = null;
 let myRoom = null;         // { code, name } of the game this client is in
 let inputsBound = false;   // canvas/keyboard handlers are attached exactly once
 let cardDefs = null, draftCfg = null, outpostCfg = null;
+let shrineKinds = null;    // the shrines this match holds, and what sleeps in each
 let spellRechargeSec = 0;   // the rate a spell with no clock of its own uses
 let draftShown = null;     // the offer currently on screen, so it deals once
 let armedSpell = null;     // card id waiting for a map click to aim it
@@ -535,6 +536,7 @@ function onInit(msg) {
   draftCfg = msg.cardDraft;
   spellRechargeSec = msg.spellRechargeSec || 0;
   outpostCfg = msg.outpost;
+  if (msg.shrineKinds) shrineKinds = msg.shrineKinds;
   myRoom = msg.room || null;
   if (msg.session && myRoom) {
     session = { url: ws.serverUrl, code: myRoom.code, token: msg.session };
@@ -1744,9 +1746,19 @@ function drawFlyingArrow(a) {
 }
 
 // A bandit camp: a tent with its garrison milling around outside.
+// Which stonework a shrine is drawn in. The kind rides on the camp from the
+// server; an unknown one falls back to the first shrine's art rather than
+// drawing nothing, because a shrine nobody can see is worse than one that looks
+// like the other.
+function shrineArt(camp) {
+  const kind = shrineKinds && shrineKinds.find(k => k.id === camp.kind);
+  return (kind && kind.art) || 'shrine';
+}
+
 function drawCamp(camp, ts) {
   const px = camp.x * ts, py = camp.y * ts;
-  Sprites.drawBuilding(ctx, camp.shrine ? 'shrine' : 'camp', px, py);
+  const art = camp.shrine ? shrineArt(camp) : 'camp';
+  Sprites.drawBuilding(ctx, art, px, py);
   // A captured camp keeps its fort but loses its garrison, and flies the
   // banner of whoever took it. A shrine is never captured — it goes quiet and
   // comes back — so this only ever runs for camps.
@@ -1760,7 +1772,7 @@ function drawCamp(camp, ts) {
     if (camp.shrine) {
       ctx.save();
       ctx.globalAlpha = 0.4;
-      Sprites.drawBuilding(ctx, 'shrine', px, py);
+      Sprites.drawBuilding(ctx, art, px, py);
       ctx.restore();
     }
     return;

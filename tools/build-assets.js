@@ -36,6 +36,8 @@ const TAROT = path.join(SRC, 'Tarot Cards [Free]', 'Tarot Cards [Free]', 'Tarot_
 const TOMES = path.join(SRC, 'SpellBooks', 'TomesMaster32.png');
 // The shrine's golem. One sheet per animation, all frames in a single row.
 const GOLEMS = path.join(SRC, 'Golems', 'Golems_Free_Version', 'Golem_1');
+// The other shrine's sleeper, from a pack of its own.
+const GOLLUX = path.join(SRC, 'Golems', 'New GOlem', 'Gollux');
 
 const TILE = 32; // one world tile, and the native cell size of every tileset used
 // MiniWorldSprites is drawn for a 16px tile grid, so everything taken from it
@@ -404,6 +406,13 @@ function buildBuildings() {
     // not follow that convention.
     shrine: cutBuilding(decodePNG(need(path.join(MINI, 'Buildings', 'Enemy', 'Mausoleum.png'))),
       [0, 0, 32, 32], 'buildings', 'neutral', 'shrine.png'),
+    // The second shrine is the second cell of that same sheet: the pack draws
+    // the mausoleum twice, a dark tomb and a pale one, and the pair are exactly
+    // what two shrines holding different things want — plainly the same sort of
+    // place, plainly not the same place. No recolour, no invention; the two
+    // that were drawn.
+    shrineColossus: cutBuilding(decodePNG(need(path.join(MINI, 'Buildings', 'Enemy', 'Mausoleum.png'))),
+      [32, 0, 32, 32], 'buildings', 'neutral', 'shrine-colossus.png'),
   };
   manifest.buildings = { sets, byRace: RACE_BUILDING_SET, defaultSet: 'red', neutralSet: 'neutral' };
   console.log(`  buildings: ${Object.keys(sets).length} sets`);
@@ -685,6 +694,89 @@ function buildGolem() {
   };
 }
 
+// The second shrine's colossus, and the one pack here with a frame size per
+// animation rather than one for the whole character: the idle sits in a 128px
+// cell and everything that strides or swings gets 384, which is where the reach
+// and the flung debris live. Frame counts are read off the art as everywhere
+// else. The pack's attack_B, healing and hit sheets go unused, exactly as the
+// first golem's die and hurt do.
+const COLOSSUS_SHEETS = {
+  idle:   { file: 'gollux_idle.png',     frame: 128 },
+  walk:   { file: 'gollux_move.png',     frame: 384 },
+  attack: { file: 'gollux_attack_A.png', frame: 384 },
+};
+
+// Two things about this one are worth knowing before touching it.
+//
+// **It is drawn facing RIGHT**, and that was read off the attack — the debris
+// flies from the fist on the right-hand side of the body — rather than off the
+// silhouette, which is a shoulder hump whichever way you read it. Left is that
+// mirrored. Getting it backwards is silent in exactly the way BALLISTA_ROWS
+// was: every colossus simply walks backwards for ever.
+//
+// **It is used at 1:1**, alone among the character art, which is the same call
+// the archer tower's pack got and for the same reason. Its body is 71x62 in the
+// source, and the first golem's is 38x38 doubled to 76x76 — so at 1:1 the two
+// prizes are already the same size on the map, and putting MINI_SCALE through
+// this one would give a five-tile monster. Its pixels are therefore finer than
+// the units it stands beside. That is the trade, and it is the one the
+// skeletons pass was reverted for getting wrong: measure the sprite that
+// actually ships, not the one you meant to build.
+function buildColossus() {
+  if (!fs.existsSync(GOLLUX)) {
+    console.log('  units/colossus: Gollux pack not found, skipping');
+    return null;                        // a checkout without the raw art still builds
+  }
+  const sheets = {};
+  for (const [name, def] of Object.entries(COLOSSUS_SHEETS)) {
+    const img = decodePNG(need(path.join(GOLLUX, def.file)));
+    sheets[name] = { img, frame: def.frame, count: Math.round(img.width / def.frame) };
+  }
+  // Where the body stands inside its own cell, taken from the first frame of
+  // each sheet — a calm one in all three. The cells are different widths, so
+  // this is the only thing lining the three animations up with each other:
+  // aligning on the cell centre instead drifts several pixels between the idle
+  // and the walk, which reads as a hop the moment a group takes a step.
+  const anchors = {};
+  for (const [name, s] of Object.entries(sheets)) {
+    anchors[name] = medianX(ops.crop(s.img, 0, 0, s.frame, s.img.height));
+  }
+  // How far the art reaches either side of that anchor, and how far above the
+  // feet, across every frame of every animation — so nothing clips when the
+  // slam throws rubble sideways.
+  let reach = 0, top = 0;
+  for (const [name, s] of Object.entries(sheets)) {
+    for (let i = 0; i < s.count; i++) {
+      const b = ops.bbox(ops.crop(s.img, i * s.frame, 0, s.frame, s.img.height));
+      if (!b) continue;
+      reach = Math.max(reach, anchors[name] - b.x0, b.x1 - anchors[name]);
+      top = Math.max(top, s.img.height - b.y0);
+    }
+  }
+  // Symmetric about the anchor, so mirroring the cell mirrors the sprite and
+  // leaves the anchor exactly where it was — one destination x serves both
+  // facings, which is the same saving the tower archer's three facings make.
+  const W = reach * 2 + 1, H = top;
+  const anims = {};
+  for (const [name, s] of Object.entries(sheets)) {
+    const out = ops.blank(s.count * W, 4 * H);
+    for (let i = 0; i < s.count; i++) {
+      const cell = ops.crop(s.img, i * s.frame + anchors[name] - reach, s.img.height - H, W, H);
+      const mirrored = ops.flipX(cell);
+      // Up and down get the right-facing view as well. It is a side-on pack
+      // with one facing — the same compromise the first golem makes by being
+      // front-on for all four — and a walking hill carries it in a way a
+      // soldier would not.
+      for (const row of [DIR_ROWS.right, DIR_ROWS.down, DIR_ROWS.up]) {
+        ops.blit(out, cell, i * W, row * H);
+      }
+      ops.blit(out, mirrored, i * W, DIR_ROWS.left * H);
+    }
+    anims[name] = { file: write(out, 'units', 'colossus', `${name}.png`), frames: s.count };
+  }
+  return { frameW: W, frameH: H, anchorX: reach, anchorY: H, anims };
+}
+
 // ---------------------------------------------------------------------------
 // The elves
 // ---------------------------------------------------------------------------
@@ -888,13 +980,19 @@ function buildElves() {
 }
 
 function buildUnits() {
-  // One golem, shared by every race — see buildGolem.
+  // One golem, shared by every race — see buildGolem. Same for the colossus:
+  // what a shrine wakes belongs to whoever woke it rather than to an empire,
+  // and the team ring the client draws under a group is what says whose it is.
   const golem = buildGolem();
+  const colossus = buildColossus();
   // ...and elves of their own, where every other race is a recolour.
   const elves = buildElves();
   for (const [race, byType] of Object.entries(UNIT_SRC)) {
     const variants = {};
-    if (race !== 'bandit') variants.golem = golem;
+    if (race !== 'bandit') {
+      variants.golem = golem;
+      if (colossus) variants.colossus = colossus;
+    }
     for (const [unitType, [relPath, layoutName]] of Object.entries(byType)) {
       // Skipped rather than built and overwritten: building it would write a
       // set of PNGs nothing ever reads.

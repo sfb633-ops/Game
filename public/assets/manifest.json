@@ -1827,6 +1827,14 @@
      "anchorX": 32,
      "anchorY": 64,
      "footW": 51
+    },
+    "shrineColossus": {
+     "file": "buildings/neutral/shrine-colossus.png",
+     "w": 64,
+     "h": 64,
+     "anchorX": 32,
+     "anchorY": 64,
+     "footW": 51
     }
    }
   },
@@ -2075,6 +2083,26 @@
       }
      }
     },
+    "colossus": {
+     "frameW": 85,
+     "frameH": 62,
+     "anchorX": 42,
+     "anchorY": 62,
+     "anims": {
+      "idle": {
+       "file": "units/colossus/idle.png",
+       "frames": 5
+      },
+      "walk": {
+       "file": "units/colossus/walk.png",
+       "frames": 8
+      },
+      "attack": {
+       "file": "units/colossus/attack.png",
+       "frames": 17
+      }
+     }
+    },
     "swordsman": {
      "frameW": 32,
      "frameH": 32,
@@ -2168,6 +2196,26 @@
       "attack": {
        "file": "units/golem/attack.png",
        "frames": 11
+      }
+     }
+    },
+    "colossus": {
+     "frameW": 85,
+     "frameH": 62,
+     "anchorX": 42,
+     "anchorY": 62,
+     "anims": {
+      "idle": {
+       "file": "units/colossus/idle.png",
+       "frames": 5
+      },
+      "walk": {
+       "file": "units/colossus/walk.png",
+       "frames": 8
+      },
+      "attack": {
+       "file": "units/colossus/attack.png",
+       "frames": 17
       }
      }
     },
@@ -2267,6 +2315,26 @@
       }
      }
     },
+    "colossus": {
+     "frameW": 85,
+     "frameH": 62,
+     "anchorX": 42,
+     "anchorY": 62,
+     "anims": {
+      "idle": {
+       "file": "units/colossus/idle.png",
+       "frames": 5
+      },
+      "walk": {
+       "file": "units/colossus/walk.png",
+       "frames": 8
+      },
+      "attack": {
+       "file": "units/colossus/attack.png",
+       "frames": 17
+      }
+     }
+    },
     "swordsman": {
      "frameW": 32,
      "frameH": 32,
@@ -2360,6 +2428,26 @@
       "attack": {
        "file": "units/golem/attack.png",
        "frames": 11
+      }
+     }
+    },
+    "colossus": {
+     "frameW": 85,
+     "frameH": 62,
+     "anchorX": 42,
+     "anchorY": 62,
+     "anims": {
+      "idle": {
+       "file": "units/colossus/idle.png",
+       "frames": 5
+      },
+      "walk": {
+       "file": "units/colossus/walk.png",
+       "frames": 8
+      },
+      "attack": {
+       "file": "units/colossus/attack.png",
+       "frames": 17
       }
      }
     },

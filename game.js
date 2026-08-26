@@ -815,11 +815,19 @@ class Match {
   // one branch each. A separate entity would have meant a second copy of all
   // of that.
   generateShrine() {
+    for (const kind of SHRINE.kinds) this.addShrine(kind);
+  }
+
+  addShrine(kind) {
     const spot = this.findOpenSpot(SHRINE.spacing) || this.findOpenSpot(AI_CAMP.spacing);
     if (!spot) return;                      // a map with nowhere for it simply has none
     this.aiCamps.push({
-      id: 'shrine',
+      id: kind.id,
       shrine: true,
+      // Which shrine this is: what sleeps in it, and which stonework the client
+      // draws. Carried on the camp rather than looked up from the id, so a
+      // shrine knows its own prize wherever it is handled.
+      kind: kind.id,
       x: spot.x, y: spot.y,
       hp: SHRINE.hp, maxHp: SHRINE.hp,
       garrison: { ...SHRINE.guardian },
@@ -1127,15 +1135,32 @@ class Match {
   // Done at the start, not at construction, because until the host says go
   // there is no telling who is playing or where they will sit — see
   // spreadPlayers, which has just moved them all.
+  // Placed one after another, each fair on its own and each keeping clear of
+  // the one already placed — two shrines dropped in the same corner would be
+  // one contested objective wearing two hats, and the far side of the map would
+  // have neither.
   placeShrineFairly() {
-    const shrine = this.aiCamps.find(c => c.shrine);
     const bases = [...this.players.values()].map(p => ({ x: p.baseX, y: p.baseY }));
-    if (!shrine || bases.length < 2) return;
+    if (bases.length < 2) return;
     const camps = this.aiCamps.filter(c => !c.shrine);
+    const placed = [];
+    for (const shrine of this.aiCamps.filter(c => c.shrine)) {
+      const spot = this.fairestSpot(bases, camps, placed);
+      if (!spot) continue;                   // nowhere better; leave it be
+      shrine.x = spot.x; shrine.y = spot.y;
+      placed.push(spot);
+    }
+  }
 
+  // Where a shrine is as EQUALLY far from every empire as it can be — minimise
+  // the spread between the nearest empire and the furthest, which for two
+  // players is the line between them and for four is the middle. Among equally
+  // fair spots the one furthest from everybody wins, so it lands in open ground
+  // rather than wedged against somebody's border.
+  fairestSpot(bases, camps, avoid) {
     let best = null;
-    // Every other tile is plenty: the shrine is one tile and the map is 240x160,
-    // and this runs once.
+    // Every other tile is plenty: a shrine is one tile and the map is 240x160,
+    // and this runs once per shrine.
     for (let y = 6; y < MAP.height - 6; y += 2) {
       for (let x = 6; x < MAP.width - 6; x += 2) {
         if (this.terrain[y][x] !== TILE_LAND) continue;
@@ -1145,13 +1170,18 @@ class Match {
           if (d < near) near = d;
           if (d > far) far = d;
         }
-        // Not on anybody's doorstep, and not on top of a camp.
+        // Not on anybody's doorstep, not on top of a camp, and not on top of
+        // the other shrine.
         if (near < SHRINE.spacing) continue;
-        let onCamp = false;
+        let blocked = false;
         for (const c of camps) {
-          if (Math.hypot(c.x - x, c.y - y) < AI_CAMP.spacing / 2) { onCamp = true; break; }
+          if (Math.hypot(c.x - x, c.y - y) < AI_CAMP.spacing / 2) { blocked = true; break; }
         }
-        if (onCamp) continue;
+        for (const a of avoid) {
+          if (blocked) break;
+          if (Math.hypot(a.x - x, a.y - y) < SHRINE.spacing) blocked = true;
+        }
+        if (blocked) continue;
         // Fairest first; among equally fair, the one furthest from everyone.
         const spread = far - near;
         if (!best || spread < best.spread - 0.5 ||
@@ -1160,8 +1190,7 @@ class Match {
         }
       }
     }
-    if (!best) return;                       // nowhere better; leave it be
-    shrine.x = best.x; shrine.y = best.y;
+    return best;
   }
 
   // The lobby is over. Everyone waiting is dealt their opening hand in the same
@@ -3027,7 +3056,14 @@ class Match {
           camp.garrison = { ...(camp.shrine ? SHRINE.guardian : AI_CAMP.garrison) };
           camp.woundCarry = 0;
           if (camp.shrine) {
-            for (const p of this.players.values()) this.emit(p.id, 'The shrine stirs again.');
+            // Which one, now that there are two: a player who hears a shrine
+            // wake needs to know whether it is worth the march they are
+            // already making.
+            const sleeps = Object.keys(this.shrineReward(camp))
+              .map(t => (UNIT_TYPES[t] || {}).plural || t).join(' and ');
+            for (const p of this.players.values()) {
+              this.emit(p.id, `The shrine of ${sleeps.toLowerCase()} stirs again.`);
+            }
           }
         }
       }
@@ -3720,24 +3756,39 @@ class Match {
     }
   }
 
-  // What a taken shrine hands over: golems, standing at the shrine itself
-  // rather than back at the keep, because they are the reward for being there.
-  // Everybody is told, because a golem on the map is everybody's problem.
+  // What this shrine has asleep in it: its own reward, or the first kind's for
+  // a shrine from a save that predates the second. Every rule that reads a
+  // shrine's prize goes through here rather than at SHRINE.kinds itself.
+  shrineReward(shrine) {
+    const kind = SHRINE.kinds.find(k => k.id === (shrine && shrine.kind)) || SHRINE.kinds[0];
+    return kind.reward;
+  }
+
+  // What a taken shrine hands over, standing at the shrine itself rather than
+  // back at the keep, because it is the reward for being there. Everybody is
+  // told, because whatever walks out of one is everybody's problem.
   awakenGolems(playerId, shrine) {
     const player = this.players.get(playerId);
     if (!player) return;
-    for (const [type, count] of Object.entries(SHRINE.reward)) {
+    const roused = [];
+    for (const [type, count] of Object.entries(this.shrineReward(shrine))) {
       if (!(count > 0) || !UNIT_TYPES[type]) continue;
       const id = this.spawnArmy(player, type, count, 'hold',
         { x: shrine.x, y: shrine.y });
       const army = this.armies.get(id);
       if (army) { army.x = shrine.x; army.y = shrine.y; this.holdPosition(army); }
+      const def = UNIT_TYPES[type];
+      roused.push(`${count} ${count === 1 ? def.name : def.plural}`);
     }
+    // Named rather than "golems": the two shrines hold different things, and
+    // which one somebody has just opened is the whole of what the rest of the
+    // map wants to know about it.
+    const what = roused.join(' and ') || 'nothing at all';
     for (const other of this.players.values()) {
       if (other.id === playerId) continue;
-      this.emit(other.id, `${player.name} has woken the shrine.`);
+      this.emit(other.id, `${player.name} has woken a shrine — ${what} rise.`);
     }
-    this.emit(playerId, 'The shrine answers — golems rise at your command.');
+    this.emit(playerId, `The shrine answers — ${what} rise at your command.`);
   }
 
   finishRaid(army, razed) {
@@ -3979,7 +4030,9 @@ class Match {
       aiCamps: this.aiCamps.map(c => ({
         id: c.id, x: c.x, y: c.y, hp: Math.max(0, Math.round(c.hp)), maxHp: c.maxHp,
         defeated: c.defeated, capturedBy: c.capturedBy || null,
-        shrine: !!c.shrine,
+        // Which shrine it is, so the client can draw the right stonework. Only
+        // on shrines, because a camp is a camp.
+        shrine: !!c.shrine, kind: c.kind || null,
       })),
       events,
       terrainEdits,

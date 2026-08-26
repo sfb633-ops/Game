@@ -1589,8 +1589,10 @@ function facingOff(aCount, bCount) {
   check('camps scaled with the ground',
     m.aiCamps.filter(c => !c.shrine).length === cfg.AI_CAMP.count,
     `${m.aiCamps.filter(c => !c.shrine).length} camps`);
-  check('and there is exactly one shrine',
-    m.aiCamps.filter(c => c.shrine).length === 1);
+  check('and there is one shrine of each kind',
+    m.aiCamps.filter(c => c.shrine).length === cfg.SHRINE.kinds.length &&
+    cfg.SHRINE.kinds.every(k => m.aiCamps.some(c => c.kind === k.id)),
+    m.aiCamps.filter(c => c.shrine).map(c => c.kind).join(', '));
 }
 
 
@@ -1879,6 +1881,30 @@ function facingOff(aCount, bCount) {
     }
     return wet;
   };
+  // Everywhere the group could actually walk to, four-connected over land. The
+  // picker below has to be held to this, because Lakelands is full of islands
+  // and cut-off pockets: about one in ten of the tiles that maximise "water on
+  // the straight line" cannot be reached by land at all, and a group sent at
+  // one of those correctly halts rather than swimming. Without this the test
+  // asserts the group arrives somewhere it never should, and which of the two
+  // it picks depends on the map roll — so it passed for a year and then failed
+  // the day an unrelated change moved the shuffle along by one call.
+  const reachable = new Uint8Array(W * H);
+  {
+    const stack = [[Math.round(sx), Math.round(sy)]];
+    reachable[Math.round(sy) * W + Math.round(sx)] = 1;
+    while (stack.length) {
+      const [x, y] = stack.pop();
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const i = ny * W + nx;
+        if (reachable[i] || T[ny][nx] !== 0) continue;
+        reachable[i] = 1;
+        stack.push([nx, ny]);
+      }
+    }
+  }
   // The furthest-crossing landfall this map offers, so the test is always the
   // hardest case available rather than one that happened to be hard once.
   let dest = null, crossed = 0;
@@ -1888,6 +1914,7 @@ function facingOff(aCount, bCount) {
       const y = Math.round(sy + Math.sin(ang * Math.PI / 180) * r);
       if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) continue;
       if (T[y][x] !== 0) continue;
+      if (!reachable[y * W + x]) continue;     // an island is not a march
       const wet = waterOnLine(x, y);
       if (wet > crossed) { crossed = wet; dest = { x, y }; }
     }
@@ -2546,6 +2573,63 @@ function facingOff(aCount, bCount) {
 
   check('every race fields each unit at the same frame size', odd.length === 0,
     odd.join('  ') || 'all in step');
+
+  // The colossus comes off a side-on pack drawn facing one way, so its other
+  // facing is the mirror. A builder change that copies the row instead of
+  // flipping it is invisible in a diff and shows up in play as a group that
+  // walks backwards half the time, so the mirror is checked rather than trusted.
+  {
+    const v = manifest.units.human.variants.colossus;
+    const rows = manifest.units.human.dirRows;
+    const img = decodePNG(path.join(__dirname, '..', '..', 'public', 'assets', v.anims.idle.file));
+    const right = cropRaw(img, 0, rows.right * v.frameH, v.frameW, v.frameH);
+    const left = cropRaw(img, 0, rows.left * v.frameH, v.frameW, v.frameH);
+    let mirrored = true, same = true;
+    for (let y = 0; y < v.frameH && mirrored; y++) {
+      for (let x = 0; x < v.frameW; x++) {
+        const a = (y * v.frameW + x) * 4;
+        const b = (y * v.frameW + (v.frameW - 1 - x)) * 4;
+        for (let c = 0; c < 4; c++) {
+          if (left.data[a + c] !== right.data[b + c]) { mirrored = false; break; }
+          if (left.data[a + c] !== right.data[a + c]) same = false;
+        }
+        if (!mirrored) break;
+      }
+    }
+    check('the colossus faces both ways, by mirroring rather than by copying',
+      mirrored && !same, mirrored ? (same ? 'the two rows are identical' : 'mirrored') : 'not a mirror');
+  }
+
+  // What a shrine wakes has to look like what the other shrine wakes, near
+  // enough that neither reads as the wrong scale for the game. This is the
+  // measurement the skeletons pass skipped: the sprite that actually ships,
+  // not the one that was meant to be built. It also catches the obvious way to
+  // get this wrong — putting MINI_SCALE through art that is already big enough,
+  // which would give a five-tile monster.
+  {
+    const body = (unit) => {
+      const v = manifest.units.human.variants[unit];
+      const img = decodePNG(path.join(__dirname, '..', '..', 'public', 'assets', v.anims.idle.file));
+      const cell = cropRaw(img, 0, manifest.units.human.dirRows.down * v.frameH, v.frameW, v.frameH);
+      let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
+      for (let y = 0; y < v.frameH; y++) {
+        for (let x = 0; x < v.frameW; x++) {
+          if (cell.data[(y * v.frameW + x) * 4 + 3] <= 8) continue;
+          if (x < x0) x0 = x; if (x > x1) x1 = x;
+          if (y < y0) y0 = y; if (y > y1) y1 = y;
+        }
+      }
+      return { w: x1 - x0 + 1, h: y1 - y0 + 1 };
+    };
+    const sizes = [];
+    for (const kind of cfg.SHRINE.kinds) {
+      for (const unit of Object.keys(kind.reward)) sizes.push({ unit, ...body(unit) });
+    }
+    const ratio = (key) => Math.max(...sizes.map(s => s[key])) / Math.min(...sizes.map(s => s[key]));
+    check('the two shrines wake things drawn at about the same size',
+      ratio('w') <= 1.4 && ratio('h') <= 1.4,
+      sizes.map(s => `${s.unit} ${s.w}x${s.h}`).join(', '));
+  }
 }
 
 // --- nothing spawns on top of a starting seat -----------------------------
@@ -2596,9 +2680,10 @@ function facingOff(aCount, bCount) {
     !m.armies.has(army.id) || armyCount(army) < 40,
     `${m.armies.has(army.id) ? armyCount(army) : 0} of 40 left`);
 
-  const golems = [...m.armies.values()].filter(a => a.type === 'golem');
-  check('taking it wakes golems', golems.length > 0,
-    golems.map(g => `${armyCount(g)}x`).join(' '));
+  const woke = Object.keys(m.shrineReward(shrine));
+  const golems = [...m.armies.values()].filter(a => woke.includes(a.type));
+  check('taking it wakes what sleeps in it', golems.length > 0,
+    golems.map(g => `${armyCount(g)}x ${g.type}`).join(' '));
   check('  for whoever took it', golems.every(g => g.ownerId === 'p'));
   check('  standing at the shrine, not back at the keep',
     golems.every(g => Math.round(g.x) === shrine.x && Math.round(g.y) === shrine.y));
@@ -2616,32 +2701,80 @@ function facingOff(aCount, bCount) {
     `hp ${shrine.hp} guard ${JSON.stringify(shrine.garrison)}`);
 }
 
-// A golem is worth the march: it beats more than its weight in anything you
-// could have bought instead, and pays for it by being slow.
+// A shrine's prize is worth the march: it beats more than its weight in
+// anything you could have bought instead, and pays for it by being slow.
+//
+// And the two shrines are worth the SAME march, which is the whole reason there
+// are two of them — one cheap shrine and one dear one is not a choice about
+// which to open, it is one shrine everybody goes to and one nobody does. The
+// numbers came out of this block: the first guess at a colossus was worth a
+// third more than three golems.
 {
-  const fight = (n) => {
+  // `prize` is a units object, exactly as SHRINE.kinds[n].reward gives it.
+  const fight = (prize, foes) => {
     const m = new Match({ started: false, map: 'openfield' });
     const a = m.addPlayer('a', 'human', 'A'), b = m.addPlayer('b', 'human', 'B');
     m.start(); a.draft = null; b.draft = null;
-    a.idleUnits.golem = cfg.SHRINE.reward.golem;
-    b.idleUnits.swordsman = n;
-    m.cmdDeployUnits('a', { golem: cfg.SHRINE.reward.golem }, a.baseX, a.baseY);
-    m.cmdDeployUnits('b', { swordsman: n }, b.baseX, b.baseY);
-    const A = [...m.armies.values()].find(x => x.ownerId === 'a');
-    const B = [...m.armies.values()].find(x => x.ownerId === 'b');
-    A.x = 60; A.y = 60; B.x = 62; B.y = 60;
-    m.cmdAttackArmy('a', A.id, 'army', B.id);
-    m.cmdAttackArmy('b', B.id, 'army', A.id);
-    for (let t = 0; t < 3000 && m.armies.has(A.id) && m.armies.has(B.id); t++) m.tick(0.2);
-    return { golems: m.armies.has(A.id) ? armyCount(A) : 0, foot: m.armies.has(B.id) ? armyCount(B) : 0 };
+    for (const [t, n] of Object.entries(prize)) a.idleUnits[t] = n;
+    for (const [t, n] of Object.entries(foes)) b.idleUnits[t] = n;
+    m.cmdDeployUnits('a', prize, a.baseX, a.baseY);
+    m.cmdDeployUnits('b', foes, b.baseX, b.baseY);
+    const A = [...m.armies.values()].filter(x => x.ownerId === 'a');
+    const B = [...m.armies.values()].filter(x => x.ownerId === 'b');
+    A.forEach((x, i) => { x.x = 60; x.y = 60 + i * 0.6; });
+    B.forEach((x, i) => { x.x = 63; x.y = 60 + i * 0.6; });
+    for (const x of A) m.cmdAttackArmy('a', x.id, 'army', B[0].id);
+    for (const x of B) m.cmdAttackArmy('b', x.id, 'army', A[0].id);
+    for (let t = 0; t < 8000; t++) {
+      m.tick(0.2);
+      const la = [...m.armies.values()].some(x => x.ownerId === 'a');
+      const lb = [...m.armies.values()].some(x => x.ownerId === 'b');
+      if (!la || !lb) break;
+    }
+    const count = (id) => [...m.armies.values()]
+      .filter(x => x.ownerId === id).reduce((n, x) => n + armyCount(x), 0);
+    return { prize: count('a'), foes: count('b') };
   };
-  const r = fight(40);
-  check('the shrine\'s golems beat 800 gold of swordsmen', r.golems > 0 && r.foot === 0,
-    `${r.golems} golems left, ${r.foot} swordsmen`);
-  check('but they are the slowest thing on the map',
-    cfg.UNIT_TYPES.golem.speed < cfg.UNIT_TYPES.catapult.speed,
-    `${cfg.UNIT_TYPES.golem.speed} vs catapult ${cfg.UNIT_TYPES.catapult.speed}`);
-  check('and nothing trains them', !Object.values(cfg.BUILDING_TYPES).some(b => b.trains === 'golem'));
+
+  const golems = cfg.SHRINE.kinds[0].reward;
+  const r = fight(golems, { swordsman: 40 });
+  check('the shrine\'s golems beat 800 gold of swordsmen', r.prize > 0 && r.foes === 0,
+    `${r.prize} golems left, ${r.foes} swordsmen`);
+
+  // How much gold in knights each prize can take. Walked one knight at a time,
+  // because at a step of five the two prizes came out identical while one was
+  // in fact worth a third more than the other.
+  const beats = (prize) => {
+    let most = 0;
+    for (let n = 30; n <= 70; n++) {
+      const out = fight(prize, { knight: n });
+      if (out.prize > 0 && out.foes === 0) most = n; else break;
+    }
+    return most;
+  };
+  const worth = cfg.SHRINE.kinds.map(k => ({ id: k.id, knights: beats(k.reward) }));
+  const low = Math.min(...worth.map(w => w.knights));
+  const high = Math.max(...worth.map(w => w.knights));
+  check('every shrine is worth about the same march',
+    low > 0 && high / low <= 1.15,
+    worth.map(w => `${w.id} ${w.knights} knights`).join(', ') + ` — ${(high / low).toFixed(2)}x`);
+
+  // ...and set on each other they are a close thing rather than a foregone one.
+  const [a, b] = cfg.SHRINE.kinds;
+  const head = fight(a.reward, b.reward);
+  check('  and neither prize simply beats the other', head.prize === 0 || head.foes === 0,
+    `${head.prize} vs ${head.foes} left`);
+
+  for (const kind of cfg.SHRINE.kinds) {
+    for (const type of Object.keys(kind.reward)) {
+      const def = cfg.UNIT_TYPES[type];
+      check(`  a ${type} is the slow way to arrive`,
+        def.speed <= cfg.UNIT_TYPES.catapult.speed,
+        `${def.speed} vs catapult ${cfg.UNIT_TYPES.catapult.speed}`);
+      check(`  and nothing trains a ${type}`,
+        def.special === true && !Object.values(cfg.BUILDING_TYPES).some(bd => bd.trains === type));
+    }
+  }
 }
 
 // --- empires start a sensible distance apart ------------------------------

@@ -237,10 +237,15 @@ sprite anchors and layering can be eyeballed as a PNG.
   income, attack, health, cost or training time, a wider border, tougher
   stonework, or a lump of gold up front — because anything that changes how
   many soldiers you field is squared on its way to a result.
-- **A shrine sits somewhere on the map.** Storm it and three golems rise for
-  you on the spot — no gold, no outpost, just the golems, and they beat more
-  than their weight in anything you could have bought. Then it goes quiet for a
-  while and wakes with a fresh guard, so it stays worth fighting over.
+- **Two shrines sit on the map, and they hold different things.** Storm the
+  dark one and three golems rise for you on the spot; storm the pale one and two
+  colossi do. No gold and no outpost either way — just what walks out, and it
+  beats more than its weight in anything you could have bought. The two prizes
+  are worth the same march to within a hair, so which one you go for is a
+  question about where you are and who else is near it rather than which is
+  better. Each goes quiet for a while after it is taken and wakes with a fresh
+  guard, so both stay worth fighting over. They are placed as far from each
+  other, and as evenly between the empires, as the map allows.
 - **Teams.** The host splits the lobby into two, three or four sides and
   everyone picks one. Teammates start next to each other — west and east for
   two, thirds for three, corners for four — share what they have scouted, are

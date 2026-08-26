@@ -437,13 +437,46 @@ const UNIT_TYPES = {
   // walk from a shrine to somebody's keep merely long rather than absurd.
   golem:     { name: 'Golem',     plural: 'Golems',    cost: 600, trainTimeSec: 0, attack: 110, hp: 850, speed: 1.7,
                special: true },
+  // The other shrine's sleeper, and the same bargain in a different shape: two
+  // of these instead of three golems. Not trainable either — `special` keeps it
+  // out of the training row, and its `cost` is a rank in the garrison's
+  // cheapest-first casualty order rather than a price anyone can pay.
+  //
+  // The numbers are NOT 1.5x a golem's, and the reason is the square law that
+  // governs everything else in this file: a side deals damage in proportion to
+  // how many of it are still standing, so two bodies lose half their output on
+  // the first death where three lose a third. Matching three golems therefore
+  // costs more than three golems' worth of stats spread over two bodies —
+  // 2 x 155/1230 is 310 attack and 2460 health against the golems' 330 and
+  // 2550, and comes out level.
+  //
+  // Measured, not reasoned about. The first guess was 200/1550, which read as
+  // "half again a golem" and was worth a third more: it beat 2400 gold of
+  // knights against the golems' 1880, and took the golems without losing a
+  // body. At 155/1230 both prizes beat exactly 47 knights, and set on each
+  // other the colossi win with one of the two left standing on 2% health —
+  // which is as near a coin flip as this engine gets. Re-measure with the
+  // shrine block in rules.test.js before believing any change to these.
+  //
+  // Slower than a golem, because it is bigger and because being late is what
+  // the whole prize pays with.
+  colossus:  { name: 'Colossus',  plural: 'Colossi',   cost: 900, trainTimeSec: 0, attack: 155, hp: 1230, speed: 1.5,
+               special: true },
 };
 
-// A shrine is one contested thing on the map worth crossing it for. Mechanically
+// A shrine is a contested thing on the map worth crossing it for. Mechanically
 // it is a camp with a bigger guard and a different prize: no gold, no outpost,
-// just the golem. And unlike a camp it is never permanently claimed — it goes
-// quiet for a while and then wakes up with a fresh guard, so it stays somewhere
-// people keep coming back to rather than a prize the first empire there keeps.
+// just what walks out of it. And unlike a camp it is never permanently claimed
+// — it goes quiet for a while and then wakes up with a fresh guard, so it stays
+// somewhere people keep coming back to rather than a prize the first empire
+// there keeps.
+//
+// There are two of them, and `kinds` is the whole of the difference: the same
+// guard behind the same stonework, and a different thing asleep inside. That is
+// deliberate — two shrines that cost the same and pay differently is a choice
+// about which one to march on, while two that cost differently would just be
+// one good shrine and one nobody bothers with. `reward` is weighed against the
+// other's in rules.test.js rather than reasoned about; see the golem's note.
 const SHRINE = {
   // Tuned against 800 gold of swordsmen, which is roughly what an empire can
   // field when it first starts thinking about the shrine: at these numbers that
@@ -452,8 +485,22 @@ const SHRINE = {
   // something only a runaway leader could ever open.
   hp: 500,
   guardian: { swordsman: 12, knight: 6, catapult: 3 },
-  // How many golems arrive, and how long before the shrine can be taken again.
-  reward: { golem: 3 },
+  // The two shrines, and what sleeps in each. `art` names the building sprite
+  // the client draws — the pack's mausoleum sheet holds two, a dark tomb and a
+  // pale one, so the pair are visibly different places without inventing any
+  // art. `id` is what an attack order names, so it has to stay stable.
+  //
+  // Three golems against two colossi: the same worth arriving in a different
+  // shape. Fewer, bigger bodies is not simply the same army — a side's output
+  // is how many of it are still standing, so two of anything lose half their
+  // damage on the first casualty where three lose a third. The colossus is
+  // paid for that in the table below, and the two are measured against each
+  // other rather than eyeballed.
+  kinds: [
+    { id: 'shrine', art: 'shrine', reward: { golem: 3 } },
+    { id: 'shrine-colossus', art: 'shrineColossus', reward: { colossus: 2 } },
+  ],
+  // How long before a shrine that has been taken can be taken again.
   dormantSec: 150,
   // Well clear of anybody's doorstep: this should be a march, not a land grab
   // by whoever happened to spawn nearest.

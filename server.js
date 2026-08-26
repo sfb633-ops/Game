@@ -356,6 +356,10 @@ function sendInit(ws, room, playerId) {
     spellRechargeSec: config.SPELL_RECHARGE_SEC,
     terrainClearCost: config.TERRAIN_CLEAR_COST,
     outpost: config.OUTPOST,
+    // Which shrines exist and what each holds. The page draws the right
+    // stonework from `art` and names the prize in the tooltip; as everywhere
+    // else, it is told rather than left to work it out from the id.
+    shrineKinds: config.SHRINE.kinds,
   }));
 }
 
