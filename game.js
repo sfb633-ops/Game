@@ -1447,12 +1447,23 @@ class Match {
   }
 
   // How many buildings this empire is allowed to be running, which is the
-  // second thing levelling the town center buys. Kept beside buildingsUsed so
-  // the two halves of the rule are read together.
+  // second thing levelling the town center buys — and the second thing taking a
+  // camp buys. Kept beside buildingsUsed so the two halves of the rule are read
+  // together.
+  //
+  // The outposts term is why a camp is worth holding rather than only worth
+  // razing: it hands over a disc of ground to build inside, and this is the
+  // permission to fill it. Counted off `player.outposts`, which is the same
+  // list releaseOutposts empties when an empire falls — so a camp that changes
+  // hands takes its slots with it, and an empire over the new limit simply
+  // cannot add more until it is back under (nothing is torn down, because
+  // demolishing somebody's buildings out from under them on a technicality is
+  // not a rule anyone would enjoy).
   buildLimit(player) {
     const castle = this.getCastle(player);
     const level = castle ? castle.level : 1;
-    return CASTLE.buildLimit[Math.min(level, CASTLE.buildLimit.length) - 1];
+    return CASTLE.buildLimit[Math.min(level, CASTLE.buildLimit.length) - 1]
+      + OUTPOST.buildLimitBonus * (player.outposts ? player.outposts.length : 0);
   }
 
   // What counts against it. The town center is not something you chose to
@@ -1486,7 +1497,9 @@ class Match {
     // Refusing this one silently would read as a broken click, so it is the
     // one build failure worth saying out loud.
     if (!def.isWall && this.buildingsUsed(player) >= this.buildLimit(player)) {
-      this.emit(playerId, `Your town center can only run ${this.buildLimit(player)} buildings — upgrade it for more room.`);
+      // Two ways out of this now, and the message names both: one you buy with
+      // your own gold, one you take off the map.
+      this.emit(playerId, `You can only run ${this.buildLimit(player)} buildings — upgrade your town center, or take a camp for ${OUTPOST.buildLimitBonus} more.`);
       return;
     }
     const race = player.mods;

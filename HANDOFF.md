@@ -2482,6 +2482,30 @@ for whoever wants it next.
 Speed went 1.5 to 1.7 and stays under the catapult's, so they remain the slowest
 thing on the map. That is what they pay with.
 
+### A captured camp is room to build
+
+An outpost handed over a disc of ground and no permission to fill it. The
+building limit came from the town center alone, so unless you happened to be at
+your limit *and* under the outpost, a captured camp was ground you could look
+at. It is worth `OUTPOST.buildLimitBonus` (3) slots now.
+
+That gives the limit a second way to grow, and a **contested** one, which is the
+part worth keeping: levelling the keep is a decision you make with your own gold
+in your own time, and taking a camp is a decision somebody else can argue with.
+
+Counted straight off `player.outposts` — the same list `releaseOutposts` empties
+when an empire falls, so a camp that changes hands takes its slots with it and
+there is only one thing to get right. An empire that ends up over the new limit
+cannot add more until it is back under; nothing is torn down, because
+demolishing somebody's buildings out from under them on a technicality is not a
+rule anyone would enjoy.
+
+The client had to be told twice. `buildLimit` comes off the server and was
+already right, but the figure quoted for the *next* level is worked out on the
+page, and without carrying the outpost bonus across an empire holding two camps
+was told its next level would take it from 16 buildings down to 15 — the same
+mistake `borderBonus` had already been fixed for, two lines above.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

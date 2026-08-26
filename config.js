@@ -127,6 +127,18 @@ const BUILD = {
 // border they started with. Captured camps never respawn.
 const OUTPOST = {
   radius: BUILD.radius / 2,
+  // ...and room to actually use it. An outpost handed over a disc of ground and
+  // no permission to fill it: the building limit is set by the town center
+  // alone, so unless you happened to be under it, a captured camp was ground
+  // you could look at. Three is a barracks and a pair of banks — enough that a
+  // camp is worth holding for what it lets you build rather than only for the
+  // gold it paid once.
+  //
+  // It also gives the limit a second way to grow, and a contested one. Levelling
+  // the keep is a decision you make with your own gold in your own time; taking
+  // a camp is a decision somebody else can contest, and it is now the cheaper
+  // of the two per slot — which is the point.
+  buildLimitBonus: 3,
 };
 
 // A race is meant to be a slant, not a handicap — and these numbers have to be

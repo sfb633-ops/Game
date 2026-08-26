@@ -1336,6 +1336,12 @@ function borderRadius(player) {
   return (player && player.buildRadius) || (buildCfg && buildCfg.radius) || 0;
 }
 
+// What a captured camp is worth in permission to build, straight from the
+// server's own config rather than a number repeated here.
+function outpostSlots() {
+  return (outpostCfg && outpostCfg.buildLimitBonus) || 0;
+}
+
 function outpostRadius() {
   return (outpostCfg && outpostCfg.radius) || 0;
 }
@@ -2810,14 +2816,19 @@ function renderPanel() {
   const borderBonus = borderRadius(me) - castleCfg.buildRadius[castle.level - 1];
   const nextRadius = maxed ? null : castleCfg.buildRadius[castle.level] + borderBonus;
   const outpostCount = (me.outposts || []).length;
-  const nextLimit = maxed ? null : castleCfg.buildLimit[castle.level];
+  // The server's limit already counts the outposts, so the figure quoted for
+  // the next level has to carry the same difference over — exactly as
+  // borderBonus does above. Without it, an empire holding two camps was told
+  // its next level would take it from 16 buildings down to 15.
+  const limitBonus = me.buildLimit - castleCfg.buildLimit[castle.level - 1];
+  const nextLimit = maxed ? null : castleCfg.buildLimit[castle.level] + limitBonus;
   const castleSig = [castle.level, castle.maxHp, borderRadius(me), nextRadius, outpostCount,
     castle.upgrading, maxed, upgradeCost, me.buildLimit, nextLimit].join('|');
   if (syncSection(castleCard, castleSig, `
     <div class="row"><span class="label">Level ${castle.level}</span><span class="sub">HP <span data-live="hp">${castle.hp}</span>/${castle.maxHp}</span></div>
     <div class="sub">Border ${borderRadius(me)} tiles${nextRadius ? ` → ${nextRadius} next level` : ''}</div>
     <div class="sub">Buildings <span data-live="used">${me.buildingsUsed}</span>/${me.buildLimit}${nextLimit ? ` → ${nextLimit} next level` : ''}</div>
-    ${outpostCount ? `<div class="sub">${outpostCount} outpost${outpostCount === 1 ? '' : 's'} held (${outpostRadius()} tiles each)</div>` : ''}
+    ${outpostCount ? `<div class="sub">${outpostCount} outpost${outpostCount === 1 ? '' : 's'} held \u2014 ${outpostRadius()} tiles and ${outpostSlots()} building slots each</div>` : ''}
     ${castle.upgrading ? `<div class="sub">Upgrading… <span data-live="upgradeLeft">${castle.remainingSec}</span>s</div>` :
       maxed ? `<div class="sub">Max level</div>` :
       `<div class="btn-row"><button class="btn btn-sm" id="upgrade-btn" data-cost="${upgradeCost}">Upgrade (${upgradeCost}g)</button></div>`}

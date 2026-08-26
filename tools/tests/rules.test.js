@@ -3114,5 +3114,87 @@ function fightOut(m, ours, theirs) {
     JSON.stringify({ spectating: ser.spectating, watchingSide: ser.watchingSide }));
 }
 
+// --- a captured camp is room to build ---------------------------------------
+//
+// An outpost used to hand over a disc of ground and no permission to fill it:
+// the building limit came from the town center alone, so unless you happened to
+// be at your limit *and* under the outpost, a captured camp was ground you
+// could look at. It is worth OUTPOST.buildLimitBonus slots now, which gives the
+// limit a second way to grow — and a contested one, since taking a camp is a
+// decision somebody else can argue with.
+{
+  const m = new Match({ started: false, map: 'openfield' });
+  const p = m.addPlayer('p', 'human', 'P');
+  m.addPlayer('q', 'human', 'Q');
+  m.start(); p.draft = null; p.gold = 999999;
+
+  const base = m.buildLimit(p);
+  check('the limit starts where the town center says',
+    base === cfg.CASTLE.buildLimit[0], `${base}`);
+
+  // The real path: send troops, take a camp, get the slots.
+  const camp = m.aiCamps.find(c => !c.shrine);
+  p.idleUnits.swordsman = 30;
+  m.cmdDeployUnits('p', { swordsman: 30 }, p.baseX, p.baseY);
+  const army = [...m.armies.values()].find(a => a.ownerId === 'p');
+  army.x = camp.x - 3; army.y = camp.y;
+  m.cmdAttackArmy('p', army.id, 'camp', camp.id);
+  for (let t = 0; t < 9000 && !camp.defeated; t++) m.tick(0.2);
+  check('  a camp can be taken', camp.defeated && camp.capturedBy === 'p');
+  check('  and it is worth its slots',
+    m.buildLimit(p) === base + cfg.OUTPOST.buildLimitBonus,
+    `${base} -> ${m.buildLimit(p)}`);
+  check('  which the client is told about',
+    m.serialize().players.find(x => x.id === 'p').buildLimit === base + cfg.OUTPOST.buildLimitBonus);
+
+  // ...and it stacks, and it stacks on top of a levelled keep.
+  p.outposts.push({ x: 1, y: 1 }, { x: 2, y: 2 });
+  check('  three outposts are worth three times as much',
+    m.buildLimit(p) === base + 3 * cfg.OUTPOST.buildLimitBonus, `${m.buildLimit(p)}`);
+  m.getCastle(p).level = 3;
+  check('  and the keep\'s own levels still count on top',
+    m.buildLimit(p) === cfg.CASTLE.buildLimit[2] + 3 * cfg.OUTPOST.buildLimitBonus,
+    `${m.buildLimit(p)} = ${cfg.CASTLE.buildLimit[2]} + 3x${cfg.OUTPOST.buildLimitBonus}`);
+
+  // The slots really are usable, not just a bigger number in the panel.
+  m.getCastle(p).level = 1;
+  p.outposts.length = 0;
+  let built = 0;
+  for (let dx = -6; dx <= 6 && built < 40; dx++) {
+    for (let dy = -6; dy <= 6 && built < 40; dy++) {
+      const before = Object.keys(p.buildings).length;
+      m.cmdBuild('p', p.baseX + dx, p.baseY + dy, 'bank');
+      if (Object.keys(p.buildings).length > before) built++;
+    }
+  }
+  check('  an empire at its limit is stopped there', built === base, `built ${built}`);
+  p.outposts.push({ x: 1, y: 1 });
+  const before = Object.keys(p.buildings).length;
+  for (let dx = -6; dx <= 6; dx++) {
+    for (let dy = -6; dy <= 6; dy++) m.cmdBuild('p', p.baseX + dx, p.baseY + dy, 'bank');
+  }
+  check('  and taking a camp lets it build exactly that many more',
+    Object.keys(p.buildings).length - before === cfg.OUTPOST.buildLimitBonus,
+    `${Object.keys(p.buildings).length - before} more`);
+}
+
+// An empire that falls gives its camps back, and the slots go with them — the
+// same list, so there is only one thing to get right.
+{
+  const m = new Match({ started: false, map: 'openfield' });
+  const p = m.addPlayer('p', 'human', 'P');
+  m.addPlayer('q', 'human', 'Q');
+  m.start(); p.draft = null;
+  const camp = m.aiCamps.find(c => !c.shrine);
+  camp.defeated = true; camp.capturedBy = 'p';
+  p.outposts.push({ x: camp.x, y: camp.y });
+  const withCamp = m.buildLimit(p);
+  m.eliminate(p, 'fallen');
+  check('a fallen empire gives its camps back',
+    p.outposts.length === 0 && camp.capturedBy === null);
+  check('  and the building slots with them',
+    m.buildLimit(p) === withCamp - cfg.OUTPOST.buildLimitBonus, `${withCamp} -> ${m.buildLimit(p)}`);
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');
 process.exit(failures ? 1 : 0);
