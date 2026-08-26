@@ -18,6 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { decodePNG } = require('../png');
 
 const SRC = path.join(__dirname, '..', '..', 'public');
 let failures = 0;
@@ -142,6 +143,48 @@ document.getElementById('probe-result').textContent = JSON.stringify(out);
   // across 370 smears it. Round across, stretch down.
   check('the banner tiles its rails rather than stretching them',
     /round/.test(r.alertRepeat), r.alertRepeat);
+}
+
+// --- a full bar looks full --------------------------------------------------
+//
+// Reported from a playtest: the health bar was not visually full at the start
+// of a match. It was at 100% the whole time — the FILL was in the wrong box.
+//
+// An absolutely positioned child is placed against its parent's padding box,
+// which for the trough is inset by the full 18px border. But the dark channel
+// the fill has to cover starts only 6px in, because the gold rim is thinner
+// than the slice reserved for the corner art. So the track was 252px inside a
+// 276px channel and left twelve pixels of empty trough at each end, for ever,
+// at every health.
+//
+// Measured against the art rather than against a number typed here: the channel
+// is whatever keepbar.png says it is, and the fill has to match it.
+{
+  const art = decodePNG(path.join(SRC, 'assets', 'ui', 'keepbar.png'));
+  // Where the dark channel starts, in the art: the first pixel along the middle
+  // row that is not the gold rim.
+  const midY = Math.floor(art.height / 2);
+  let lip = 0;
+  for (let x = 0; x < art.width; x++) {
+    const o = (midY * art.width + x) * 4;
+    const bright = Math.max(art.data[o], art.data[o + 1], art.data[o + 2]);
+    if (art.data[o + 3] > 8 && bright <= 90) { lip = x; break; }
+  }
+
+  const r = probe(`
+    document.getElementById('keep-bar').classList.remove('hidden');
+    const fill = document.getElementById('keep-fill');
+    fill.className = 'hp-green';
+    fill.style.width = '100%';
+    return { trough: box('keep-trough'), track: box('keep-track'), fill: box('keep-fill') };`);
+
+  check('the trough lip was found in the art', lip > 0 && lip < 12, `${lip}px`);
+  // The left and right slivers of trough the fill does not cover.
+  const leftGap = r.fill.x - r.trough.x;
+  const rightGap = (r.trough.x + r.trough.w) - (r.fill.x + r.fill.w);
+  check('a keep at full health fills its whole trough',
+    Math.abs(leftGap - lip) <= 1 && Math.abs(rightGap - lip) <= 1,
+    `${leftGap}px of bare trough on the left and ${rightGap}px on the right, against a ${lip}px rim`);
 }
 
 console.log(failures ? `\n${failures} FAILURES` : '\nall browser checks pass');

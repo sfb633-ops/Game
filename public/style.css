@@ -257,6 +257,11 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 #keep-bar {
   --keep-cap: 18px;
   --keep-fill-cap: 9px;
+  /* How far the trough's dark channel sits inside the edge of its own art: the
+     gold rim is six pixels thick. Measured off keepbar.png, where the channel
+     runs x 6..251 of 258. See #keep-track, which is the only thing that needs
+     it and the one place it was silently wrong. */
+  --keep-lip: 6px;
   position: absolute; top: 82px; left: 10px;
   width: 288px;
   pointer-events: none;
@@ -282,10 +287,22 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
   image-rendering: pixelated;
   position: relative;
 }
-/* The interior the fill runs along, inset off the trough's own stonework. */
+/* The interior the fill runs along: the trough's dark channel, exactly.
+   An absolutely positioned child is placed against its parent's PADDING box,
+   which here is inset by the full 18px border — but the channel it has to fill
+   starts only 6px in, because the gold rim is thinner than the slice reserved
+   for the corners. At left/right 0 the track was 252px inside a 276px channel,
+   so a keep at full health showed twelve pixels of empty trough at each end and
+   never looked full. Pulling the track back out by the difference lines it up
+   with the art it is running along.
+
+   The vertical needs no such correction: the channel is 12px tall in a 24px
+   art, and a 12px track centred in a 24px element already lands on it. */
 #keep-track {
   position: absolute;
-  left: 0; right: 0; top: 50%;
+  left: calc(var(--keep-lip) - var(--keep-cap));
+  right: calc(var(--keep-lip) - var(--keep-cap));
+  top: 50%;
   transform: translateY(-50%);
   height: 12px;                          /* the fill art is 4px tall at x3 */
 }
