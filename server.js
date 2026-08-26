@@ -740,22 +740,27 @@ function stepRoom(room, now, dt) {
     room.match.tick(dt);
     const snapshot = room.match.serialize();
     thinState(room, snapshot);
-    const reports = snapshot.events;
-    const allArmies = snapshot.armies;
+    const { events: reports, armies: allArmies, rubble: allRubble, ...common } = snapshot;
     // One view per player. Fog makes this unavoidable — what you are shown
     // depends on what you can see — and it is also where battle reports get
     // filtered down to the player they were addressed to.
+    //
+    // But only the four fields below differ between players. The rest — every
+    // empire's buildings, the camps, the scores — is the same for everyone, and
+    // encoding it once per socket was most of the tick at twelve players. It is
+    // encoded once here and the per-player fields are spliced on as text: the
+    // shared object's closing brace is dropped and the rest appended.
+    const shared = JSON.stringify({ type: 'state', ...common }).slice(0, -1);
     for (const [id, ws] of room.sockets) {
       if (ws.readyState !== ws.OPEN) continue;
-      ws.send(JSON.stringify({
-        type: 'state',
-        ...snapshot,
+      const mine = {
         events: reports.filter(e => e.playerId === id),
         armies: room.match.visibleArmiesFor(id, allArmies),
-        rubble: room.match.visibleRubbleFor(id, snapshot.rubble),
+        rubble: room.match.visibleRubbleFor(id, allRubble),
         // Tiles this empire has just laid eyes on, and nothing it already knew.
         explored: room.match.drainExplored(id),
-      }));
+      };
+      ws.send(shared + ',' + JSON.stringify(mine).slice(1));
     }
   }
 }
