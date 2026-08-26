@@ -2782,6 +2782,31 @@ separator; nothing was reachable through it, but it was wrong.
 browser check were outside it and are the three that find the most. About half
 a minute.
 
+### The optimization pass (26 Aug 2026)
+
+Seven commits, each one optimization, each landed with the whole suite green
+and each revertible on its own with `git revert <sha>` — that was the point of
+doing them one at a time. `git log --oneline` from "Bug pass: one swing at
+buildings too" upward lists them; in order:
+
+| commit | what | risk if wrong |
+| --- | --- | --- |
+| Index buildings by tile | `Match.buildingIndex`, `"x,y"` → `{ building, owner }`, maintained by `indexBuilding`/`unindexBuilding` from the two placement choke points and the two seat moves (`addPlayer`, `reseat`). `tileOccupied`, `buildingAt` and `findRoute`'s blocked test read it instead of walking every empire's list. | a building that is on the map and not in the index is walkable and buildable-over; the invariants fuzz would show it as a group standing on a building |
+| Camps by id | `Match.campById`, a Map built once after the shrine is added. | none — camps are never added later |
+| One movement budget | `army.moved`, reset for every group at the top of `tick` and debited by both the march loop and `walkTo`. This closes the "marches and is squared up in the same tick" note above. `walkTo` with no `dt` still snaps, which is what the stance tests rely on. | a group that can never move: check `moved` is reset before the loop, not inside it |
+| Vision re-sweeps only eyes that moved | `player.eyesLit`, the set of `"x,y,r"` eyes lit last tick; an eye still in it is skipped. Reset wherever `explored` is reset. Late-joining allies are caught up by `syncTeamVision`, not by this. | a black patch that never lights: an eye whose tiles were not actually written when it was first seen |
+| Client tile sets once per state | `wallSet` / `occupiedSet` / `rubbleSet` rebuilt in `onState` (5 Hz) rather than per frame and per hover. | stale by at most one broadcast, which they were anyway |
+| Groups bucketed by cell | `ARMY_CELL` (4) squares, `bucketArmies` at the top of `tick`, `enemyInTheWay` reads the 3x3 around the probe. Positions are as of the start of the tick; the cell exceeds stance plus a tick's walk, so a group that has left its bucket is still out of stance. | a march that walks through a group: the cell got smaller than `COMBAT.faceOff * 2` plus the fastest unit's step |
+| Shared state encoded once | `stepRoom` stringifies the common part of the snapshot once and splices the four per-player fields (`events`, `armies`, `rubble`, `explored`) on as text. The net tests read real state messages, so a malformed splice fails there. | every client fails to parse state — obvious within a tick |
+
+**Not done, on purpose: revision-counting `thinState`.** It was on the list and
+the HANDOFF note under "Buildings are only sent when they change" already
+argues against it — a counter has to be bumped at every hp, queue and level
+mutation, and the one that is missed leaves a client silently showing a stale
+keep. Castle regeneration alone touches hp every tick. The stringify-and-compare
+costs one encode per player per tick and cannot drift. Leave it unless a
+profile says otherwise.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

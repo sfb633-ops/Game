@@ -3571,5 +3571,34 @@ function fightOut(m, ours, theirs) {
   }
 }
 
+// --- one movement budget ---------------------------------------------------
+// A group that is marching AND being squared up by something attacking it used
+// to be moved by both in the same tick, so for a tick or two it covered up to
+// twice its pace. Now the two share one budget: no group ever moves further in
+// a tick than it walks.
+{
+  const m = new Match({ map: 'openfield' });
+  const a = m.addPlayer('a', 'human', 'A');
+  const d = m.addPlayer('d', 'human', 'D');
+  a.draft = d.draft = null;
+  const x = a.baseX + 8, y = a.baseY;
+  const walker = m.spawnArmy(a, 'knight', 10, 'move', { x: x + 20, y });
+  const W = m.armies.get(walker); W.x = x; W.y = y;
+  const chaser = m.spawnArmy(d, 'swordsman', 10, 'hold', { x: x + 1, y: y + 1 });
+  const C = m.armies.get(chaser); C.x = x + 1; C.y = y + 1; m.holdPosition(C);
+  m.cmdAttackArmy('d', chaser, 'army', walker);
+  const dt = 0.2;
+  let worst = 0;
+  for (let i = 0; i < 40 && m.armies.has(walker); i++) {
+    const before = { x: W.x, y: W.y };
+    m.tick(dt);
+    const moved = Math.hypot(W.x - before.x, W.y - before.y);
+    const allowed = cfg.UNIT_TYPES.knight.speed * a.mods.speedMult * dt;
+    worst = Math.max(worst, moved / allowed);
+  }
+  check('a group marched and squared up in the same tick never outruns its own pace',
+    worst <= 1.001, `worst tick was ${worst.toFixed(2)}x walking pace`);
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');
 process.exit(failures ? 1 : 0);
