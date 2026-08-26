@@ -305,6 +305,9 @@ class Match {
     // knows how to find, target, fight and draw a camp then handles a shrine
     // for free — see generateShrine.
     this.generateShrine();
+    // Camps are looked up by id on every tick of every raid and never added to
+    // after this, so the list is indexed once.
+    this.campById = new Map(this.aiCamps.map(c => [c.id, c]));
     this.gameOver = false;
     this.winnerId = null;
     this.winnerTeam = null;
@@ -2589,7 +2592,7 @@ class Match {
       return { x: t.baseX, y: t.baseY };
     }
     if (targetType === 'camp') {
-      const c = this.aiCamps.find(c => c.id === targetId);
+      const c = this.campById.get(targetId);
       if (!c || c.defeated) return null;
       return { x: c.x, y: c.y };
     }
@@ -3242,7 +3245,7 @@ class Match {
         if (gap <= this.reachOf(army) + 0.05) swingsAt(me, 'a:' + foe.id);
         if (gap <= this.reachOf(foe) + 0.05) swingsAt('a:' + foe.id, me);
       } else if (army.targetType === 'camp') {
-        const camp = this.aiCamps.find(c => c.id === army.targetId);
+        const camp = this.campById.get(army.targetId);
         if (!camp || camp.defeated) continue;
         // Siege lands whatever the range; the garrison only answers in reach.
         swingsAt(me, 'c:' + camp.id);
@@ -3275,7 +3278,7 @@ class Match {
     focus.clear();
     const at = (key) => {
       if (key[0] === 'a') { const a = this.armies.get(key.slice(2)); return a && { x: a.x, y: a.y }; }
-      if (key[0] === 'c') { const c = this.aiCamps.find(v => v.id === key.slice(2)); return c && { x: c.x, y: c.y }; }
+      if (key[0] === 'c') { const c = this.campById.get(key.slice(2)); return c && { x: c.x, y: c.y }; }
       if (key[0] === 'b') { const [x, y] = key.slice(2).split(',').map(Number); return { x, y }; }
       const p = this.players.get(key.slice(2));
       return p && { x: p.baseX, y: p.baseY };
@@ -3596,7 +3599,7 @@ class Match {
   // raiders start on the camp itself, and every point of damage they put into
   // it pays out — razing it pays the loot and a bonus on top.
   stepCampBattle(army, dt) {
-    const camp = this.aiCamps.find(c => c.id === army.targetId);
+    const camp = this.campById.get(army.targetId);
     if (!camp || camp.defeated) { this.finishRaid(army, false); return; }
     const outgoing = this.outputAgainst(army, dt, 'c:' + camp.id);
 
