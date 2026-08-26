@@ -25,10 +25,8 @@ const MINI = path.join(SRC, 'MiniWorldSprites');
 // Kenney's UI pack: 9-slice panel frames the stylesheet stretches with
 // border-image. Nothing in the canvas renderer touches these.
 const UI = path.join(SRC, 'UI', '9-Slice');
-// The keep's health bar. One tilesheet, 12x11 tiles of 32.
+// The keep's health bar and the attack banner. One tilesheet, 12x11 tiles of 32.
 const DARKAGES = path.join(SRC, 'DarkAgesUi_v1.0', '32x32-Tilesheet.png');
-// The ribbon the "you are under attack" alert is drawn on.
-const BANNER = path.join(SRC, 'Ui Pack', '01_Flat_Theme', 'Sprites', 'UI_Flat_Banner01a.png');
 // Faces for the draft. Boons are tarot arcana, spells are spellbook tomes.
 const TAROT = path.join(SRC, 'Tarot Cards [Free]', 'Tarot Cards [Free]', 'Tarot_Original', '1X');
 const TOMES = path.join(SRC, 'SpellBooks', 'TomesMaster32.png');
@@ -799,17 +797,45 @@ function buildKeepBar() {
   }
 }
 
-// The ribbon the attack alert is written on.
+// The plaque the attack alert is written on.
 //
-// 64x20, and the shape decides the slice: the first and last thirteen columns
-// are the folded tabs at each end and must never stretch, while everything
-// between them is a flat body that can. Hence a horizontal 9-slice of 13.
+// First attempt was a ribbon from the flat UI pack, and it was wrong twice
+// over. It looked wrong: its ends are folded tabs that stick up above the body,
+// so stretched wide it reads as two white squares with a white slab between
+// them rather than as one object. And it looked wrong *here*: the rest of this
+// interface is brown wood and gold, and a flat cream ribbon belongs to a
+// different game.
+//
+// This is the gold-framed plaque from the same Dark Ages sheet as the health
+// bar, so the two things that shout at you about your keep are visibly the same
+// furniture. Cut the same way and for the same reason — rows 0-7 are the crest,
+// rows 8-26 are the plaque — except that the plaque has rounded corners, so
+// unlike the bar it needs a slice on all four sides rather than just the two.
+//
+// Its interior is blue on the sheet. Blue is the wrong colour for an alarm, and
+// the frame is not: the recolour is restricted to the blues by hue so the gold
+// comes through untouched.
+const DARKAGES_PLAQUE = { x: 128, y: 96, w: 64, h: 27 };
+const PLAQUE_CREST_H = 8;                       // rows 0-7 of it
+const PLAQUE_SLICE = { top: 5, side: 10 };      // gold frame, corner swirls
+const ALARM_FROM_BLUE = { hueFrom: 0.45, hueTo: 0.75, hueShift: 0.42, satMul: 1.25, lightAdd: -0.10 };
+
 function buildBanner() {
-  const img = ops.scaleUp(decodePNG(need(BANNER)), UI_BAR_SCALE);
+  const sheet = decodePNG(need(DARKAGES));
+  const d = DARKAGES_PLAQUE;
+
+  const body = ops.scaleUp(
+    ops.recolor(ops.crop(sheet, d.x, d.y + PLAQUE_CREST_H, d.w, d.h - PLAQUE_CREST_H), ALARM_FROM_BLUE),
+    UI_BAR_SCALE);
   manifest.ui.banner = {
-    file: write(img, 'ui', 'banner.png'), w: img.width, h: img.height,
-    slice: [0, 13 * UI_BAR_SCALE],
+    file: write(body, 'ui', 'banner.png'), w: body.width, h: body.height,
+    slice: [PLAQUE_SLICE.top * UI_BAR_SCALE, PLAQUE_SLICE.side * UI_BAR_SCALE],
   };
+
+  const crestBand = ops.crop(sheet, d.x, d.y, d.w, PLAQUE_CREST_H);
+  const cb = ops.bbox(crestBand);
+  const crest = ops.scaleUp(ops.crop(crestBand, cb.x0, 0, cb.x1 - cb.x0 + 1, PLAQUE_CREST_H), UI_BAR_SCALE);
+  manifest.ui.bannerCrest = { file: write(crest, 'ui', 'banner-crest.png'), w: crest.width, h: crest.height };
 }
 
 // ---------------------------------------------------------------------------

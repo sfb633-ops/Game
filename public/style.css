@@ -228,6 +228,10 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
   width: 288px;
   pointer-events: none;
 }
+/* Against its own id, for the reason written over #attack-alert.hidden. This
+   one does not set `display`, so the class would in fact have won — but a rule
+   that works by accident is one that breaks the day somebody adds a display. */
+#keep-bar.hidden { display: none; }
 #keep-cap {
   display: flex; justify-content: space-between; align-items: baseline;
   font-size: 0.72rem; letter-spacing: 0.04em;
@@ -296,34 +300,59 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
    on its own: worth interrupting you for, not worth a click to dismiss. */
 #attack-alert {
   position: absolute;
-  top: 64px; left: 50%;
+  /* Clear of the health bar. The bar runs to about y=125 with its caption, and
+     the banner is centred on the map — which, with the side panel taking its
+     width off, puts its left edge right on top of the bar. Found by rendering
+     it: the banner was covering the second half of "900 / 900". */
+  top: 150px; left: 50%;
   transform: translateX(-50%);
-  min-width: 340px;
-  /* Exactly the height of the art at x3. The slice has no top or bottom, so
-     any other height would stretch the ribbon vertically — and a two-pixel
-     outline scaled by a fraction is a blurred one. The width is free to
-     stretch: the middle of the ribbon is a flat field. */
-  height: 60px;
+  min-width: 330px;
+  /* The plaque is framed on all four sides, so unlike the health bar it is
+     sliced on all four: 15px of gold at the top and bottom, 30px at the sides
+     where the corner swirls are. Both numbers are the source art (5 and 10) at
+     the same x3 everything else here uses. */
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  padding: 10px 30px 4px;                /* clear of the folded tabs at the top */
+  padding: 6px 12px 8px;
   border: 0 solid transparent;
-  border-left-width: 39px;
-  border-right-width: 39px;
-  border-image: url("assets/ui/banner.png") 0 39 fill stretch;
+  border-width: 15px 30px;
+  /* round across, stretch down. The two axes want opposite things here and
+     saying so is the whole trick: the top and bottom rails carry a repeating
+     gold ornament, and stretching a 44px run of it to 370 smears it into
+     blurred blocks — visible the moment the page was rendered. The sides are
+     plain gold, where stretching is exact and tiling would show a seam.
+     "round" rather than "repeat" so a whole number of ornaments fits and the
+     run never ends mid-pattern. */
+  border-image: url("assets/ui/banner.png") 15 30 fill round stretch;
   image-rendering: pixelated;
   text-align: center;
   pointer-events: none;
   z-index: 40;
   animation: alert-in 260ms cubic-bezier(0.2, 1.6, 0.4, 1);
 }
+/* Every other overlay in this file spells the hidden case out against its own
+   id, and this is why: `.hidden` is one class and `#attack-alert` is an id, so
+   a bare `display: none` on the class loses to the `display: flex` above it and
+   the banner is on screen for the whole game — including over the lobby, which
+   is where this was noticed. */
+#attack-alert.hidden { display: none; }
+#attack-alert-crest {
+  position: absolute;
+  left: 50%; bottom: 100%;
+  transform: translateX(-50%);
+  margin-bottom: -2px;                   /* the frame's own top edge overlaps */
+  image-rendering: pixelated;
+  pointer-events: none;
+}
 #attack-alert-line1 {
-  font-size: 0.95rem; font-weight: bold; letter-spacing: 0.16em;
-  color: #a32b1c; line-height: 1.1;
+  font-size: 1rem; font-weight: bold; letter-spacing: 0.18em;
+  color: #ffd76a; line-height: 1.15;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
 }
 #attack-alert-line2 {
-  font-size: 0.78rem; margin-top: 2px; color: #4a3722; line-height: 1.1;
+  font-size: 0.8rem; margin-top: 3px; color: #f2d7bc; line-height: 1.15;
   white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
 }
 #attack-alert.leaving { animation: alert-out 320ms ease-in forwards; }
 @keyframes alert-in {

@@ -8,6 +8,7 @@
 // exactly that mistake.
 const fs = require('fs');
 const path = require('path');
+const { decodePNG } = require('../png');
 
 const SRC = path.join(__dirname, '..', '..', 'public');
 let failures = 0;
@@ -205,27 +206,59 @@ if (geomStart > 0 && geomEnd > geomStart) {
   check('every image the stylesheet references was built',
     absent.length === 0, absent.join(', ') || `${urls.length} files`);
 
-  // A 9-slice is two numbers that have to be the same: the slice, and the
-  // border-width reserved for it. Different, and the art is scaled into the
-  // wrong box — which looks like blurry pixel art and reads as a bad asset.
-  const slices = [
-    ['keepbar.png', 18, /border-left-width: var\(--keep-cap\)/, /--keep-cap: (\d+)px/],
-    ['banner.png', 39, /border-left-width: 39px/, null],
-  ];
+  // A 9-slice is two numbers that have to agree: how much of the art is the
+  // border, and how much of the box is reserved for it. Different, and the art
+  // is scaled into the wrong space — blurred pixels that read as a bad asset.
+  //
+  // Checked against the source PNG as well, because a slice bigger than half
+  // the image has no middle left to stretch and silently draws nothing.
   const wrong = [];
-  for (const [file, slice, widthRe, varRe] of slices) {
-    const rule = new RegExp(`url\\("assets/ui/${file.replace('.', '\\.')}"\\) 0 (\\d+) fill`);
-    const m = css.match(rule);
-    if (!m) { wrong.push(`${file}: no border-image rule`); continue; }
-    if (Number(m[1]) !== slice) wrong.push(`${file}: slice ${m[1]}, expected ${slice}`);
-    if (!widthRe.test(css)) wrong.push(`${file}: no matching border-width`);
-    if (varRe) {
-      const v = css.match(varRe);
-      if (!v || Number(v[1]) !== slice) wrong.push(`${file}: variable is ${v && v[1]}, slice is ${slice}`);
+  for (const [, file, sliceText] of css.matchAll(/url\("assets\/ui\/([\w-]+\.png)"\) ([\d ]+?) fill/g)) {
+    const nums = sliceText.trim().split(/\s+/).map(Number);
+    const [top, side] = nums.length === 1 ? [nums[0], nums[0]] : nums;
+    const img = decodePNG(path.join(SRC, 'assets', 'ui', file));
+    if (side * 2 >= img.width) wrong.push(`${file}: side slice ${side} leaves no middle in ${img.width}px`);
+    if (top * 2 > img.height) wrong.push(`${file}: top slice ${top} exceeds ${img.height}px`);
+    // ...and the rule that reaches for this art has to reserve the same border
+    // for it. Widths are written three ways in this stylesheet — a shorthand, a
+    // pair, or one side at a time — and two of them go through a variable, so
+    // the variables are resolved first and every number found is accepted.
+    // Only the rule this url sits in, not a fixed window of characters before
+    // it: a rule that swaps the picture and nothing else — a button's pressed
+    // state, say — inherits its border-width by design and has nothing here to
+    // compare against. Finding no width means inherited, not wrong.
+    const at = css.indexOf(file);
+    const block = css.slice(css.lastIndexOf('{', at) + 1, at);
+    const widths = [...block.matchAll(/border(?:-width|-left-width|-right-width)?: ([^;]+);/g)]
+      .map(m => m[1])
+      .map(v => v.replace(/var\((--[\w-]+)\)/g, (_, name) => {
+        const def = css.match(new RegExp(`\\${name}: (\\d+)px`));
+        return def ? def[1] + 'px' : '?';
+      }))
+      .join(' ');
+    const numbers = [...widths.matchAll(/(\d+)px/g)].map(m => Number(m[1]));
+    if (numbers.length && !numbers.includes(side)) {
+      wrong.push(`${file}: slice ${side} but the border reserves ${numbers.join('/')}`);
     }
   }
   check('every 9-slice reserves exactly the border it slices', wrong.length === 0,
     wrong.join(' | ') || 'slice and border-width agree');
+
+  // The two variables the health bar uses must equal the slices they stand for.
+  const capVar = css.match(/--keep-cap: (\d+)px/);
+  const fillVar = css.match(/--keep-fill-cap: (\d+)px/);
+  check('  and the health bar\'s variables match its own slices',
+    capVar && Number(capVar[1]) === 18 && fillVar && Number(fillVar[1]) === 9,
+    `--keep-cap ${capVar && capVar[1]}, --keep-fill-cap ${fillVar && fillVar[1]}`);
+
+  // Both overlays sit over a live game, and the lobby is drawn over that game
+  // after a rematch. `.hidden` is one class; `#attack-alert` is an id. A bare
+  // display on the id beats the class, and the banner stays on screen for the
+  // whole match — which is how this was found, sitting over the lobby.
+  for (const id of ['keep-bar', 'attack-alert']) {
+    check(`#${id} spells out its own hidden case`,
+      new RegExp(`#${id}\\.hidden\\s*\\{[^}]*display:\\s*none`).test(css));
+  }
 
   // Stretch, not repeat. The middle of each of these carries its own left-hand
   // edge, so tiling it redraws that edge every tile: a seam down the banner and

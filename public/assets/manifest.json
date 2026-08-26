@@ -2581,11 +2581,16 @@
   "banner": {
    "file": "ui/banner.png",
    "w": 192,
-   "h": 60,
+   "h": 57,
    "slice": [
-    0,
-    39
+    15,
+    30
    ]
+  },
+  "bannerCrest": {
+   "file": "ui/banner-crest.png",
+   "w": 90,
+   "h": 24
   }
  },
  "cards": {

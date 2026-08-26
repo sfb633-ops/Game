@@ -596,6 +596,12 @@ function onInit(msg) {
 function showLobby(on) {
   inLobby = on;
   document.getElementById('lobby').classList.toggle('hidden', !on);
+  // The lobby is drawn over the game it followed. Anything shouting about the
+  // last match has to stop shouting.
+  if (on) {
+    clearAttackAlert();
+    document.getElementById('keep-bar').classList.add('hidden');
+  }
 }
 
 function onLobbyState(msg) {
@@ -3268,7 +3274,11 @@ const KEEP_AMBER = 0.5, KEEP_RED = 0.25;
 function renderKeepBar(me) {
   const bar = document.getElementById('keep-bar');
   if (!bar) return;
-  const castle = me && me.alive && me.buildings && me.buildings.find(b => b.type === 'castle');
+  // A rematch lobby is drawn over the game it followed, and the state from that
+  // game is still the latest one — so "there is a keep" is not on its own a
+  // reason to draw its health.
+  const castle = !inLobby && me && me.alive && me.buildings
+    && me.buildings.find(b => b.type === 'castle');
   if (!castle) { bar.classList.add('hidden'); return; }
   bar.classList.remove('hidden');
 
@@ -3306,7 +3316,7 @@ let attackAlertTimer = null, attackAlertFade = null;
 
 function raiseAttackAlert(who) {
   const el = document.getElementById('attack-alert');
-  if (!el) return;
+  if (!el || inLobby) return;
   clearTimeout(attackAlertTimer);
   clearTimeout(attackAlertFade);
   el.classList.remove('hidden', 'leaving');

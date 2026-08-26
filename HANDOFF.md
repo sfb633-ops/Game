@@ -2366,6 +2366,59 @@ styles exists in the page and every id in the page is styled, that every image
 a URL names was actually built, that each 9-slice's border-width equals its
 slice number, and that none of them went back to `repeat`.
 
+### Verifying interface changes
+
+The first version of the attack banner was checked by composing its PNGs by
+hand, cross-referencing every id between the three files, and confirming each
+image existed. All of that passed, and what shipped was a banner that sat on
+screen for the whole game — because the fault was CSS specificity, and **the
+cascade is not a thing you can grep**. `#attack-alert` set `display: flex`; the
+markup said `class="hidden"`; one class loses to one id. Every other overlay in
+`style.css` spells out `#id.hidden { display: none }` and had done all along.
+
+Chrome is installed on this machine. There was no excuse for guessing, and there
+is none now:
+
+- **`tools/tests/browser.test.js`** drives it headless with `--dump-dom` and
+  reads computed values back: everything with a hidden state must compute to
+  `display: none`, no two overlays may overlap at any size, and each piece of
+  pixel art must be laid out at exactly its own height. It skips loudly without
+  Chrome. Both bugs it was written for were put back to confirm it fails on
+  them.
+- **`tools/shoot-ui.js`** renders the page at several states and writes the
+  pictures out. For anything that has to *look* right rather than measure right.
+
+Three of the four faults in this pass were found by one or the other, and none
+of them by reading the code:
+
+| fault | found by |
+| --- | --- |
+| the banner never hid | the screenshot, then pinned by the computed-style check |
+| it covered "900 / 900" on the health bar | the screenshot, then pinned by the overlap check |
+| its gold rails were smeared | the screenshot — a 44px ornament stretched across 370px |
+| the plaque looked foreign to the game | looking at it |
+
+### The attack banner, second attempt
+
+The first was a ribbon from the flat UI pack and it was wrong twice over. It
+looked wrong on its own — its ends are folded tabs that stand above the body, so
+stretched wide it reads as two white squares with a slab between them — and it
+looked wrong *here*, where the rest of the interface is brown wood and gold and
+a flat cream ribbon belongs to a different game.
+
+It is now the gold-framed plaque from the same Dark Ages sheet as the health
+bar, so the two things that shout at you about your keep are visibly the same
+furniture. Cut the same way and for the same reason: rows 0–7 are the crest,
+rows 8–26 are the plaque. Unlike the bar it has rounded corners, so it needs a
+slice on all four sides rather than two. Its interior is blue on the sheet, and
+blue is the wrong colour for an alarm — the recolour is restricted to the blues
+by hue so the gold frame comes through untouched.
+
+`border-image-repeat: round stretch` and the two axes want opposite things,
+which is the whole trick: the top and bottom rails carry a repeating gold
+ornament that must be tiled, and the sides are plain gold where stretching is
+exact and a tile would show a seam.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

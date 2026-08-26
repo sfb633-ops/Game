@@ -4,6 +4,7 @@ Plain node scripts, no framework. Each one exits non-zero if a check fails.
 
 ```
 node tools/tests/invariants.test.js  # properties, not cases — start here
+node tools/tests/browser.test.js     # the cascade, in a real Chrome; skips if absent
 node tools/tests/rules.test.js       # game rules; needs no server
 node tools/tests/spawns.test.js      # every opening circle is fully buildable
 node tools/tests/client.test.js      # static checks on the browser client
@@ -15,6 +16,36 @@ node tools/tests/lobby.test.js       # ditto — host/join/start over real socke
 `npm run test:net` runs the last three, and does **not** start a server for you:
 without one already listening on :3000 it fails with `ECONNREFUSED`, which
 looks like a broken test and is not one.
+
+## browser.test.js — for anything the cascade decides
+
+Written because a bug shipped that nothing else could have caught.
+`#attack-alert` set `display: flex`, the markup carried `class="hidden"`, and
+`.hidden { display: none }` is one class against an id — so it loses. The banner
+was on screen for the entire game, including over the lobby, which is where it
+was noticed. Every static check passed the whole time: the id was styled, the
+class was applied, the art existed, every string was in the right file. **The
+cascade is not a thing you can grep.**
+
+Chrome is driven headless with `--dump-dom`: the page computes what it wants to
+know, writes the answer into an element, and the test reads it back. No
+screenshots and no reference images — those rot — just the computed values a
+rule is supposed to produce. It checks that everything with a hidden state
+actually computes to `display: none`, that the overlays do not overlap each
+other at any size, and that each piece of pixel art is laid out at exactly its
+own height.
+
+It **skips loudly** when Chrome is not installed rather than failing, and says
+what it did not check. `CHROME=/path/to/chrome` points it somewhere else.
+
+Both bugs it was written for were reintroduced to confirm it fails on them,
+which is the only way to know a test does anything.
+
+`tools/shoot-ui.js` is the other half: it renders the real page in the real
+browser at several states — full health, critical, mid-fade, a lobby over a
+finished match — and writes the pictures out to look at. Use it for anything
+that has to *look* right rather than measure right. Two of the three faults in
+the banner were found by running it and looking at the result.
 
 ## invariants.test.js — read this one first
 
