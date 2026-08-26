@@ -91,7 +91,12 @@ function run(seed, teams, mapId) {
       if (m.terrain[ty][tx] !== 0) { bad(`army standing on terrain ${m.terrain[ty][tx]} at ${tx},${ty} seed ${seed}`); return; }
       // teams: an order must never be aimed at a friend
       if (a.targetType === 'player' && m.allied(a.ownerId, a.targetId)) { bad(`ordered at an ally seed ${seed}`); return; }
-      if (a.targetType === 'army') {
+      // A merge points at one of your own groups on purpose — that is what a
+      // merge IS — so only an attack order counts here. This read as a failure
+      // the first time empires were seated far enough apart for a merge to
+      // still be in flight when the check ran: the invariant had always been
+      // wrong and had only ever been sampled between merges.
+      if (a.targetType === 'army' && a.order !== 'merge') {
         const foe = m.armies.get(a.targetId);
         if (foe && m.allied(a.ownerId, foe.ownerId)) { bad(`attacking an allied group seed ${seed}`); return; }
       }

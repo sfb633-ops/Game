@@ -2506,6 +2506,90 @@ page, and without carrying the outpost bonus across an empire holding two camps
 was told its next level would take it from 16 buildings down to 15 — the same
 mistake `borderBonus` had already been fixed for, two lines above.
 
+### Seating the empires that turned up
+
+Every map lays out `MAP.maxPlayers` seats and a lobby rarely fills. Seats were
+handed out in layout order — `find(sp => !sp.taken)` — so three players in a
+twelve-seat map took seats 0, 1 and 2, which on every laid-out map are
+**neighbours**. Three empires with a whole map to themselves started in each
+other's laps. All the earlier work on `LAID_OUT_SPACING` was tuning the gap
+between twelve seats while the three people actually playing sat in a huddle.
+
+`spreadPlayers()` runs at `start()` — not as each player joins, because who is
+playing is not known until the host says go, and a seat picked for the second
+of two is the wrong seat once a third arrives. It chooses which seats to use:
+farthest-point first (take the two furthest apart, then keep adding whichever
+is furthest from everything chosen), then a swap pass, because greedy is good
+and not optimal.
+
+Closest pair of empires **actually playing**, before and after:
+
+| map | 2 | 3 | 4 | 6 |
+| --- | --- | --- | --- | --- |
+| wilds | 46 → **185** | 44 → **120** | 44 → **105** | 40 → **59** |
+| lakelands | 48 → **191** | 43 → **130** | 36 → **116** | 35 → **49** |
+| divide | 191 → **226** | 29 → **135** | 29 → **135** | 29 → **54** |
+| fourcorners | 191 → **221** | 111 → 111 | 111 → 111 | 37 → **74** |
+
+A full twelve-player game is unchanged, which is right — there is nothing to
+choose when every seat is used.
+
+**Spreading is right between sides and wrong within one.** The first version
+applied it to teams as well and put two allies a hundred and thirty tiles
+apart, which is most of the map and the exact opposite of what picking a side
+is for. `clusterSeats` is the other half: the tightest bunch of seats in the
+pool, so a side sits together while the layout keeps the sides opposite. Both
+halves are pinned — enemies further than allies, *and* allies within 60 tiles.
+
+### A shrine worth arguing over
+
+It was dropped on the first random tile 34 clear of anything already placed.
+Random is fine for a bandit camp — there are twenty-six and they even out — and
+it is not fine for the one object everybody is meant to race for. Measured, it
+was landing 29 tiles from one empire and 153 from another: not a contested
+objective, a gift.
+
+`placeShrineFairly()` puts it where it is as equally far from every empire as it
+can be — minimise the spread between nearest and furthest, which for two players
+is the line between them and for four is the middle — and among equally fair
+spots takes the one furthest from everybody, so it lands in open ground rather
+than wedged against a border. Spread from empire to empire went from 16–172
+tiles down to 0–68, mostly under 30.
+
+Like the seating it runs at `start()`, because until then there is no telling
+who is playing or where they will sit.
+
+### The army that all stopped at once
+
+Reported as: many groups sent at an enemy base, one detachment was attacked,
+and they all froze. Reproduced, and the cause was not the interception.
+
+Once buildings became things you could send troops at, they started competing
+with the keep for the same click — and a keep's art is nearly three tiles tall,
+so clicking the middle of it lands a tile or more from its actual tile and a
+bank behind it wins on distance. Five groups sent at "the enemy base" were all
+ordered onto one shed. They knocked it down in seconds and every one of them
+stopped dead, three tiles from a keep at full health, for the rest of the match.
+
+`KEEP_CLAIM` fixes it: a click within 2.4 tiles of an enemy town centre means
+that **empire**, and wins outright rather than on distance. Buildings that close
+to a keep are not separately clickable, which is a small price and the right way
+round. `stepBuildingBattle` also says so out loud now when the thing it was sent
+at is already down — an army that stops for no visible reason is the thing that
+reads as the game being broken.
+
+Worth recording what this cost to find: the first three reproductions failed
+because they used a `player` target, which behaves perfectly. The bug only
+exists on the path the *client* actually takes.
+
+### A fuzz invariant that was wrong all along
+
+Spreading the seats made the fuzz fail on "attacking an allied group". The
+invariant did not exclude the `merge` order — and a merge points at one of your
+own groups on purpose, because that is what a merge is. It had always been
+wrong and had only ever been sampled between merges; seating empires further
+apart made merges long enough to still be in flight when the check ran.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

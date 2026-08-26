@@ -2150,10 +2150,30 @@ function onCanvasMouseUp(e) {
   render(); renderPanel();
 }
 
+// How near a click has to land to an enemy town center for it to mean that
+// EMPIRE, whatever else is under the cursor.
+//
+// This exists because of a real and very bad bug. Once buildings became things
+// you could send troops at, they started competing with the keep for the same
+// click — and the keep's art is nearly three tiles tall, so clicking the middle
+// of it lands a tile or more from its actual tile and a bank behind it wins on
+// distance. Five groups sent at "the enemy base" were therefore all ordered
+// onto one shed: they knocked it down in seconds and every one of them stopped
+// dead, three tiles from a keep at full health, for the rest of the match.
+//
+// A click on the keep means the keep. Buildings this close to one are not
+// separately clickable, which is a small price and the right way round.
+const KEEP_CLAIM = 2.4;
+
 // Nearest enemy castle or AI camp to a point, within a click radius, or null.
 function nearestTarget(fx, fy, maxDist = 1.6) {
   let best = null, bestDist = maxDist;
   if (!latestState) return null;
+  // The keep first, and it wins outright rather than on distance.
+  for (const p of latestState.players) {
+    if (!p.alive || isAlly(p.id)) continue;
+    if (Math.hypot(p.baseX - fx, p.baseY - fy) <= KEEP_CLAIM) return { type: 'player', id: p.id };
+  }
   for (const camp of latestState.aiCamps) {
     if (camp.defeated) continue;
     const d = Math.hypot(camp.x - fx, camp.y - fy);

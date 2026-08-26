@@ -269,5 +269,24 @@ if (geomStart > 0 && geomEnd > geomStart) {
     repeats.length === 0, repeats.join(', ') || 'all stretch');
 }
 
+// A click on an enemy keep has to mean that EMPIRE. Once buildings became
+// targets they started competing with the keep for the same click, and the
+// keep's art is nearly three tiles tall — so clicking the middle of it lands a
+// tile or more from its actual tile and a bank behind it wins on distance.
+// Five groups sent at "the enemy base" were all ordered onto one shed, knocked
+// it down in seconds, and stopped dead three tiles from a keep at full health.
+{
+  const at = client.indexOf('function nearestTarget(');
+  check('the target picker is where the test expects it', at > 0);
+  const body = client.slice(at, client.indexOf('function nearestMyArmy('));
+  check('  and a keep within KEEP_CLAIM wins outright rather than on distance',
+    /KEEP_CLAIM/.test(body) && /return \{ type: 'player'/.test(body),
+    /KEEP_CLAIM/.test(body) ? 'guarded' : 'buildings can still steal the click');
+  // The check has to come before the buildings loop, or it is not a claim.
+  const keepAt = body.indexOf('KEEP_CLAIM');
+  const buildingsAt = body.indexOf("type: 'building'");
+  check('  and it is checked before buildings are', keepAt > 0 && keepAt < buildingsAt);
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall client checks pass');
 process.exit(failures ? 1 : 0);

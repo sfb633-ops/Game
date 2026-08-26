@@ -3196,5 +3196,148 @@ function fightOut(m, ours, theirs) {
     m.buildLimit(p) === withCamp - cfg.OUTPOST.buildLimitBonus, `${withCamp} -> ${m.buildLimit(p)}`);
 }
 
+// --- the empires that turned up are spread across the map -------------------
+//
+// Every map lays out MAP.maxPlayers seats, and a lobby rarely fills. Seats were
+// handed out in layout order — the first free one — so three players in a
+// twelve-seat map took seats 0, 1 and 2, which on every laid-out map are
+// NEIGHBOURS. Three empires with a whole map to themselves started in each
+// other's laps.
+//
+// The measure that matters is the closest pair of empires ACTUALLY PLAYING, not
+// the closest pair of seats that exist.
+{
+  const closest = (pts) => {
+    let c = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        c = Math.min(c, Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y));
+      }
+    }
+    return c;
+  };
+  const worst = [];
+  const gains = [];
+  for (const mapId of ['wilds', 'lakelands', 'highlands', 'divide', 'fourcorners', 'openfield']) {
+    for (const n of [2, 3, 4, 6]) {
+      const m = new Match({ started: false, map: mapId });
+      const inOrder = closest(m.spawns.slice(0, n));      // what taking them in order gives
+      for (let i = 0; i < n; i++) m.addPlayer('p' + i, 'human', 'P' + i);
+      m.start();
+      const spread = closest([...m.players.values()].map(p => ({ x: p.baseX, y: p.baseY })));
+      gains.push(spread / inOrder);
+      // A small game on a big map should be a long way apart. Two empires with
+      // a 240x160 map to share have no excuse for being within a third of it.
+      const floor = n === 2 ? 120 : n === 3 ? 90 : n === 4 ? 70 : 40;
+      if (spread < floor) worst.push(`${mapId}/${n}: ${spread.toFixed(0)} < ${floor}`);
+    }
+  }
+  check('a small game puts its empires a long way apart', worst.length === 0,
+    worst.join('  ') || 'every map and size clears its floor');
+  check('  and it is always at least as good as taking the seats in order',
+    gains.every(g => g >= 1), `worst ratio ${Math.min(...gains).toFixed(2)}x, best ${Math.max(...gains).toFixed(2)}x`);
+}
+
+// ...without breaking the rule that a team sits together.
+{
+  const bad = [];
+  for (const mapId of ['wilds', 'lakelands', 'divide', 'fourcorners', 'openfield']) {
+    for (const teams of [2, 3, 4]) {
+      for (const per of [2, 3]) {
+        const m = new Match({ started: false, map: mapId, teams });
+        for (let i = 0; i < teams * per; i++) m.addPlayer('p' + i, 'human', 'P' + i);
+        if (m.players.size < teams * per) continue;
+        m.start();
+        const ps = [...m.players.values()];
+        let foe = Infinity, mate = Infinity;
+        for (let i = 0; i < ps.length; i++) {
+          for (let j = i + 1; j < ps.length; j++) {
+            const d = Math.hypot(ps[i].baseX - ps[j].baseX, ps[i].baseY - ps[j].baseY);
+            if (ps[i].team === ps[j].team) mate = Math.min(mate, d); else foe = Math.min(foe, d);
+          }
+        }
+        if (!(foe > mate)) bad.push(`${mapId}/${teams}x${per}`);
+      }
+    }
+  }
+  check('spreading them out still seats every team together',
+    bad.length === 0, bad.join(' ') || 'enemies always further than allies');
+
+  // Closer than that, in fact. Spreading is right BETWEEN sides and wrong
+  // within one: picking a side and then being put a hundred and thirty tiles
+  // from your partner is the opposite of what picking a side is for. Which is
+  // exactly what happened the first time this was written.
+  const far = [];
+  for (const mapId of ['wilds', 'lakelands', 'divide', 'fourcorners', 'openfield']) {
+    for (const teams of [2, 3, 4]) {
+      const m = new Match({ started: false, map: mapId, teams });
+      for (let i = 0; i < teams * 2; i++) m.addPlayer('p' + i, 'human', 'P' + i);
+      if (m.players.size < teams * 2) continue;
+      m.start();
+      const ps = [...m.players.values()];
+      for (let i = 0; i < ps.length; i++) {
+        for (let j = i + 1; j < ps.length; j++) {
+          if (ps[i].team !== ps[j].team) continue;
+          const d = Math.hypot(ps[i].baseX - ps[j].baseX, ps[i].baseY - ps[j].baseY);
+          if (d > 60) far.push(`${mapId}/${teams}: allies ${d.toFixed(0)} apart`);
+        }
+      }
+    }
+  }
+  check('  and teammates are actually beside each other', far.length === 0,
+    far.join('  ') || 'every side sits together');
+}
+
+// Everyone ends up somewhere they can actually play from.
+{
+  const bad = [];
+  for (const mapId of ['wilds', 'lakelands', 'divide', 'fourcorners', 'openfield']) {
+    const m = new Match({ started: false, map: mapId });
+    for (let i = 0; i < 5; i++) m.addPlayer('p' + i, 'human', 'P' + i);
+    m.start();
+    const seen = new Set();
+    for (const p of m.players.values()) {
+      const key = `${p.baseX},${p.baseY}`;
+      if (seen.has(key)) bad.push(`${mapId}: two empires on ${key}`);
+      seen.add(key);
+      if (!m.validMoveTile(p.baseX, p.baseY)) bad.push(`${mapId}: ${p.id} on ground nobody can stand on`);
+      const castle = m.getCastle(p);
+      if (!castle || castle.x !== p.baseX || castle.y !== p.baseY) {
+        bad.push(`${mapId}: ${p.id}'s keep did not move with them`);
+      }
+    }
+  }
+  check('  and every empire keeps exactly one keep, on ground it can use',
+    bad.length === 0, bad.join('  ') || 'all seated cleanly');
+}
+
+// --- the shrine is worth arguing over --------------------------------------
+//
+// It used to be dropped on the first random tile 34 clear of anything already
+// placed, which put it 29 tiles from one empire and 153 from another. That is
+// not a contested objective, it is a gift.
+{
+  const bad = [];
+  for (const mapId of ['wilds', 'lakelands', 'divide', 'fourcorners', 'openfield']) {
+    for (const n of [2, 3, 4, 6]) {
+      const m = new Match({ started: false, map: mapId });
+      for (let i = 0; i < n; i++) m.addPlayer('p' + i, 'human', 'P' + i);
+      m.start();
+      const shrine = m.aiCamps.find(c => c.shrine);
+      if (!shrine) continue;
+      const ds = [...m.players.values()].map(p => Math.hypot(p.baseX - shrine.x, p.baseY - shrine.y));
+      const near = Math.min(...ds), far = Math.max(...ds);
+      if (near < cfg.SHRINE.spacing) bad.push(`${mapId}/${n}: ${near.toFixed(0)} from an empire`);
+      // Fair enough that the nearest is not simply handed it. The allowance
+      // grows with the crowd because six empires cannot all be equidistant
+      // from one tile.
+      const allowed = n <= 3 ? 25 : 75;
+      if (far - near > allowed) bad.push(`${mapId}/${n}: spread ${(far - near).toFixed(0)} > ${allowed}`);
+    }
+  }
+  check('the shrine is nobody\'s doorstep and roughly fair to everybody',
+    bad.length === 0, bad.join('  ') || 'every map and size');
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');
 process.exit(failures ? 1 : 0);

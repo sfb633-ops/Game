@@ -939,20 +939,8 @@ class Match {
     if (old) old.taken = false;
     seat.taken = true;
 
-    delete player.buildings[tileKey(player.baseX, player.baseY)];
-    player.baseX = seat.x; player.baseY = seat.y;
-    player.buildings[tileKey(seat.x, seat.y)] = {
-      x: seat.x, y: seat.y, type: 'castle', level: 1,
-      hp: CASTLE.hp[0], maxHp: CASTLE.hp[0],
-      underConstruction: false, remainingSec: 0, upgrading: false, trainQueue: [],
-    };
+    this.reseat(player, seat);
     player.team = team;
-    // They are somewhere else now, so what they have seen is somewhere else
-    // too. Cleared rather than added to, or a player could tour every corner of
-    // the map by hopping teams in the lobby.
-    player.explored = new Uint8Array(MAP.width * MAP.height);
-    player.exploredDelta = [];
-    this.stepVision(player);
     // What their new side knows, they now know — and what they can see from
     // the new seat, their new side does. Their old side's map went with the
     // clear above, so hopping teams cannot be used to tour the map.
@@ -960,10 +948,202 @@ class Match {
     return true;
   }
 
+  // Which seats a given number of empires should actually use, out of all the
+  // ones the layout put down. Maximise the smallest gap between them.
+  //
+  // Every map lays out MAP.maxPlayers seats and a lobby rarely fills. Seats were
+  // handed out in layout order — the first free one — so three players in a
+  // twelve-seat map took seats 0, 1 and 2, which on every laid-out map are
+  // NEIGHBOURS. Three empires with a whole map to spread across started in each
+  // other's laps, and it looked exactly as bad as it was.
+  //
+  // Farthest-point first: take the two seats furthest apart, then keep adding
+  // whichever seat is furthest from everything chosen so far. Then a swap pass,
+  // because greedy is good and not optimal — try every unused seat in place of
+  // every chosen one and keep any exchange that widens the narrowest gap. Two
+  // passes settle it at these sizes, and the whole thing runs once per match.
+  spreadSeats(pool, count) {
+    if (count >= pool.length) return pool.slice();
+    const gap = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const minTo = (seat, chosen) => chosen.reduce((m, c) => Math.min(m, gap(seat, c)), Infinity);
+
+    // The two furthest apart start it off.
+    let best = null;
+    for (let i = 0; i < pool.length; i++) {
+      for (let j = i + 1; j < pool.length; j++) {
+        const d = gap(pool[i], pool[j]);
+        if (!best || d > best.d) best = { d, a: pool[i], b: pool[j] };
+      }
+    }
+    const chosen = count === 1 ? [pool[0]] : [best.a, best.b];
+    while (chosen.length < count) {
+      let pick = null;
+      for (const seat of pool) {
+        if (chosen.includes(seat)) continue;
+        const d = minTo(seat, chosen);
+        if (!pick || d > pick.d) pick = { d, seat };
+      }
+      chosen.push(pick.seat);
+    }
+
+    const narrowest = (set) => {
+      let m = Infinity;
+      for (let i = 0; i < set.length; i++) for (let j = i + 1; j < set.length; j++) m = Math.min(m, gap(set[i], set[j]));
+      return m;
+    };
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < chosen.length; i++) {
+        for (const seat of pool) {
+          if (chosen.includes(seat)) continue;
+          const trial = chosen.slice();
+          trial[i] = seat;
+          if (narrowest(trial) > narrowest(chosen)) chosen[i] = seat;
+        }
+      }
+    }
+    return chosen;
+  }
+
+  // The opposite job, for the other half of the rule. A side wants to be
+  // TOGETHER: the tightest bunch of `count` seats in the pool, so two allies on
+  // a six-seat flank end up next to each other rather than at either end of it.
+  //
+  // Spreading is right between sides and wrong within one, and getting that
+  // backwards put two teammates a hundred and thirty tiles apart — which is
+  // most of the map, and the exact opposite of what picking a side is for.
+  clusterSeats(pool, count) {
+    if (count >= pool.length) return pool.slice();
+    const gap = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const widest = (set) => {
+      let w = 0;
+      for (let i = 0; i < set.length; i++) for (let j = i + 1; j < set.length; j++) w = Math.max(w, gap(set[i], set[j]));
+      return w;
+    };
+    let best = null;
+    for (const centre of pool) {
+      const near = pool.slice().sort((a, b) => gap(a, centre) - gap(b, centre)).slice(0, count);
+      const w = widest(near);
+      if (!best || w < best.w) best = { seats: near, w };
+    }
+    return best.seats;
+  }
+
+  // Move an empire onto a seat, castle and all. Shared with setTeam, which does
+  // the same thing for a different reason.
+  reseat(player, seat) {
+    if (player.baseX === seat.x && player.baseY === seat.y) return;
+    delete player.buildings[tileKey(player.baseX, player.baseY)];
+    player.baseX = seat.x; player.baseY = seat.y;
+    player.buildings[tileKey(seat.x, seat.y)] = {
+      x: seat.x, y: seat.y, type: 'castle', level: 1,
+      hp: CASTLE.hp[0], maxHp: CASTLE.hp[0],
+      underConstruction: false, remainingSec: 0, upgrading: false, trainQueue: [],
+    };
+    // Somewhere else means having seen somewhere else. Cleared rather than
+    // added to, for the same reason setTeam clears it.
+    player.explored = new Uint8Array(MAP.width * MAP.height);
+    player.exploredDelta = [];
+    this.stepVision(player);
+  }
+
+  // Spread the empires that actually turned up across the seats that exist.
+  // Done at the start rather than as each player joins, because who is playing
+  // is not known until the host says go — a seat picked for the second of two
+  // is the wrong seat once a third arrives.
+  //
+  // Team games keep their sides: each side is spread within its own group of
+  // seats, so teammates stay together and the sides stay opposite. That is a
+  // pinned rule (your nearest neighbour must be a teammate) and this must not
+  // be the thing that breaks it.
+  spreadPlayers() {
+    const byGroup = new Map();
+    for (const p of this.players.values()) {
+      const g = this.teamCount ? p.team : 0;
+      if (!byGroup.has(g)) byGroup.set(g, []);
+      byGroup.get(g).push(p);
+    }
+    for (const sp of this.spawns) sp.taken = false;
+    for (const [g, members] of byGroup) {
+      const pool = this.spawns.filter(sp => !sp.taken && (!this.teamCount || sp.group === g));
+      if (pool.length < members.length) {           // should not happen; do no harm
+        for (const p of members) {
+          const seat = pool.find(sp => !sp.taken) || this.spawns.find(sp => !sp.taken);
+          if (seat) { seat.taken = true; this.reseat(p, seat); }
+        }
+        continue;
+      }
+      // Spread in a free-for-all, bunch in a team game. The layout has already
+      // put the sides on opposite ends of the map; what is left to decide is
+      // where inside a side its members sit, and the answer there is together.
+      const seats = this.teamCount
+        ? this.clusterSeats(pool, members.length)
+        : this.spreadSeats(pool, members.length);
+      members.forEach((p, i) => { seats[i].taken = true; this.reseat(p, seats[i]); });
+    }
+    // Their new sides know what they know, from where they are now.
+    for (const p of this.players.values()) this.syncTeamVision(p);
+  }
+
+  // Put the shrine somewhere worth arguing over.
+  //
+  // It used to be dropped on the first random tile that was 34 clear of
+  // anything already placed. Random is fine for a bandit camp — there are
+  // twenty-six of those and they even out — and it is not fine for the one
+  // object on the map everybody is supposed to race for: a shrine 40 tiles from
+  // one empire and 150 from another is not contested, it is a gift.
+  //
+  // So it goes where it is as EQUALLY far from every empire as it can be —
+  // minimise the spread between the nearest empire and the furthest — which for
+  // two players is the line between them and for four is the middle. Among
+  // equally fair spots, the one that is furthest from everybody wins, so it
+  // lands in open ground rather than wedged against somebody's border.
+  //
+  // Done at the start, not at construction, because until the host says go
+  // there is no telling who is playing or where they will sit — see
+  // spreadPlayers, which has just moved them all.
+  placeShrineFairly() {
+    const shrine = this.aiCamps.find(c => c.shrine);
+    const bases = [...this.players.values()].map(p => ({ x: p.baseX, y: p.baseY }));
+    if (!shrine || bases.length < 2) return;
+    const camps = this.aiCamps.filter(c => !c.shrine);
+
+    let best = null;
+    // Every other tile is plenty: the shrine is one tile and the map is 240x160,
+    // and this runs once.
+    for (let y = 6; y < MAP.height - 6; y += 2) {
+      for (let x = 6; x < MAP.width - 6; x += 2) {
+        if (this.terrain[y][x] !== TILE_LAND) continue;
+        let near = Infinity, far = 0;
+        for (const b of bases) {
+          const d = Math.hypot(b.x - x, b.y - y);
+          if (d < near) near = d;
+          if (d > far) far = d;
+        }
+        // Not on anybody's doorstep, and not on top of a camp.
+        if (near < SHRINE.spacing) continue;
+        let onCamp = false;
+        for (const c of camps) {
+          if (Math.hypot(c.x - x, c.y - y) < AI_CAMP.spacing / 2) { onCamp = true; break; }
+        }
+        if (onCamp) continue;
+        // Fairest first; among equally fair, the one furthest from everyone.
+        const spread = far - near;
+        if (!best || spread < best.spread - 0.5 ||
+            (Math.abs(spread - best.spread) <= 0.5 && near > best.near)) {
+          best = { x, y, spread, near };
+        }
+      }
+    }
+    if (!best) return;                       // nowhere better; leave it be
+    shrine.x = best.x; shrine.y = best.y;
+  }
+
   start() {
     if (this.started) return false;
     this.started = true;
     if (this.players.size >= 2) this.contested = true;
+    this.spreadPlayers();
+    this.placeShrineFairly();
     for (const player of this.players.values()) {
       if (!player.draft) player.draft = this.rollDraft();
     }
@@ -3480,7 +3660,18 @@ class Match {
   // come out the same.
   stepBuildingBattle(army, dt) {
     const found = this.buildingAt(army.targetId);
-    if (!found || this.allied(army.ownerId, found.owner.id)) { this.holdPosition(army); return; }
+    if (!found || this.allied(army.ownerId, found.owner.id)) {
+      // Somebody else got there first, or this group is one of several sent at
+      // the same thing and arrived to find it gone. Standing still is the right
+      // answer — they were sent at that building and it is no longer there —
+      // but doing it silently is not: an army that stops for no visible reason
+      // is the thing that reads as the game being broken.
+      if (army.order === 'fight' || army.targetType === 'building') {
+        this.emit(army.ownerId, 'That building is already down — your troops are holding.');
+      }
+      this.holdPosition(army);
+      return;
+    }
     this.hitBuilding(army, found.owner, found.building, dt);
   }
 
