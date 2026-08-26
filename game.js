@@ -915,6 +915,9 @@ class Match {
       // a list of newly-lit tiles rather than the whole map every tick.
       explored: new Uint8Array(MAP.width * MAP.height),
       exploredDelta: [],
+      // The eyes stepVision lit last tick, so ones that have not moved are
+      // not walked again. Reset with `explored`, and only with it.
+      eyesLit: new Set(),
       mods: { ...BASE_MODS },
       // Held in the lobby, a player has no hand yet: start() deals every one of
       // them at the same moment. A player who arrives after the match is
@@ -1057,6 +1060,7 @@ class Match {
     // added to, for the same reason setTeam clears it.
     player.explored = new Uint8Array(MAP.width * MAP.height);
     player.exploredDelta = [];
+    player.eyesLit = new Set();
     this.stepVision(player);
   }
 
@@ -1421,9 +1425,21 @@ class Match {
         if (!other.alive && other.team === player.team) viewers.push(other);
       }
     }
+    // An eye that has not moved since last tick lit exactly these tiles last
+    // tick, and `explored` only ever grows, so there is nothing left for it to
+    // find. That is every building and every group standing still — which is
+    // most of them — so the r^2 sweep runs only for what is actually walking.
+    // Keyed on the rounded tile the sweep uses, so a group creeping inside one
+    // tile is skipped too. Allies who arrive later are caught up by
+    // syncTeamVision, not by this, so skipping is safe for them as well.
+    const lit = new Set();
+    const before = player.eyesLit || new Set();
     for (const eye of this.eyesOf(player)) {
       const cx = Math.round(eye.x), cy = Math.round(eye.y);
       const r = eye.r, rr = r * r;
+      const key = cx + ',' + cy + ',' + r;
+      lit.add(key);
+      if (before.has(key)) continue;
       const y0 = Math.max(0, cy - r), y1 = Math.min(MAP.height - 1, cy + r);
       const x0 = Math.max(0, cx - r), x1 = Math.min(MAP.width - 1, cx + r);
       for (let y = y0; y <= y1; y++) {
@@ -1443,6 +1459,7 @@ class Match {
         }
       }
     }
+    player.eyesLit = lit;
   }
 
   // Handed to the client and cleared, the same way events are.
