@@ -2590,6 +2590,64 @@ own groups on purpose, because that is what a merge is. It had always been
 wrong and had only ever been sampled between merges; seating empires further
 apart made merges long enough to still be in flight when the check ran.
 
+### The elves get art of their own
+
+Every other unit in the game is MiniWorldSprites: a 16x16 or 32x32 grid, rows
+by facing, read through `CHAR_LAYOUTS`. The elf swordsman and knight now come
+from a purpose-drawn pack instead, and it is a different kind of file — a
+labelled contact sheet. A title, two panels side by side (swordsman left,
+knight right) split by a one-pixel rule, a heading per animation, a frame
+number over every frame, and a solid black ground rather than transparency.
+Nothing is on a grid and the frames are hand-packed, varying about ten pixels
+in width inside a single row.
+
+Two things make it readable anyway, and both matter if anyone changes it:
+
+- **The rule between the panels finds itself** — it is the one column lit down
+  most of the sheet, so no coordinate is typed into the builder.
+- **The columns are read off the frame numbers.** Every frame has its number
+  centred over it. Assuming an even pitch instead looks like it works and
+  quietly clips the wider frames.
+
+Black is the background, so "is there art here" is a brightness test rather
+than an alpha one, and the threshold has to clear the darkest parts of the
+sprites themselves — hence 24 and not 0.
+
+**Scale.** The sheet is labelled 28x24 and 28x48, which is exactly what every
+other race already fields, and `rules.test.js` pins that they stay matched.
+The scale is taken from the **walk** box, not from the union of every frame:
+measuring across the attack frames instead lets a sword arc shrink the elf.
+Checked by measuring body height — rows carrying at least a quarter of the
+widest row, which drops a one-pixel sword blade and keeps a torso — and the
+elf comes out 24 against the human's 24, and 47 against 46 mounted.
+
+That measurement was worth doing. By raw bounding box the elf swordsman is
+16x24 against the human's 28x24 and looks smaller, because the elf holds its
+sword straight up and the human is a chunky 28-wide blob with a shield. The
+silhouettes differ; the characters do not.
+
+**Contrast.** Bringing 3:1 art down averages it, and averaging costs contrast:
+the elves came out soft and muted beside hard-edged, black-outlined placeholder
+art, and read as washed out on a green field. `ELF_LIFT` puts it back. The
+number was picked by rendering four candidates at 5x against the other races
+and looking — at 1.5 they bleach, at 1.2 the change is not worth making.
+
+**The one real compromise: the sheet has a single attack, drawn facing the
+camera.** It is used for all four facings, so an elf swinging to the left is
+drawn swinging downward. That was chosen over the alternatives — dropping the
+swing entirely, or showing it in one direction out of four and looking broken
+in the other three. The day somebody draws the missing three, point the other
+facings at their own rows in `buildElfUnit` and nothing else changes.
+
+**`buildElves()` returns null when the pack is absent**, and the
+MiniWorldSprites elves declared in `UNIT_SRC` take over. A checkout without the
+raw art still builds.
+
+The pin worth keeping is the blank-facing one. A reader that finds rows by
+looking for frame numbers does not fail by crashing, it fails by producing one
+empty row — a unit that is invisible while it happens to be facing left.
+Blanking a row by hand makes the check fail with `elf/swordsman/walk/left`.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

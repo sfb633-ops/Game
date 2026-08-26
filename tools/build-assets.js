@@ -27,6 +27,8 @@ const MINI = path.join(SRC, 'MiniWorldSprites');
 const UI = path.join(SRC, 'UI', '9-Slice');
 // The keep's health bar and the attack banner. One tilesheet, 12x11 tiles of 32.
 const DARKAGES = path.join(SRC, 'DarkAgesUi_v1.0', '32x32-Tilesheet.png');
+// Purpose-drawn elves, replacing the recoloured MiniWorldSprites ones.
+const ELVES = path.join(SRC, 'Elves', 'elves.png');
 // Faces for the draft. Boons are tarot arcana, spells are spellbook tomes.
 const TAROT = path.join(SRC, 'Tarot Cards [Free]', 'Tarot Cards [Free]', 'Tarot_Original', '1X');
 const TOMES = path.join(SRC, 'SpellBooks', 'TomesMaster32.png');
@@ -681,15 +683,223 @@ function buildGolem() {
   };
 }
 
+// ---------------------------------------------------------------------------
+// The elves
+// ---------------------------------------------------------------------------
+//
+// Every other unit here comes off a MiniWorldSprites grid: fixed cells, rows by
+// facing, read with CHAR_LAYOUTS. The elves are a labelled contact sheet
+// instead — a title, two panels side by side (swordsman left, knight right)
+// separated by a one-pixel rule, a heading per animation, a frame number over
+// every frame, and a solid black ground rather than transparency. Nothing is on
+// a grid and the frames are hand-packed, varying about ten pixels in width
+// inside a single row.
+//
+// Two things make it readable anyway, and both are worth knowing before anyone
+// changes this:
+//
+//   - The rule between the panels is the one column lit down most of the
+//     sheet's height, so it finds itself rather than being a number typed here.
+//   - Every frame has its number centred over it. The columns are read off
+//     those glyphs. Assuming an even pitch instead looks like it works and
+//     quietly clips the wider frames.
+//
+// Black is the background, so "is there art here" is a brightness test. The
+// threshold has to clear the darkest parts of the sprites themselves, which is
+// why it is 24 and not 0.
+const ELF_LIT = 24;
+// Which row of each panel is what. Death is read and thrown away: the game has
+// no death animation, and a unit that is gone is gone from the state.
+const ELF_WALK_ROWS = [0, 1, 2, 3];        // down, left, right, up
+const ELF_ATTACK_ROW = 4;
+// The cell each unit is delivered in, and how tall the character stands inside
+// it. Both match what every other race already fields — the sheet is even
+// labelled with them — and rules.test.js pins that they stay matched, because a
+// unit that is a different size from its counterparts reads as a bug long
+// before anybody works out which pack it came from.
+const ELF_CELL = { swordsman: 32, knight: 64 };
+const ELF_CHAR_H = { swordsman: 24, knight: 48 };
+const ELF_FOOT_MARGIN = 2;                 // pixels of cell left under the feet
+// Bringing 3:1 pixel art down averages it, and averaging costs contrast: the
+// elves came out soft and muted beside the hard-edged, black-outlined placeholder
+// art they stand next to, and read as washed out on a green field. A modest lift
+// puts them back. Judged by rendering them at 5x against the others and looking,
+// not by taste: at 1.5 they bleach, at 1.2 the change is not worth making.
+const ELF_LIFT = { satMul: 1.3, lightAdd: 0.08 };
+
+function elfRuns(vals, gapTol, offset = 0) {
+  const out = []; let start = null, last = -99;
+  vals.forEach((on, i) => {
+    if (on) { if (start === null) start = i; last = i; }
+    else if (start !== null && i - last > gapTol) { out.push([start + offset, last + offset]); start = null; }
+  });
+  if (start !== null) out.push([start + offset, last + offset]);
+  return out;
+}
+
+// The sheet, cut into frames: { swordsman: [[8 frames] x 6 rows], knight: ... }
+function readElfSheet() {
+  const img = decodePNG(need(ELVES));
+  const lit = (x, y) => {
+    const o = (y * img.width + x) * 4;
+    return Math.max(img.data[o], img.data[o + 1], img.data[o + 2]) > ELF_LIT;
+  };
+  let cut = Math.floor(img.width / 2);
+  for (let x = 0; x < img.width; x++) {
+    let n = 0;
+    for (let y = 0; y < img.height; y++) if (lit(x, y)) n++;
+    if (n > img.height * 0.5) { cut = x; break; }
+  }
+  const panels = { swordsman: [0, cut - 1], knight: [cut + 1, img.width - 1] };
+
+  const out = {};
+  for (const [unit, [x0, x1]] of Object.entries(panels)) {
+    const rowOn = [];
+    for (let y = 0; y < img.height; y++) {
+      let n = 0;
+      for (let x = x0; x <= x1; x++) if (lit(x, y)) n++;
+      rowOn.push(n > 0);
+    }
+    const bands = elfRuns(rowOn, 3);
+    const colsIn = (a, b, gapTol) => {
+      const on = [];
+      for (let x = x0; x <= x1; x++) {
+        let n = 0;
+        for (let y = a; y <= b; y++) if (lit(x, y)) n++;
+        on.push(n > 0);
+      }
+      return elfRuns(on, gapTol, x0);
+    };
+    const anims = [];
+    bands.forEach(([a, b], i) => {
+      if (b - a + 1 > 14) return;                 // too tall to be a number row
+      const glyphs = colsIn(a, b, 10);
+      if (glyphs.length !== 8) return;            // headings are one or two
+      const next = bands[i + 1];
+      if (!next || next[1] - next[0] + 1 <= 14) return;
+      anims.push({ centres: glyphs.map(([p, q]) => (p + q) / 2), band: next });
+    });
+    if (anims.length < ELF_ATTACK_ROW + 1) {
+      throw new Error(`elves.png: only ${anims.length} animations found in the ${unit} panel`);
+    }
+    const halfW = (anims[0].centres[1] - anims[0].centres[0]) / 2 - 2;
+    const lift = (cx, y0, y1) => {
+      const a = Math.max(0, Math.round(cx - halfW));
+      const b = Math.min(img.width - 1, Math.round(cx + halfW));
+      const c = ops.crop(img, a, y0, b - a + 1, y1 - y0 + 1);
+      for (let i = 0; i < c.data.length; i += 4) {
+        if (Math.max(c.data[i], c.data[i + 1], c.data[i + 2]) <= ELF_LIT) c.data[i + 3] = 0;
+      }
+      return c;
+    };
+    out[unit] = anims.map(an => an.centres.map(cx => lift(cx, an.band[0], an.band[1])));
+  }
+  return out;
+}
+
+function elfBox(rows, which) {
+  let box = null;
+  for (const r of which) {
+    for (const f of rows[r]) box = ops.unionBox(box, ops.bbox(f));
+  }
+  return box;
+}
+
+function buildElfUnit(unit, rows) {
+  const cell = ELF_CELL[unit];
+  // The scale comes from the WALK box, so the character ends up the height the
+  // sheet says it is. Measuring it across the attack frames instead would let a
+  // sword arc shrink the elf.
+  const walk = elfBox(rows, ELF_WALK_ROWS);
+  const k = ELF_CHAR_H[unit] / (walk.y1 - walk.y0 + 1);
+
+  // Every frame is placed the same way: the lifted crop is symmetric about the
+  // number the artist centred it under, so centring it horizontally puts the
+  // body where they put it, and aligning the bottom of the content to a fixed
+  // baseline stands the character on the ground. Doing it per frame rather than
+  // through one shared window is what stops the sprite drifting when the row
+  // bands differ in height, which they do — by nine pixels between the
+  // swordsman's walk and his attack.
+  const place = (frame) => {
+    const b = ops.bbox(frame);
+    const out = ops.blank(cell, cell);
+    if (!b) return out;
+    const w = Math.max(1, Math.round(frame.width * k));
+    const h = Math.max(1, Math.round(frame.height * k));
+    const scaled = ops.recolor(ops.resize(frame, w, h), ELF_LIFT);
+    const sb = ops.bbox(scaled);
+    if (!sb) return out;
+    ops.drawOver(out, scaled,
+      Math.round((cell - w) / 2),
+      cell - ELF_FOOT_MARGIN - (sb.y1 + 1));
+    return out;
+  };
+
+  const strip = (perFacing) => {
+    const frames = perFacing.down.length;
+    const out = ops.blank(frames * cell, 4 * cell);
+    for (const [dir, destRow] of Object.entries(DIR_ROWS)) {
+      perFacing[dir].forEach((f, i) => ops.blit(out, place(f), i * cell, destRow * cell));
+    }
+    return { img: out, frames };
+  };
+
+  const [down, left, right, up] = ELF_WALK_ROWS.map(r => rows[r]);
+  const attack = rows[ELF_ATTACK_ROW];
+  const clips = {
+    idle: strip({ down: [down[0]], left: [left[0]], right: [right[0]], up: [up[0]] }),
+    walk: strip({ down, left, right, up }),
+    // The sheet has one attack, drawn facing the camera, and it is used for
+    // every facing. That means an elf swinging to the left is drawn swinging
+    // downward — a real cost, chosen deliberately over the alternatives, which
+    // were to drop the swing entirely or to show it in one direction out of
+    // four. Point the other three at their walk rows here the day somebody
+    // draws them, and nothing else has to change.
+    attack: strip({ down: attack, left: attack, right: attack, up: attack }),
+  };
+
+  const anims = {};
+  for (const [name, clip] of Object.entries(clips)) {
+    anims[name] = { file: write(clip.img, 'units', 'elf', unit, `${name}.png`), frames: clip.frames };
+  }
+  const anchorFrame = ops.crop(clips.idle.img, 0, 0, cell, cell);
+  const ab = ops.bbox(anchorFrame);
+  return {
+    frameW: cell, frameH: cell,
+    anchorX: medianX(anchorFrame),
+    anchorY: ab ? ab.y1 + 1 : cell,
+    anims,
+  };
+}
+
+// Null when the pack is not present, so a checkout without it still builds —
+// the MiniWorldSprites elves are still declared in UNIT_SRC and take over.
+function buildElves() {
+  if (!fs.existsSync(ELVES)) {
+    console.log('  units/elf: elves.png not found, falling back to MiniWorldSprites');
+    return null;
+  }
+  const sheet = readElfSheet();
+  const out = {};
+  for (const unit of Object.keys(ELF_CELL)) out[unit] = buildElfUnit(unit, sheet[unit]);
+  return out;
+}
+
 function buildUnits() {
   // One golem, shared by every race — see buildGolem.
   const golem = buildGolem();
+  // ...and elves of their own, where every other race is a recolour.
+  const elves = buildElves();
   for (const [race, byType] of Object.entries(UNIT_SRC)) {
     const variants = {};
     if (race !== 'bandit') variants.golem = golem;
     for (const [unitType, [relPath, layoutName]] of Object.entries(byType)) {
+      // Skipped rather than built and overwritten: building it would write a
+      // set of PNGs nothing ever reads.
+      if (race === 'elf' && elves && elves[unitType]) continue;
       variants[unitType] = buildCharacter(race, unitType, relPath, layoutName);
     }
+    if (race === 'elf' && elves) Object.assign(variants, elves);
     manifest.units[race] = {
       dirMode: '4dir', dirRows: DIR_ROWS,
       fps: { idle: 5, walk: 10, attack: 9 },

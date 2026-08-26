@@ -2171,46 +2171,6 @@
       }
      }
     },
-    "swordsman": {
-     "frameW": 32,
-     "frameH": 32,
-     "anchorX": 16,
-     "anchorY": 28,
-     "anims": {
-      "idle": {
-       "file": "units/elf/swordsman/idle.png",
-       "frames": 1
-      },
-      "walk": {
-       "file": "units/elf/swordsman/walk.png",
-       "frames": 5
-      },
-      "attack": {
-       "file": "units/elf/swordsman/attack.png",
-       "frames": 4
-      }
-     }
-    },
-    "knight": {
-     "frameW": 64,
-     "frameH": 64,
-     "anchorX": 31,
-     "anchorY": 50,
-     "anims": {
-      "idle": {
-       "file": "units/elf/knight/idle.png",
-       "frames": 4
-      },
-      "walk": {
-       "file": "units/elf/knight/walk.png",
-       "frames": 4
-      },
-      "attack": {
-       "file": "units/elf/knight/attack.png",
-       "frames": 4
-      }
-     }
-    },
     "catapult": {
      "frameW": 32,
      "frameH": 32,
@@ -2228,6 +2188,46 @@
       "attack": {
        "file": "units/elf/catapult/attack.png",
        "frames": 4
+      }
+     }
+    },
+    "swordsman": {
+     "frameW": 32,
+     "frameH": 32,
+     "anchorX": 16,
+     "anchorY": 30,
+     "anims": {
+      "idle": {
+       "file": "units/elf/swordsman/idle.png",
+       "frames": 1
+      },
+      "walk": {
+       "file": "units/elf/swordsman/walk.png",
+       "frames": 8
+      },
+      "attack": {
+       "file": "units/elf/swordsman/attack.png",
+       "frames": 8
+      }
+     }
+    },
+    "knight": {
+     "frameW": 64,
+     "frameH": 64,
+     "anchorX": 30,
+     "anchorY": 62,
+     "anims": {
+      "idle": {
+       "file": "units/elf/knight/idle.png",
+       "frames": 1
+      },
+      "walk": {
+       "file": "units/elf/knight/walk.png",
+       "frames": 8
+      },
+      "attack": {
+       "file": "units/elf/knight/attack.png",
+       "frames": 8
       }
      }
     }

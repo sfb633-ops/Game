@@ -1,7 +1,28 @@
 // Pins the defects found in the review. Each block fails loudly if the bug
 // comes back.
 const cfg = require('../../config.js');
+const path = require('path');
+const { decodePNG } = require('../png');
 const { Match, armyCount, armyHp, armyMaxHp, armyWounded } = require('../../game.js');
+
+// Enough of an image reader for the sprite checks below: one cell out of a
+// strip, and whether anything was drawn in it. Pulling in imageops for two
+// four-line functions would make this file depend on the art pipeline.
+function cropRaw(img, x0, y0, w, h) {
+  const out = { width: w, height: h, data: Buffer.alloc(w * h * 4) };
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const sx = x0 + x, sy = y0 + y;
+      if (sx < 0 || sy < 0 || sx >= img.width || sy >= img.height) continue;
+      img.data.copy(out.data, (y * w + x) * 4, (sy * img.width + sx) * 4, (sy * img.width + sx) * 4 + 4);
+    }
+  }
+  return out;
+}
+function anyOpaque(img, alphaMin = 8) {
+  for (let i = 3; i < img.data.length; i += 4) if (img.data[i] > alphaMin) return true;
+  return false;
+}
 
 // Troops are deployed and then given orders — there is no command that raises a
 // group already attacking. This is the two steps the UI takes, in one call, so
@@ -2467,6 +2488,26 @@ function facingOff(aCount, bCount) {
     }));
     if (sizes.size !== 1) odd.push(`${unit}: ${[...sizes].join('/')}`);
   }
+  // Every facing of every animation has to carry art. The elves come off a
+  // labelled contact sheet rather than a grid — rows are found by looking for
+  // the eight frame numbers above them — and the failure mode of a reader like
+  // that is not a crash, it is one blank row: a unit that is invisible while it
+  // happens to be facing left. Cheap to check, impossible to spot in a diff.
+  const blank = [];
+  for (const race of races) {
+    for (const [unit, v] of Object.entries(manifest.units[race].variants)) {
+      for (const [name, clip] of Object.entries(v.anims)) {
+        const img = decodePNG(path.join(__dirname, '..', '..', 'public', 'assets', clip.file));
+        for (const [dir, row] of Object.entries(manifest.units[race].dirRows)) {
+          const cell = cropRaw(img, 0, row * v.frameH, v.frameW, v.frameH);
+          if (!anyOpaque(cell)) blank.push(`${race}/${unit}/${name}/${dir}`);
+        }
+      }
+    }
+  }
+  check('  and every facing of every animation actually has art in it',
+    blank.length === 0, blank.slice(0, 6).join(' ') || 'nothing blank');
+
   check('every race fields each unit at the same frame size', odd.length === 0,
     odd.join('  ') || 'all in step');
 }
