@@ -2202,6 +2202,114 @@ given its own 45-second recharge against everything else's 100. It is the only
 spell in the book that cannot hurt anybody, and one you were saving because it
 was expensive was a spell doing nothing.
 
+### Testing properties instead of cases
+
+Three bug passes went by without finding the doom-stack bug, and the reason is
+worth writing down because it is a lesson about method rather than about a
+number.
+
+Every test in the suite pinned a behaviour: deploy troops, check they arrive;
+cast a spell, check it hits. Every combat test fought one group against one
+group, because that is how you write a test for "fighting works". The bug was
+that the *result of a fight depended on how the soldiers were packed* — which no
+test that only ever uses one packing can see. It was not a broken feature. It
+was a broken property.
+
+`tools/tests/invariants.test.js` is the answer, and it is the file to add to
+first from now on. It asserts symmetry, representation-independence, world
+sanity under hostile input, determinism, termination and the balance bands. The
+sanity check alone — about sixty conditions, run after every tick of a fuzz that
+sends every command with a quarter of its arguments deliberately poisonous —
+found in its first run a class of defect nothing else had touched.
+
+### One message could kill the server
+
+The worst of what that fuzz found, and it is worth stating plainly because the
+plan is to put this on Steam one day.
+
+`BUILDING_TYPES['__proto__']` is `Object.prototype`. It is truthy, so it sailed
+straight through every `if (!def) return` in game.js. A single
+`{type:'build', buildingType:'__proto__'}` therefore:
+
+1. charged `gold -= Math.round(undefined * costMult)`, leaving that empire's gold
+   **NaN for the rest of the match** — every later purchase check silently false,
+   nothing to say why;
+2. put a building on the map with `hp: undefined`, which **nothing can ever
+   destroy**, because every comparison against NaN is false;
+3. left a plot whose `type` made the next `train` order throw — and with no
+   try/catch around `ws.on('message')`, a throw there is an uncaught exception,
+   which in Node is **the whole process**, and with it every other game on the
+   server.
+
+Three layers of fix, because any one of them alone leaves the hole open:
+
+- **`defOf(table, key)`** is now the only way a table is read with anything that
+  came off the wire — `hasOwnProperty`, not a truthiness test. `finiteOr` does the
+  same job for numbers: NaN and Infinity are contagious in a way nothing else
+  here is, and one of either in a coordinate or a price spreads through every sum
+  it touches and never washes out.
+- **`tick` refuses a non-finite dt** and clamps a huge one (`MAX_TICK_SEC`). The
+  server has always handed it a fixed `TICK_MS`; this is for the day something
+  else does not.
+- **The socket handler and each room's tick are wrapped.** A bug that costs one
+  player their session is a bug. A bug that costs everyone theirs is an outage.
+
+### Determinism
+
+The same map and the same orders used to give two different worlds, because army
+ids came from a counter shared by every match in the process. Small thing, large
+cost: a game whose outcome cannot be reproduced from its inputs cannot be
+debugged from a bug report, cannot be replayed, and cannot tell you whether a
+balance change did anything. The counter belongs to the match now.
+
+### The balance pass
+
+Measured rather than reasoned about. `tools/tests/invariants.test.js` pins each
+band; the numbers below are what was wrong.
+
+**A town centre fell in thirteen seconds.** Twenty swordsmen — four hundred gold,
+the smallest force anybody fields — levelled an undefended level-1 keep in 13s,
+and a fully upgraded one fell to a real army in 12s. There was no siege in this
+game, only a drive-by. Keeps are 900/1500/2400 now: the same raid takes 27s, and
+levelling up buys 600 hit points instead of 300.
+
+**A camp was a vending machine.** Four swordsmen and 120 hit points meant twenty
+swordsmen took one in eight seconds *without a single loss* for about 550 gold
+and an outpost. There was no decision in it. At eight swordsmen and two knights
+behind 200 hit points it costs a fifth of the force that takes it, and ten
+swordsmen are no longer enough.
+
+**The shrine paid gold it advertised it did not pay.** `stepCampBattle` added
+plunder per point of damage before the branch whose own comment reads "No gold
+and no outpost" — about 400 a capture. A comment describing what the code does
+not do is worse than no comment.
+
+**Towers had to come down when the keep went up.** The two numbers multiply: a
+keep that lasts twice as long gives its towers twice as long to shoot, and at a
+0.5 reduction ceiling six towers with *no garrison at all* beat 800 gold of
+swordsmen. At 0.35 the rule holds again — three towers behind a real garrison
+turn a losing defence into a winning one, six towers alone do not save a keep,
+and ten only hold by spending every building slot a level-1 town centre has.
+
+**Boons had the same square-law problem the races did.** A boon that changes how
+many soldiers you field is squared on its way to a result; one that changes how
+good each is, is not. So Prosperity's +25% income was worth 1.56 and Forge Fires'
++15% attack was worth 1.15 — the best boon was **1.55x the worst**, which is not
+a draft, it is a right answer. They now sit between 1.21 and 1.29.
+
+**Reincarnation was a coin flip disguised as skill.** Measured with both sides
+using their ability: cast the moment it comes up — which is what a new player
+does, and at that point nobody has fallen — the undead lost every matchup by 60%.
+Held until the army is half gone, the undead *won* every matchup by 35–64%. One
+timing decision on a two-and-a-half minute cooldown, worth the whole game either
+way, while the other three races have abilities that are simply on for a while
+and cannot be misplayed. It raises 60% of the fallen now instead of all of them.
+
+Abilities are priced by fighting, not by reasoning about uptime: how much bigger
+a foreign army has to be to beat a race using its ability than one that is not.
+Warband 1.25, Strength in Unity 1.24, Agility 1.20, Reincarnation 1.19 — a
+spread of 1.06x, where Reincarnation alone had been worth about double.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

@@ -488,6 +488,25 @@ wss.on('connection', (ws) => {
   ws.on('pong', () => { ws.isAlive = true; });
 
   ws.on('message', (raw) => {
+    // Everything below runs on whatever a client chose to send. Every command
+    // validates its own arguments, and the day one of them does not, the throw
+    // comes out of this callback uncaught — which in Node is the whole process,
+    // and with it every other game on the server. That has happened once
+    // already: a build message naming a building type of "__proto__" got a
+    // truthy Object.prototype back from the table, put a nonsense building on
+    // the map, and crashed the next train order.
+    //
+    // So: the sender's own connection is closed, and everybody else's game
+    // carries on. A bug that costs one player their session is a bug; a bug
+    // that costs everyone theirs is an outage.
+    try { handleMessage(ws, raw); }
+    catch (err) {
+      console.error('[msg] dropped a client for a message that threw:', err && err.stack || err);
+      try { ws.close(1011, 'bad request'); } catch { /* already gone */ }
+    }
+  });
+
+  function handleMessage(ws, raw) {
     const now = Date.now();
     ws.budget = Math.min(MESSAGE_BUDGET.burst,
       ws.budget + (now - ws.budgetAt) / 1000 * MESSAGE_BUDGET.perSecond);
@@ -657,7 +676,7 @@ wss.on('connection', (ws) => {
         break;
       }
     }
-  });
+  }
 
   ws.on('close', () => leaveRoom(ws));
   ws.on('error', () => {});
@@ -678,6 +697,27 @@ setInterval(() => {
   const dt = (now - lastTick) / 1000;
   lastTick = now;
   for (const room of rooms.values()) {
+    // One room at a time, each in its own try. A throw here is a throw inside a
+    // setInterval callback, which in Node is an uncaught exception and the end
+    // of the process — so without this, one match that got into a state the
+    // simulation cannot step takes down every other match on the server with
+    // it. The room that broke is closed and told why; nobody else notices.
+    try { stepRoom(room, now, dt); }
+    catch (err) {
+      console.error(`[tick] ${room.code} threw and was closed:`, err && err.stack || err);
+      for (const [, sock] of room.sockets) {
+        try {
+          if (sock.readyState === sock.OPEN) sock.send(JSON.stringify({ type: 'serverClosing' }));
+          sock.close(1011, 'match error');
+        } catch { /* already gone */ }
+      }
+      rooms.delete(room.code);
+    }
+  }
+}, config.TICK_MS);
+
+function stepRoom(room, now, dt) {
+  {
     if (room.dropped.size) reapDropped(room, now);
     if (room.sockets.size === 0) {
       // Keep an abandoned room warm for a bit — a reconnecting friend should
@@ -686,11 +726,11 @@ setInterval(() => {
         rooms.delete(room.code);
         console.log(`[room] ${room.code} closed (empty)`);
       }
-      continue;   // nobody is watching, so nothing needs simulating
+      return;   // nobody is watching, so nothing needs simulating
     }
     // Waiting in its lobby: there is no world to step yet, and the roster is
     // broadcast on change rather than on a clock.
-    if (!room.match.started) continue;
+    if (!room.match.started) return;
     room.match.tick(dt);
     const snapshot = room.match.serialize();
     thinState(room, snapshot);
@@ -712,7 +752,7 @@ setInterval(() => {
       }));
     }
   }
-}, config.TICK_MS);
+}
 
 // A redeploy arrives as SIGTERM. Without this the sockets are cut mid-frame and
 // every client sits on "Connection lost" until it works the timeout out for

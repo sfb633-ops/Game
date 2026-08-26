@@ -217,7 +217,28 @@ const RACE_ABILITIES = {
   undead: {
     id: 'reincarnation', name: 'Reincarnation', sigil: '☥',
     aim: 'point', radius: 5, cooldownSec: 150,
-    desc: 'Raise the fallen anywhere on the map. Every army of yours inside the zone is restored to the strength it marched out with, and the wounded at home are made whole.',
+    // `raiseFraction` is how much of the fallen come back, and it exists
+    // because restoring an army OUTRIGHT made this the strongest thing in the
+    // game by a distance and the swingiest.
+    //
+    // Measured, both sides using their ability: cast the moment it is ready —
+    // which is what a new player does, and at that point nobody has fallen yet
+    // — the undead lost every matchup by 60%. Held until the army is half gone,
+    // the undead WON every matchup by 35-64%. One timing decision, on a
+    // two-and-a-half minute cooldown, worth the whole game either way. The
+    // other three races have abilities that are simply on for a while and
+    // cannot be misplayed; this one was a coin flip disguised as skill.
+    //
+    // At a half it is worth about what the others are worth — a fight it turns
+    // rather than a fight it undoes — and mistiming it costs a good cast rather
+    // than the match.
+    // Priced against the other three by fighting: at 0.5 it came out worth
+    // x1.14 the army against their x1.20-x1.25, and at 0.6 it sits with them.
+    // It is also the only one of the four that keeps paying between fights —
+    // it mends the garrison at home as well — so the low end of the band is
+    // the right place for it.
+    raiseFraction: 0.6,
+    desc: 'Raise the fallen anywhere on the map. Half of everyone lost from your armies in the zone stands up again, and the wounded at home are made whole.',
   },
   orc: {
     id: 'warband', name: 'Warband', sigil: '⚔',
@@ -244,7 +265,19 @@ const RACE_ABILITIES = {
 // below are 0-indexed.
 const CASTLE = {
   maxLevel: 3,
-  hp:            [400, 700, 1100],
+  // Measured, not guessed. At 400/700/1100 an undefended level-1 keep fell to
+  // twenty swordsmen — four hundred gold, the smallest force anybody fields —
+  // in THIRTEEN SECONDS, and a fully upgraded one fell to a real army in twelve.
+  // There was no siege in this game, only a drive-by: step away from the
+  // keyboard for half a minute and the match was over, and nothing you could
+  // have built in that half minute would have changed it.
+  //
+  // At these numbers that same raid takes about half a minute, which is long
+  // enough to see it coming, deploy the garrison and get troops home — and a
+  // real army still takes a fully grown keep in well under a minute, so it is a
+  // siege rather than a stalemate. The upgrade is also worth more than it was:
+  // levelling used to buy 300 more hit points and now buys 600.
+  hp:            [900, 1500, 2400],
   incomePerSec:  [3, 5, 7],
   upgradeCost:   [0, 250, 550],     // cost to reach this level from the previous
   upgradeTimeSec:[0, 38, 77],
@@ -397,8 +430,19 @@ const AI_CAMP = {
   // Deliberately sparse — the map is four times the old one but this is only
   // doubled, so camps stay something you go looking for rather than trip over.
   count: 26,
-  hp: 120,
-  garrison: { swordsman: 4 },
+  // The stockade behind the garrison. Raised with the garrison so a camp is one
+  // fight rather than one fight and a formality.
+  hp: 200,
+  // Four swordsmen and 120 hit points made a camp a vending machine: twenty
+  // swordsmen took one in eight seconds WITHOUT A SINGLE LOSS and walked away
+  // with about 550 gold and an outpost. There was no decision in it — the only
+  // question was whether you had got round to it yet.
+  //
+  // At eight swordsmen and a pair of knights it costs a fifth of the force that
+  // takes it, which is a price worth weighing against what it pays, and ten
+  // swordsmen are no longer enough on their own. It is still the first thing an
+  // early empire should be looking at.
+  garrison: { swordsman: 8, knight: 2 },
   lootGold: 200,
   // Raiding pays twice: gold per point of damage put into the camp (so a raid
   // that stalls still earns something) and a lump bonus for razing it outright.
@@ -467,8 +511,15 @@ const CARDS = {
   // ---- boons ----
   prosperity: {
     name: 'Prosperity', kind: 'boon', sigil: '✦',
-    desc: '+25% gold income, for as long as the empire stands.',
-    mods: { incomeMult: 1.25 },
+    // Every one of these numbers is smaller than it was, and the reason is the
+    // one written over RACES: a boon that changes how many soldiers you field
+    // is squared on its way to a result, and a boon that changes how good each
+    // one is, is not. So +25% income was not worth 25%, it was worth 56%, while
+    // Forge Fires' +15% attack was worth exactly 15%. Measured across the eight
+    // boons, the best was 1.55 times the worst — which does not make a draft, it
+    // makes a right answer. They now sit between 1.21 and 1.29.
+    desc: '+13% gold income, for as long as the empire stands.',
+    mods: { incomeMult: 1.13 },
   },
   warChest: {
     name: 'War Chest', kind: 'boon', sigil: '◆',
@@ -477,23 +528,23 @@ const CARDS = {
   },
   drillmaster: {
     name: 'Drillmaster', kind: 'boon', sigil: '⚔',
-    desc: 'Training and upgrades finish 25% faster.',
-    mods: { buildTimeMult: 0.75 },
+    desc: 'Training and upgrades finish 12% faster.',
+    mods: { buildTimeMult: 0.88 },
   },
   forgeFires: {
     name: 'Forge Fires', kind: 'boon', sigil: '✳',
-    desc: 'Every soldier hits 15% harder.',
-    mods: { attackMult: 1.15 },
+    desc: 'Every soldier hits 28% harder.',
+    mods: { attackMult: 1.28 },
   },
   ironhide: {
     name: 'Ironhide', kind: 'boon', sigil: '◉',
-    desc: 'Every soldier carries 20% more health.',
-    mods: { hpMult: 1.20 },
+    desc: 'Every soldier carries 28% more health.',
+    mods: { hpMult: 1.28 },
   },
   thrift: {
     name: 'Thrift', kind: 'boon', sigil: '△',
-    desc: 'Everything you build and train costs 15% less.',
-    mods: { costMult: 0.85 },
+    desc: 'Everything you build and train costs 11% less.',
+    mods: { costMult: 0.89 },
   },
   surveyors: {
     name: "Surveyor's Charter", kind: 'boon', sigil: '◎',
@@ -587,7 +638,18 @@ const CARDS = {
 // part of an assault. A bank you demolish yourself leaves the ground clear.
 // However many towers are crammed in, they can never cut more than this off an
 // assault. Without a ceiling, twelve towers is simply immunity.
-const TOWER_REDUCTION_CAP = 0.5;
+//
+// Lowered from 0.5 when the town center's health went up. The two numbers
+// multiply: a keep that lasts twice as long gives its towers twice as long to
+// shoot, and at a cap of 0.5 that tipped six towers with NO GARRISON AT ALL
+// into beating eight hundred gold of swordsmen — which is exactly the "the
+// answer to being attacked is always one more tower" that this ceiling exists
+// to prevent, arrived at from the other direction.
+//
+// At 0.35 the same six towers cost the attacker sixteen men and still lose the
+// keep, while three towers behind a real garrison hold comfortably. Towers are
+// worth building; they are not a substitute for troops.
+const TOWER_REDUCTION_CAP = 0.35;
 
 // Paying to make ground buildable. Deliberately dear next to a building: the
 // Reshape the Land card does the same job for free over a whole disc, and a

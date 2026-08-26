@@ -3,6 +3,7 @@
 Plain node scripts, no framework. Each one exits non-zero if a check fails.
 
 ```
+node tools/tests/invariants.test.js  # properties, not cases — start here
 node tools/tests/rules.test.js       # game rules; needs no server
 node tools/tests/spawns.test.js      # every opening circle is fully buildable
 node tools/tests/client.test.js      # static checks on the browser client
@@ -14,6 +15,53 @@ node tools/tests/lobby.test.js       # ditto — host/join/start over real socke
 `npm run test:net` runs the last three, and does **not** start a server for you:
 without one already listening on :3000 it fails with `ECONNREFUSED`, which
 looks like a broken test and is not one.
+
+## invariants.test.js — read this one first
+
+Every other file in here pins a *behaviour*: this feature does this thing. That
+is the right shape for a rule somebody chose, and it is the wrong shape for the
+bugs that actually get through.
+
+The worst defect this project has had — thirty knights beating three golems as
+one group and being wiped out by the same three golems as three groups — passed
+every behaviour test in the suite, because every one of them fought one group
+against one group. It was not a broken feature. It was a broken *property*: the
+result of a fight depended on something it must never depend on. Two "all-round
+bug passes" went by without finding it.
+
+So this file asserts things that must be true of any match, whatever anybody did
+to it, and each one catches a class rather than an instance:
+
+| property | what it catches |
+| --- | --- |
+| **symmetry** | a mirrored fight must be a draw, and stay a draw when the two players are created in the opposite order. Catches every iteration-order, first-mover and tie-broken-by-id bug at once. |
+| **independence** | the same soldiers, sent the same way, get the same result as 1, 2, 3, 5 or 6 groups. This is the doom-stack property, stated generally. |
+| **sanity** | about sixty things that must hold of the world, checked after *every tick* of a hostile fuzz that sends every command with a quarter of its arguments deliberately poisonous. |
+| **determinism** | the same map and the same orders give the same world twice. Without it, no bug found in a playtest can be reproduced from the report. |
+| **termination** | every unit against every other reaches a conclusion; a march at ground nobody can stand on ends. |
+| **balance bands** | the keep, the camp, the shrine, the towers, the boons and the race abilities all sit inside a measured band. |
+
+The sanity check is the one that pays for itself. The junk list is not
+decoration: `BUILDING_TYPES['__proto__']` is `Object.prototype`, which is truthy,
+so it used to sail through every `if (!def) return` in game.js. What came out was
+a building with an undefined cost — an empire's gold went NaN and stayed NaN for
+the rest of the match — undefined health, so nothing could ever destroy it,
+because every comparison against NaN is false — and a type that crashed the next
+train order and, with no try/catch around the socket handler, the entire server
+process and every other game running on it. One message.
+
+Balance is not really an invariant — somebody chose those numbers and somebody
+may choose different ones. What *is* an invariant is that nobody changes them
+without finding out. Every band in there is a thing that was measurably wrong:
+
+- a town centre fell to the smallest force anybody fields in thirteen seconds
+- a bandit camp paid 550 gold for no losses at all
+- six towers with no garrison beat eight hundred gold of soldiers
+- the best boon was 1.55x the worst
+- one race's ability was worth double every other race's
+
+None of those were caught by a behaviour test, because every one of them was a
+number doing exactly what it had been told to do.
 
 `client.test.js` exists because the same mistake happened twice: an edit to a
 neighbouring block deleted the calls to `renderDraft`/`renderCards`, which left

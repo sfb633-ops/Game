@@ -10,8 +10,45 @@ const {
   TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA,
 } = require('./config');
 
+// The longest step the simulation will take in one go. A process that was
+// paused — a laptop lid, a long GC, a debugger — comes back with a huge gap
+// since the last tick, and stepping it in one piece teleports every army and
+// pays out a minute of income at once. Clamped, the world runs slow for a
+// moment instead.
+const MAX_TICK_SEC = 1;
+
 // What a building's target id has to look like. See Match.buildingAt.
 const TILE_KEY = /^-?\d+,-?\d+$/;
+
+// ---------------------------------------------------------------------------
+// Reading a table with a key a client chose
+// ---------------------------------------------------------------------------
+//
+// `BUILDING_TYPES['__proto__']` is Object.prototype. It is truthy, so it sails
+// straight through every `if (!def) return` in this file, and what comes out
+// the other side is a building whose cost is `undefined` — so `gold -= NaN`
+// leaves that empire's gold NaN for the rest of the match — whose hp is
+// `undefined`, so nothing can ever destroy it, because every comparison
+// against NaN is false — and whose type later walks into cmdTrain and throws,
+// which with no try/catch around the socket handler took the entire process
+// down and every room on it with it. One message.
+//
+// `constructor`, `toString`, `valueOf`, `hasOwnProperty` and the rest of
+// Object.prototype do the same thing. This is the only way these tables are
+// allowed to be read with anything that came off the wire.
+function defOf(table, key) {
+  return typeof key === 'string' && Object.prototype.hasOwnProperty.call(table, key)
+    ? table[key] : undefined;
+}
+
+// A number a client sent, or null. Everything that lands in the world's state
+// goes through here: NaN and Infinity are contagious — one of either in a
+// coordinate, a price or a timer spreads through every sum it touches and never
+// washes out, and no amount of later checking gets it back.
+function finiteOr(v, fallback = null) {
+  return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+}
+
 
 function tileKey(x, y) { return `${x},${y}`; }
 
@@ -174,11 +211,11 @@ const BASE_MODS = {
 };
 
 function computeMods(player) {
-  const race = RACES[player.race] || RACES.human;
+  const race = defOf(RACES, player.race) || RACES.human;
   const mods = { ...BASE_MODS };
   for (const key in BASE_MODS) if (race[key] !== undefined) mods[key] = race[key];
   for (const id of player.cards) {
-    const card = CARDS[id];
+    const card = defOf(CARDS, id);
     if (!card || !card.mods) continue;
     for (const [key, value] of Object.entries(card.mods)) {
       // borderBonus is a reach in tiles, so it adds; everything else scales.
@@ -190,7 +227,7 @@ function computeMods(player) {
   // taken back out by recomputing this the moment its clock hits zero. Doing
   // it here rather than at the point of use is what keeps a temporary buff
   // indistinguishable from a race or a boon to everything downstream.
-  const ability = RACE_ABILITIES[player.race];
+  const ability = defOf(RACE_ABILITIES, player.race);
   if (ability && ability.mods && player.ability && player.ability.activeRemaining > 0) {
     for (const [key, value] of Object.entries(ability.mods)) mods[key] *= value;
   }
@@ -221,7 +258,14 @@ const LAID_OUT_SPACING = CASTLE.buildRadius[1] * 2 + 4;
 // opening border clear of the map edge, so this cannot push one off the map.
 const SEAT_MARGIN_Y = 12;
 
-let nextArmyId = 1;
+// Army ids used to come from a counter shared by every match in the process,
+// which made two identical matches produce different worlds — same terrain,
+// same orders, different ids, and from there a serialize() that does not
+// compare equal. That is a small thing that costs a large one: a game whose
+// outcome cannot be reproduced from the same inputs cannot be debugged from a
+// bug report, cannot be replayed, and cannot be trusted to tell you whether a
+// balance change did anything. The counter belongs to the match — see
+// Match.nextArmyId — and ids only ever have to be unique inside one.
 
 class Match {
   // `started` defaults to true because a Match is a running game — that is what
@@ -262,6 +306,9 @@ class Match {
     // "a|b" for every pair of groups whose exchange has already been resolved
     // this tick. Lives for one tick; see the top of tick().
     this.resolvedPairs = new Set();
+    // See the note where the old module-level counter used to be: this belongs
+    // to the match so that two matches given the same input are the same match.
+    this.nextArmyId = 1;
     // Who is swinging at whom this tick, and who has already been shoved into
     // position. Both are rebuilt at the top of every tick; both are empty
     // outside one, which is what makes a Match stepped by hand in a test
@@ -797,7 +844,7 @@ class Match {
   }
 
   addPlayer(id, race, name, team = null) {
-    if (!RACES[race]) race = 'human';
+    if (!defOf(RACES, race)) race = 'human';
     let seat;
     if (this.teamCount) {
       const t = this.pickTeam(team);
@@ -825,6 +872,11 @@ class Match {
       alive: true,
       buildings,
       idleUnits: emptyUnits(),
+      // Starts at zero, not at undefined. Everything that touches it copes
+      // with the gap — `(player.woundCarry || 0)` — but a field that is
+      // sometimes a number and sometimes not is a trap laid for the next
+      // person, and one of those `|| 0`s will get dropped one day.
+      woundCarry: 0,
       // Razed camps this empire has claimed; each one is a second disc it can
       // build inside.
       outposts: [],
@@ -936,7 +988,7 @@ class Match {
   }
 
   takeCard(player, cardId) {
-    const card = CARDS[cardId];
+    const card = defOf(CARDS, cardId);
     if (!card) return;
     player.cards.push(cardId);
     if (card.spell) player.spells[cardId] = (player.spells[cardId] || 0) + card.spell.charges;
@@ -1361,8 +1413,11 @@ class Match {
   cmdBuild(playerId, x, y, buildingType) {
     const player = this.players.get(playerId);
     if (!player || !player.alive) return;
-    const def = BUILDING_TYPES[buildingType];
+    const def = defOf(BUILDING_TYPES, buildingType);
     if (!def || buildingType === 'castle') return;
+    x = finiteOr(x); y = finiteOr(y);
+    if (x === null || y === null) return;
+    x = Math.round(x); y = Math.round(y);
     if (!this.canBuildAt(player, x, y)) return;
     // Walls are one tile thick wherever they come from. cmdBuildWall checks
     // this and the build palette never offers a wall, so nothing the client
@@ -1527,7 +1582,7 @@ class Match {
   // the shortest queue, and among equals the one already furthest along.
   cmdTrainUnit(playerId, unitType) {
     const player = this.players.get(playerId);
-    if (!player || !player.alive || !UNIT_TYPES[unitType]) return;
+    if (!player || !player.alive || !defOf(UNIT_TYPES, unitType)) return;
     let best = null;
     // Shortest queue first, and among equals whichever is closest to finishing
     // what it is on — that is the building that will actually get to this unit
@@ -1574,15 +1629,20 @@ class Match {
   cmdTrain(playerId, x, y, unitType) {
     const player = this.players.get(playerId);
     if (!player || !player.alive) return;
-    const plot = player.buildings[tileKey(x, y)];
+    x = finiteOr(x); y = finiteOr(y);
+    if (x === null || y === null) return;
+    const plot = player.buildings[tileKey(Math.round(x), Math.round(y))];
     if (!plot || plot.type === null || plot.underConstruction) return;
-    const buildingDef = BUILDING_TYPES[plot.type];
-    if (!buildingDef || buildingDef.trains !== unitType) return;
+    const unitDef = defOf(UNIT_TYPES, unitType);
+    const buildingDef = defOf(BUILDING_TYPES, plot.type);
+    // Both halves matter. Without the first, a unitType of undefined matched a
+    // building whose `trains` was also undefined, and the throw two lines below
+    // took the server down.
+    if (!unitDef || !buildingDef || buildingDef.trains !== unitType) return;
     // One building never holds more than the base queue on its own, and the
     // empire never queues more than its buildings between them have earned.
     if (plot.trainQueue.length >= TRAIN_QUEUE_MAX) return;
     if (this.queuedFor(player, unitType) >= this.trainCapacity(player, unitType)) return;
-    const unitDef = UNIT_TYPES[unitType];
     const race = player.mods;
     const cost = Math.round(unitDef.cost * race.costMult);
     if (player.gold < cost) return;
@@ -1597,7 +1657,7 @@ class Match {
   cmdCastSpell(playerId, cardId, x, y) {
     const player = this.players.get(playerId);
     if (!player || !player.alive) return;
-    const card = CARDS[cardId];
+    const card = defOf(CARDS, cardId);
     if (!card || !card.spell) return;
     if (!(player.spells[cardId] > 0)) return;
     x = Math.round(x); y = Math.round(y);
@@ -1820,7 +1880,7 @@ class Match {
     const player = this.players.get(playerId);
     if (!player || !player.alive) return;
     if (player.draft) return;                       // not while the hand is still being dealt
-    const ab = RACE_ABILITIES[player.race];
+    const ab = defOf(RACE_ABILITIES, player.race);
     if (!ab) return;
     if (player.ability.cooldownRemaining > 0) return;
     const use = this['ability_' + ab.id];
@@ -1862,7 +1922,7 @@ class Match {
   // will ever get.
   stepSpellRecharge(player, dt) {
     for (const cardId of player.cards) {
-      const card = CARDS[cardId];
+      const card = defOf(CARDS, cardId);
       if (!card || !card.spell) continue;
       const max = card.spell.charges;
       // A spell may set its own clock; everything without one shares the
@@ -1885,7 +1945,7 @@ class Match {
   // do the moment it lands.
   activeAbility(player) {
     if (!player || !player.ability || player.ability.activeRemaining <= 0) return null;
-    return RACE_ABILITIES[player.race] || null;
+    return defOf(RACE_ABILITIES, player.race) || null;
   }
 
   // Both halves of the ability clock. A timed ability's multipliers have to
@@ -1902,7 +1962,7 @@ class Match {
       if (state.activeRemaining <= 0) {
         state.activeRemaining = 0;
         player.mods = computeMods(player);
-        const ab = RACE_ABILITIES[player.race];
+        const ab = defOf(RACE_ABILITIES, player.race);
         if (ab) this.emit(player.id, `${ab.name} has faded.`);
       }
     }
@@ -1960,7 +2020,9 @@ class Match {
     for (const army of this.armies.values()) {
       if (army.ownerId !== player.id) continue;
       if (Math.hypot(army.x - x, army.y - y) > ab.radius) continue;
-      const missing = army.mustered - army.roster.length;
+      // Half the fallen, rounded up so a single casualty is still worth a cast.
+      // See RACE_ABILITIES.undead.raiseFraction for why it is not all of them.
+      const missing = Math.ceil((army.mustered - army.roster.length) * (ab.raiseFraction || 1));
       const hurt = armyMaxHp(army) - armyHp(army);
       if (hurt <= 0) continue;
       healed += hurt;
@@ -2313,8 +2375,8 @@ class Match {
     const units = emptyUnits();
     let any = false;
     for (const type in requested) {
-      if (!UNIT_TYPES[type]) continue;
-      const want = Math.max(0, Math.floor(requested[type] || 0));
+      if (!defOf(UNIT_TYPES, type)) continue;
+      const want = Math.max(0, Math.floor(finiteOr(requested[type], 0)));
       const have = player.idleUnits[type] || 0;
       const take = Math.min(want, have);
       if (take > 0) { units[type] = take; any = true; }
@@ -2338,7 +2400,7 @@ class Match {
   }
 
   spawnArmy(player, type, count, order, dest, targetType, targetId) {
-    const id = `army-${nextArmyId++}`;
+    const id = `army-${this.nextArmyId++}`;
     // A soldier's full health is fixed at muster, with the race and every boon
     // already folded in — so a boon drafted later does not retroactively
     // toughen troops already in the field, and the health bar of an army that
@@ -2451,6 +2513,8 @@ class Match {
   cmdDeployUnits(playerId, requestedUnits, x, y) {
     const player = this.players.get(playerId);
     if (!player || !player.alive) return;
+    x = finiteOr(x); y = finiteOr(y);
+    if (x === null || y === null) return;
     if (!this.validMoveTile(x, y)) return;
     // Troops muster inside ground you hold — your border, or an outpost you
     // have taken. Where they go *afterwards* is unrestricted (cmdMoveArmy takes
@@ -2480,6 +2544,8 @@ class Match {
   cmdMoveArmy(playerId, armyId, x, y) {
     const army = this.ownArmy(playerId, armyId);
     if (!army) return;
+    x = finiteOr(x); y = finiteOr(y);
+    if (x === null || y === null) return;
     if (!this.validMoveTile(x, y)) return;
     this.bankPlunder(army);
     army.order = 'move';
@@ -2568,6 +2634,18 @@ class Match {
 
   tick(dt) {
     if (!this.started || this.gameOver) return;
+    // NaN and Infinity are contagious in a way nothing else here is: one of
+    // either in dt spreads through every sum it touches — gold, hit points,
+    // build timers, wound carry — and never washes out, because every later
+    // comparison against NaN is false. A building at NaN hp can never be
+    // destroyed; an empire at NaN gold can never buy anything again. The world
+    // is unrecoverable and nothing says why.
+    //
+    // The server hands this a fixed TICK_MS and always has. This is here so
+    // that the day something else does not — a clock that jumps, a test, a
+    // future caller — the tick is skipped instead of the match being ruined.
+    if (!Number.isFinite(dt) || dt <= 0) return;
+    if (dt > MAX_TICK_SEC) dt = MAX_TICK_SEC;
     // Two groups fighting each other are both in 'fight' and both stepped, so
     // without this the exchange would land twice a tick. Cleared here and
     // written by stepArmyBattle, which resolves a pair once whichever of the
@@ -3221,7 +3299,7 @@ class Match {
   // gone, the bare race it was raised from is the best available answer.
   modsFor(army) {
     const owner = this.players.get(army.ownerId);
-    return owner ? owner.mods : (RACES[army.race] || RACES.human);
+    return owner ? owner.mods : (defOf(RACES, army.race) || RACES.human);
   }
 
   // Take the army's share of the beating; returns false once it has been wiped
@@ -3262,7 +3340,13 @@ class Match {
 
     const dealt = Math.min(camp.hp, outgoing);
     camp.hp -= dealt;
-    army.plunder += dealt * AI_CAMP.plunderPerDamage;
+    // A camp pays for every point of damage put into it. A shrine pays nothing
+    // — the prize is what walks out of it, and the block below says so in a
+    // comment while this line was quietly handing over four hundred gold a
+    // capture on the way past. A comment describing what the code does not do
+    // is worse than no comment, because it is the thing the next person checks
+    // instead of the code.
+    if (!camp.shrine) army.plunder += dealt * AI_CAMP.plunderPerDamage;
     if (camp.hp <= 0) {
       camp.defeated = true;
       if (camp.shrine) {
