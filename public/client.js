@@ -2001,21 +2001,35 @@ const SPELL_FLASH_COLOR = {
   revealTheHeathens: '210, 232, 255', curseOfSickness: '150, 210, 120',
   sabotageDefenses: '236, 176, 96', entangle: '116, 196, 128',
 };
+// Two layers, and they say different things. The ring is the spell's REACH — it
+// expands to exactly the radius the rules used, which is the only thing on
+// screen that tells a player how much ground they just covered. The art is what
+// it looked like, and it is capped in size (see drawSpellEffect), so on a
+// wide spell it is a mark at the centre rather than a map of the area.
+//
+// The effect lives until both have finished, or a nine-frame animation would be
+// cut off the moment the ring's nine tenths of a second ran out.
 function drawSpellFlash(fx, ts) {
   const age = clock - fx.start;
+  const kind = fx.ability || fx.kind;
   const life = 0.9;
-  if (age > life) return false;
-  const t = age / life;
-  const rgb = SPELL_FLASH_COLOR[fx.ability || fx.kind] || '255, 220, 140';
-  ctx.save();
-  ctx.strokeStyle = `rgba(${rgb}, ${(1 - t) * 0.95})`;
-  ctx.fillStyle = `rgba(${rgb}, ${(1 - t) * 0.22})`;
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.arc(fx.x * ts, fx.y * ts, fx.radius * ts * (0.35 + t * 0.9), 0, Math.PI * 2);
-  ctx.fill(); ctx.stroke();
-  ctx.restore();
-  return true;
+  let alive = false;
+
+  if (age <= life) {
+    const t = age / life;
+    const rgb = SPELL_FLASH_COLOR[kind] || '255, 220, 140';
+    ctx.save();
+    ctx.strokeStyle = `rgba(${rgb}, ${(1 - t) * 0.95})`;
+    ctx.fillStyle = `rgba(${rgb}, ${(1 - t) * 0.22})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(fx.x * ts, fx.y * ts, fx.radius * ts * (0.35 + t * 0.9), 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+    alive = true;
+  }
+  if (Sprites.drawSpellEffect(ctx, kind, fx.x * ts, fx.y * ts, fx.radius, age)) alive = true;
+  return alive;
 }
 
 function drawHpBar(x, y, w, hp, maxHp, color) {

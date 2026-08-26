@@ -2484,6 +2484,36 @@
     13,
     -3
    ]
+  },
+  "spells": {
+   "meteor": {
+    "file": "fx/spell-meteor.png",
+    "frames": 8,
+    "w": 192,
+    "h": 186,
+    "fps": 11
+   },
+   "revealTheHeathens": {
+    "file": "fx/spell-revealTheHeathens.png",
+    "frames": 8,
+    "w": 176,
+    "h": 192,
+    "fps": 11
+   },
+   "curseOfSickness": {
+    "file": "fx/spell-curseOfSickness.png",
+    "frames": 9,
+    "w": 173,
+    "h": 192,
+    "fps": 11
+   },
+   "sabotageDefenses": {
+    "file": "fx/spell-sabotageDefenses.png",
+    "frames": 8,
+    "w": 172,
+    "h": 192,
+    "fps": 11
+   }
   }
  },
  "ui": {

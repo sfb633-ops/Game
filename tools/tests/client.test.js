@@ -288,5 +288,44 @@ if (geomStart > 0 && geomEnd > geomStart) {
   check('  and it is checked before buildings are', keepAt > 0 && keepAt < buildingsAt);
 }
 
+// ---------------------------------------------------------------------------
+// Spell effects
+//
+// Two things rot here. The manifest can name a strip that was never written —
+// the effect then silently does nothing, because drawSpellEffect gives up when
+// the image is not ready and the ring underneath covers for it. And the colour
+// table can keep an entry for a spell that has been renamed or cut, which
+// nobody notices because a stale key simply never matches.
+{
+  const manifest = JSON.parse(fs.readFileSync(path.join(SRC, 'assets', 'manifest.json'), 'utf8'));
+  const cfg = require('../../config.js');
+  const fx = (manifest.fx && manifest.fx.spells) || {};
+
+  const missing = Object.keys(fx).filter(k => !fs.existsSync(path.join(SRC, 'assets', fx[k].file)));
+  check('every spell effect strip the manifest names was actually built',
+    missing.length === 0, missing.join(', ') || `${Object.keys(fx).length} effects`);
+
+  const abilityIds = new Set(Object.values(cfg.RACE_ABILITIES).map(a => a.id));
+  const orphan = Object.keys(fx).filter(k => !cfg.CARDS[k] && !abilityIds.has(k));
+  check('  and each one belongs to a spell that still exists',
+    orphan.length === 0, orphan.join(', ') || 'all accounted for');
+
+  // A strip has to be a whole number of frames wide, or every frame after the
+  // first is drawn off by a fraction and the animation crawls sideways.
+  const ragged = Object.entries(fx).filter(([, d]) => !d.frames || !d.w || !d.fps);
+  check('  and each says how many frames it has and how fast to play them',
+    ragged.length === 0, ragged.map(r => r[0]).join(', ') || 'all complete');
+
+  const table = client.match(/const SPELL_FLASH_COLOR = \{([\s\S]*?)\n\};/);
+  check('the spell colour table is where the test expects it', !!table);
+  if (table) {
+    const keys = [...table[1].matchAll(/(\w+)\s*:/g)].map(m => m[1]);
+    const known = new Set([...Object.keys(cfg.CARDS), ...abilityIds]);
+    const stale = keys.filter(k => !known.has(k));
+    check('  and it colours nothing that has been renamed or cut',
+      stale.length === 0, stale.join(', ') || `${keys.length} entries`);
+  }
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall client checks pass');
 process.exit(failures ? 1 : 0);

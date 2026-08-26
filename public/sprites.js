@@ -471,6 +471,51 @@ const Sprites = (function () {
   }
 
 
+  // How far past its own size a spell's art may be stretched. Pixel art three
+  // times up is a staircase; a little over one is fine.
+  const FX_ZOOM_MAX = 1.5;
+
+  // What a spell looks like where it landed. One strip per effect, played once.
+  //
+  // Sized off the spell's own radius, so a meteor that cracks two and a bit
+  // tiles looks like two and a bit — but never blown up more than FX_ZOOM_MAX
+  // past the art's own size. Without that cap, Reveal the Heathens covers a
+  // radius of thirteen and draws a twenty-six-tile eyeball, upscaled nearly
+  // five times: it fills the screen, buries everything under it, and is a
+  // staircase of enormous pixels. Rendering it and looking is the only way that
+  // was ever going to be obvious.
+  //
+  // Past the cap the art stops being a map of the area and becomes a mark at
+  // the centre of it. The ring the caller draws underneath is what says how far
+  // the spell actually reached.
+  //
+  // Returns false when there is no art for this kind — several effects
+  // (terraform, entangle, the race abilities) have no sheet and are not meant
+  // to.
+  function drawSpellEffect(ctx, kind, worldX, worldY, tiles, age) {
+    const set = manifest.fx && manifest.fx.spells;
+    const fx = set && set[kind];
+    if (!fx || !ready(fx.file)) return false;
+    const life = fx.frames / fx.fps;
+    const t = age / life;
+    if (!(t >= 0) || t >= 1) return false;
+    const frame = Math.min(fx.frames - 1, Math.floor(t * fx.frames));
+    // Fit the art's longest side across the spell's diameter, keeping aspect,
+    // and never magnify it past FX_ZOOM_MAX.
+    const span = Math.max(tiles * 2 * TILE(), TILE());
+    const native = Math.max(fx.w, fx.h);
+    const k = Math.min(span, native * FX_ZOOM_MAX) / native;
+    const w = fx.w * k, h = fx.h * k;
+    ctx.save();
+    // Held solid for most of the run, then faded out over the last quarter, so
+    // the animation ends rather than being cut off mid-frame.
+    ctx.globalAlpha = t < 0.75 ? 1 : Math.max(0, 1 - (t - 0.75) / 0.25);
+    ctx.drawImage(get(fx.file), frame * fx.w, 0, fx.w, fx.h,
+      Math.round(worldX - w / 2), Math.round(worldY - h / 2), Math.round(w), Math.round(h));
+    ctx.restore();
+    return true;
+  }
+
   return {
     load,
     drawTowerArcher,
@@ -483,5 +528,6 @@ const Sprites = (function () {
     drawBuilding, drawBanner, buildingDef, drawWall, groundShadow,
     drawUnit, drawArmy,
     drawSmoke,
+    drawSpellEffect,
   };
 })();

@@ -29,6 +29,8 @@ const UI = path.join(SRC, 'UI', '9-Slice');
 const DARKAGES = path.join(SRC, 'DarkAgesUi_v1.0', '32x32-Tilesheet.png');
 // Purpose-drawn elves, replacing the recoloured MiniWorldSprites ones.
 const ELVES = path.join(SRC, 'Elves', 'elves.png');
+// What a spell looks like when it lands.
+const SPELL_FX_DIR = path.join(SRC, 'Spell Effects');
 // Faces for the draft. Boons are tarot arcana, spells are spellbook tomes.
 const TAROT = path.join(SRC, 'Tarot Cards [Free]', 'Tarot Cards [Free]', 'Tarot_Original', '1X');
 const TOMES = path.join(SRC, 'SpellBooks', 'TomesMaster32.png');
@@ -1413,6 +1415,149 @@ function buildArrows() {
 // Effects
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// What a spell looks like when it lands
+// ---------------------------------------------------------------------------
+//
+// Each of these is one animation laid out as a grid of frames on a transparent
+// ground. The grids are NOT all the same and are not guessable from the file
+// size — the plague is three by three in a square sheet, the rest are four by
+// two in a wide one — so each says its own shape here rather than one clever
+// rule trying to cover them all.
+//
+// A gutter-finder was tried first and does not work: on three of the four
+// sheets the glow and the flung debris of one frame reach into its neighbour's
+// column, so there is no empty band to find and the whole sheet reads as a
+// single frame. Where the frames touch, the layout has to be declared.
+//
+// Every frame is cut to ONE box, measured across the whole animation, so the
+// effect does not jump about while it plays. Then the lot is brought down to
+// FX_MAX px on its longest side: the source is around 350px a frame, the game
+// draws a 2.3-tile meteor about 150px wide at 1x, and the most anyone can zoom
+// to is 3x — so this is comfortably enough to stay sharp and a fifth of the
+// bytes.
+const SPELL_FX = {
+  meteor:            { file: 'Meteor spell.png',     cols: 4, rows: 2 },
+  revealTheHeathens: { file: 'eye spell.png',        cols: 4, rows: 2 },
+  curseOfSickness:   { file: 'Plague Spell.png',     cols: 3, rows: 3 },
+  sabotageDefenses:  { file: 'Earthquake spell.png', cols: 4, rows: 2 },
+};
+const FX_MAX = 192;
+const FX_FPS = 11;
+
+// Three of the four sheets arrived fully opaque — the meteor on white, the eye
+// and the earthquake on a grey checkerboard — so the background has to be
+// lifted off before any of it is usable.
+//
+// Keying by colour alone does not work here: the white-hot core of the meteor's
+// explosion is the same white as the ground it is drawn on, and a colour key
+// eats it. So the fill is flooded in from the EDGES of each frame. Only
+// background connected to the outside is removed and anything the artwork
+// encloses survives, which is what saves the core.
+//
+// Per frame rather than per sheet, because the sheets have faint divider lines
+// ruled between the cells: keyed whole, those lines are interior and stay, and
+// every effect drags a grey cross around with it.
+//
+// Between `FX_KEY_IN` and `FX_KEY_OUT` the alpha ramps rather than switching,
+// so the meteor's glow fades out instead of ending on a hard rim.
+const FX_KEY_IN = 16, FX_KEY_OUT = 60;
+
+function fxBackgroundColours(img, ring = 2, tol = 14) {
+  const seen = [];
+  const consider = (x, y) => {
+    const o = (y * img.width + x) * 4;
+    if (img.data[o + 3] === 0) return;
+    const c = [img.data[o], img.data[o + 1], img.data[o + 2]];
+    for (const s of seen) {
+      if (Math.abs(s[0] - c[0]) <= tol && Math.abs(s[1] - c[1]) <= tol && Math.abs(s[2] - c[2]) <= tol) {
+        s[3]++; return;
+      }
+    }
+    seen.push([c[0], c[1], c[2], 1]);
+  };
+  for (let x = 0; x < img.width; x++) for (let r = 0; r < ring; r++) { consider(x, r); consider(x, img.height - 1 - r); }
+  for (let y = 0; y < img.height; y++) for (let r = 0; r < ring; r++) { consider(r, y); consider(img.width - 1 - r, y); }
+  const edge = 2 * (img.width + img.height) * ring;
+  return seen.filter(s => s[3] > edge * 0.02).map(s => [s[0], s[1], s[2]]);
+}
+
+function fxKeyOut(img) {
+  const bg = fxBackgroundColours(img);
+  if (!bg.length) return img;
+  const dist = (r, g, b) => {
+    let best = Infinity;
+    for (const c of bg) {
+      const d = Math.max(Math.abs(c[0] - r), Math.abs(c[1] - g), Math.abs(c[2] - b));
+      if (d < best) best = d;
+    }
+    return best;
+  };
+  const W = img.width, H = img.height;
+  const out = { width: W, height: H, data: Buffer.from(img.data) };
+  const seen = new Uint8Array(W * H);
+  const queue = new Int32Array(W * H);
+  let head = 0, tail = 0;
+  const push = (i) => { if (!seen[i]) { seen[i] = 1; queue[tail++] = i; } };
+  for (let x = 0; x < W; x++) { push(x); push((H - 1) * W + x); }
+  for (let y = 0; y < H; y++) { push(y * W); push(y * W + W - 1); }
+  while (head < tail) {
+    const i = queue[head++];
+    const o = i * 4;
+    const d = dist(out.data[o], out.data[o + 1], out.data[o + 2]);
+    if (d >= FX_KEY_OUT) continue;                   // artwork: the flood stops
+    out.data[o + 3] = d <= FX_KEY_IN ? 0
+      : Math.round(255 * (d - FX_KEY_IN) / (FX_KEY_OUT - FX_KEY_IN));
+    const x = i % W, y = (i - x) / W;
+    if (x > 0) push(i - 1);
+    if (x < W - 1) push(i + 1);
+    if (y > 0) push(i - W);
+    if (y < H - 1) push(i + W);
+  }
+  return out;
+}
+
+function buildSpellFx() {
+  const out = {};
+  for (const [kind, def] of Object.entries(SPELL_FX)) {
+    const full = path.join(SPELL_FX_DIR, def.file);
+    if (!fs.existsSync(full)) {
+      console.log(`  fx/${kind}: ${def.file} not found, skipped`);
+      continue;
+    }
+    const sheet = decodePNG(full);
+    // Boundaries by proportion, not by a fixed cell size: the plague sheet is
+    // 1024 across three columns, which does not divide.
+    const cut = (i, n, total) => Math.round(i * total / n);
+    const frames = [];
+    for (let r = 0; r < def.rows; r++) {
+      for (let c = 0; c < def.cols; c++) {
+        const x0 = cut(c, def.cols, sheet.width), x1 = cut(c + 1, def.cols, sheet.width);
+        const y0 = cut(r, def.rows, sheet.height), y1 = cut(r + 1, def.rows, sheet.height);
+        frames.push(fxKeyOut(ops.crop(sheet, x0, y0, x1 - x0, y1 - y0)));
+      }
+    }
+    // One box across every frame, so the animation is registered.
+    let box = null;
+    for (const f of frames) box = ops.unionBox(box, ops.bbox(f));
+    if (!box) { console.log(`  fx/${kind}: nothing drawn in it, skipped`); continue; }
+    const w = box.x1 - box.x0 + 1, h = box.y1 - box.y0 + 1;
+    const k = Math.min(1, FX_MAX / Math.max(w, h));
+    const fw = Math.max(1, Math.round(w * k)), fh = Math.max(1, Math.round(h * k));
+
+    const strip = ops.blank(fw * frames.length, fh);
+    frames.forEach((f, i) => {
+      ops.blit(strip, ops.resize(ops.crop(f, box.x0, box.y0, w, h), fw, fh), i * fw, 0);
+    });
+    out[kind] = {
+      file: write(strip, 'fx', `spell-${kind}.png`),
+      frames: frames.length, w: fw, h: fh, fps: FX_FPS,
+    };
+    console.log(`  fx/${kind}: ${frames.length} frames at ${fw}x${fh}`);
+  }
+  return out;
+}
+
 function buildFx() {
   const SIZE = 64, N = 10;
   const strip = ops.blank(SIZE * N, SIZE);
@@ -1422,6 +1567,7 @@ function buildFx() {
   }
   manifest.fx.smoke = { file: write(strip, 'fx', 'smoke.png'), frames: N, size: SIZE, fps: 20 };
   manifest.fx.arrow = buildArrows();
+  manifest.fx.spells = buildSpellFx();
 }
 
 // ---------------------------------------------------------------------------

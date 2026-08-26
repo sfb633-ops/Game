@@ -2648,6 +2648,57 @@ looking for frame numbers does not fail by crashing, it fails by producing one
 empty row — a unit that is invisible while it happens to be facing left.
 Blanking a row by hand makes the check fail with `elf/swordsman/walk/left`.
 
+### Spell effects
+
+Four hand-drawn animations, one per spell: meteor, the eye for Reveal the
+Heathens, the plague ring for Curse of Sickness, and the cracking ground for
+Sabotage Defenses. Three things about the source were not what they looked
+like, and each cost a rebuild to find.
+
+**The grids are not the same and are not guessable.** The plague is three by
+three in a square sheet; the rest are four by two in a wide one. A
+gutter-finder was written first and does not work at all: on three of the four
+the glow and flung debris of one frame reach into the next column, so there is
+no empty band and the whole sheet reads as a single frame. Where frames touch,
+the layout has to be declared — `SPELL_FX` does.
+
+**Three of the four arrived fully opaque.** The meteor is on white, the eye and
+the earthquake on a grey checkerboard — background baked into the pixels, not
+alpha. Keying by colour alone eats the white-hot core of the explosion, which
+is the same white as the ground it sits on. So `fxKeyOut` floods in from the
+edges of each frame: only background connected to the outside is removed, and
+anything the artwork encloses survives. Per frame rather than per sheet,
+because the sheets have faint divider lines ruled between the cells — keyed
+whole, those are interior and stay, and every effect drags a grey cross around
+with it.
+
+**Sizing to the radius alone is wrong at the top end.** The first version fitted
+each animation across the spell's diameter, which is right for a meteor at 2.3
+tiles and absurd for Reveal the Heathens at 13: a twenty-six-tile eyeball,
+upscaled nearly five times, filling the screen as a staircase of enormous
+pixels. `FX_ZOOM_MAX` caps the magnification at 1.5x, past which the art stops
+being a map of the area and becomes a mark at the centre of it.
+
+So the two layers say different things, and both are drawn: **the ring is the
+reach** — it expands to exactly the radius the rules used, and is the only
+thing on screen that tells a player how much ground they covered — and **the
+art is what it looked like**. The effect lives until both have finished, or a
+nine-frame animation is cut off the moment the ring's 0.9s runs out.
+
+None of the three would have been found by reading. All three came out of
+building it, rendering it through the real Sprites module in a real browser,
+and looking — see `tools/shoot-ui.js` for the same trick on the interface.
+
+One wrinkle worth knowing for next time: the shooter has to load over the
+game's own server, not from a file. `Sprites.load` fetches the manifest, and
+fetch is blocked on file:// by CORS. That failure looks like a perfectly black
+screenshot and no error at all.
+
+**Weight.** The four strips are about 1.1MB of the 2.1MB the game ships. That is
+a one-time cached cost and it is the single biggest lever in the asset
+pipeline: `FX_MAX` (192) is the pixel size each frame is stored at, and
+dropping it is a straight trade of sharpness at high zoom for bytes.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no
