@@ -102,6 +102,33 @@ const TROOP_ICON_W = 36, TROOP_ICON_H = 54;
 const TROOP_ICON_BASE = 51;   // where the feet go inside that box
 const armyFacing = {};     // armyId -> last known facing, so idle troops keep it
 const armyPrev = {};       // armyId -> {x, y} from the previous state message
+
+// The server thinks five times a second and says so five times a second; the
+// canvas draws sixty. Reading a group's position straight off the last message
+// therefore moved it in five jumps a second — a knight covers a fifth of a tile
+// a tick, so troops crossing open country hopped six pixels at a time and no
+// amount of walk animation made that read as walking. It is the single loudest
+// thing about the way the marching looked.
+//
+// So the drawn position chases the reported one instead of being it. Each
+// message opens a segment from wherever the group is *drawn* right now to where
+// the server says it is, to be covered over one broadcast interval; the frame
+// loop walks along it. Starting from the drawn position rather than from the
+// previously reported one is what keeps it continuous — a message that arrives
+// late or early bends the segment instead of snapping it, and a dropped one is
+// simply a longer stride.
+//
+// The price is that a group is drawn one interval behind the truth. That is a
+// fifth of a second, it is the standard price for this, and it is paid by
+// everything downstream — badges, health bars, click targeting — so what you
+// click on is still what you can see.
+const armySmooth = new Map();  // armyId -> { x, y, fromX, fromY, toX, toY, t0, t1 }
+let stateGap = 0.2;            // measured seconds between broadcasts
+let lastStateAt = 0;
+// Further than any group can march in a tick: a deployment, a merge, or a group
+// coming into view for the first time. Sliding a sprite across the map for a
+// fifth of a second would be a lie about where it has been.
+const SMOOTH_SNAP = 3;
 let effects = [];          // transient smoke puffs: { x, y, start, scale, life }
 let spellFlash = [];       // one-shot rings where a spell landed
 let arrows = [];           // tower shots in flight
@@ -554,6 +581,8 @@ function onInit(msg) {
   showLobby(msg.started === false);
   lobbyHostId = msg.hostId || null;
   seenBuildings.clear();
+  armySmooth.clear();
+  lastStateAt = 0;
   buildingPop.clear();
   lastBuildings.clear();
   buildingsPrimed = false;
@@ -1528,6 +1557,7 @@ function isMyBuildable(tx, ty, occupied) {
 
 function render() {
   if (!latestState) return;
+  smoothArmies();
   if (!terrainCanvas) {
     // Art still loading: paint the backdrop so the pane isn't a white flash.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -3239,6 +3269,44 @@ function trackBuildings(msg) {
 
 // Update the facing each army's sprites should use, and kick off a smoke puff
 // wherever an army vanished — which, in this game, means it just fought.
+// Open a fresh interpolation segment for every group in this broadcast. Runs
+// before anything overwrites the reported positions, so the figures read here
+// are the server's own — see armySmooth.
+function trackSmoothing(msg) {
+  if (lastStateAt) {
+    const gap = clock - lastStateAt;
+    // A backgrounded tab and two messages inside one frame are both nonsense to
+    // measure a cadence from; everything else eases the running figure along.
+    if (gap > 0.02 && gap < 1) stateGap += (gap - stateGap) * 0.25;
+  }
+  lastStateAt = clock;
+  for (const a of msg.armies) {
+    const s = armySmooth.get(a.id);
+    if (!s || Math.hypot(a.x - s.x, a.y - s.y) > SMOOTH_SNAP) {
+      armySmooth.set(a.id, { x: a.x, y: a.y, fromX: a.x, fromY: a.y, toX: a.x, toY: a.y, t0: clock, t1: clock });
+      continue;
+    }
+    s.fromX = s.x; s.fromY = s.y;
+    s.toX = a.x; s.toY = a.y;
+    s.t0 = clock; s.t1 = clock + stateGap;
+  }
+}
+
+// Walk each group along its current segment and write the result back onto the
+// state the rest of the frame reads.
+function smoothArmies() {
+  if (!latestState) return;
+  for (const a of latestState.armies) {
+    const s = armySmooth.get(a.id);
+    if (!s) continue;
+    const span = s.t1 - s.t0;
+    const k = span > 1e-6 ? Math.min(1, Math.max(0, (clock - s.t0) / span)) : 1;
+    s.x = s.fromX + (s.toX - s.fromX) * k;
+    s.y = s.fromY + (s.toY - s.fromY) * k;
+    a.x = s.x; a.y = s.y;
+  }
+}
+
 function trackArmies(msg) {
   const ts = mapCfg ? mapCfg.tileSize : 32;
   const live = new Set();
@@ -3282,6 +3350,7 @@ function trackArmies(msg) {
       effects.push({ x: last.x * ts, y: last.y * ts, start: clock, scale: 0.8, life: 0.5 });
     }
     delete armyPrev[id];
+    armySmooth.delete(id);
     delete armyFacing[id];
     seenArmies.delete(id);
   }
@@ -3307,6 +3376,7 @@ function onState(msg) {
   // any state at all is the signal that the wait is over — no separate
   // handshake, and a late joiner is covered by exactly the same rule.
   if (inLobby) showLobby(false);
+  trackSmoothing(msg);
   trackArmies(msg);
   trackBuildings(msg);
   if (msg.events) {

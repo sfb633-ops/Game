@@ -66,6 +66,21 @@ for (const [fn, where, source] of [
   check(`${where} calls ${fn}`, source.includes(`${fn}(`));
 }
 
+// The server thinks five times a second; the canvas draws sixty. Two calls hold
+// the interpolation that bridges the gap, and the order of them is the whole
+// trick: trackSmoothing has to read the positions the server reported, and
+// smoothArmies overwrites those positions with the drawn ones. Swap them, or
+// lose either call, and troops go back to hopping across the map — which
+// nothing else in the client, and no rule test, would notice.
+check('onState opens a smoothing segment before it tracks anything else',
+  state.indexOf('trackSmoothing(') >= 0 &&
+  state.indexOf('trackSmoothing(') < state.indexOf('latestState = msg'));
+check('  and render walks the groups along it every frame',
+  bodyOf('render').includes('smoothArmies('));
+check('  from the reported positions, not the drawn ones',
+  bodyOf('trackSmoothing').includes('msg.armies') &&
+  !bodyOf('trackSmoothing').includes('latestState'));
+
 // Elements the client reaches for by id have to exist in the page.
 const html = fs.readFileSync(path.join(SRC, 'index.html'), 'utf8');
 const ids = new Set([...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]));
