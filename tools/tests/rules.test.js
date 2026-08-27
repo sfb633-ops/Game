@@ -3733,5 +3733,75 @@ function fightOut(m, ours, theirs) {
     worst <= 1.001, `worst tick was ${worst.toFixed(2)}x walking pace`);
 }
 
+// --- routes come back taut, and still legal ------------------------------
+//
+// The search is four-connected, so it can only turn right angles: left to
+// itself a route round a ridge is a flight of stairs, and the march walks every
+// step of it. Two properties are pinned rather than a shape, because the shape
+// depends on the map roll.
+//
+//   Legal: every leg of the route crosses ground the army could actually walk.
+//   Taut:  no corner survives that the leg before it could already see past.
+//
+// The second is what makes the marching read as marching. It is also the one
+// that can quietly stop working — smoothing is easy to defeat by accident with
+// an over-strict blocking test, and nothing else in the game would notice.
+{
+  const maps = ['lakelands', 'highlands', 'crossroads'];
+  let sampled = 0, illegal = 0, slack = 0, turnsAfter = 0;
+  for (const map of maps) {
+    const m = new Match({ map });
+    const p = m.addPlayer('a', 'human', 'A');
+    p.draft = null;
+    const headings = (rt) => {
+      const out = []; let px = p.baseX, py = p.baseY;
+      for (const w of rt) { out.push(Math.atan2(w.y - py, w.x - px)); px = w.x; py = w.y; }
+      let n = 0;
+      for (let k = 1; k < out.length; k++) {
+        let d = Math.abs(out[k] - out[k - 1]);
+        if (d > Math.PI) d = 2 * Math.PI - d;
+        if (d > 0.15) n++;
+      }
+      return n;
+    };
+    for (let i = 0; i < 400 && sampled < 30 * maps.length; i++) {
+      const dx = Math.floor(Math.random() * cfg.MAP.width);
+      const dy = Math.floor(Math.random() * cfg.MAP.height);
+      const army = { id: 'probe', ownerId: 'a', x: p.baseX, y: p.baseY, destX: dx, destY: dy, roster: [10], type: 'swordsman' };
+      if (!m.validMoveTile(dx, dy) || !m.pathBlocked(army, dx, dy)) continue;
+      const route = m.findRoute(army, dx, dy);
+      if (!route) continue;
+      sampled++;
+      // Legal: walk every leg the way the march walks it.
+      let px = army.x, py = army.y;
+      for (const w of route) {
+        const d = Math.hypot(w.x - px, w.y - py), n = Math.max(1, Math.ceil(d * 8));
+        for (let s = 1; s <= n; s++) {
+          const qx = px + (w.x - px) * s / n, qy = py + (w.y - py) * s / n;
+          // The destination is always enterable — a keep behind a wall is still
+          // the thing the army was sent to — so the last tile is exempt.
+          if (Math.round(qx) === dx && Math.round(qy) === dy) continue;
+          if (!m.validMoveTile(Math.round(qx), Math.round(qy))) { illegal++; s = n; }
+        }
+        px = w.x; py = w.y;
+      }
+      // Taut: a corner is only kept because the line past it is blocked.
+      px = army.x; py = army.y;
+      for (let k = 0; k + 1 < route.length; k++) {
+        const skip = { id: 'probe', ownerId: 'a', x: px, y: py, roster: [10], type: 'swordsman' };
+        if (!m.pathBlocked(skip, route[k + 1].x, route[k + 1].y)) slack++;
+        px = route[k].x; py = route[k].y;
+      }
+      turnsAfter += headings(route);
+    }
+  }
+  check('a planned route never crosses ground the army cannot walk',
+    illegal === 0, `${illegal} illegal legs over ${sampled} routes`);
+  check('  and it comes back taut — no corner it could have seen past',
+    slack === 0, `${slack} needless corners over ${sampled} routes`);
+  check('  which is what keeps a detour from being a flight of stairs',
+    sampled > 0 && turnsAfter / sampled < 12, `${(turnsAfter / sampled).toFixed(1)} heading changes a march`);
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');
 process.exit(failures ? 1 : 0);
