@@ -2878,6 +2878,102 @@ stonework from `art`, and each camp carries its own `kind` on the wire. A shrine
 whose kind the client does not recognise falls back to the first one's art
 rather than drawing nothing.
 
+### Making the marching look like marching (27 Aug 2026)
+
+The brief was that unit pathing did not feel natural. It was two separate
+faults, one on each side of the wire, and each is worth knowing about on its own
+because either alone still looks wrong.
+
+**The route was a flight of stairs.** `findRoute` is breadth-first over a
+four-connected grid, so it can only turn right angles, and `simplifyRoute` only
+ever merged runs that were already in a line. A detour that ought to have been
+one clean diagonal therefore came back as a literal staircase, and the walk
+followed every step of it. Measured before the fix, over forty blocked marches a
+map:
+
+| map | heading changes a march | distance vs the crow's flight |
+|---|---|---|
+| Highlands | 28.2 (worst 67) | 1.51x |
+| Crossroads | 16.6 | 1.33x |
+| Lakelands | 16.0 | 1.32x |
+| Open Field | 2.3 | 1.27x |
+
+`pullTaut` fixes it by string-pulling: walk the corner list keeping an anchor,
+and drop every corner the anchor can already see past, repeated until nothing
+more comes out. Highlands is now 9.3 changes and 1.32x, Lakelands 2.9 and 1.17x.
+
+Two things make this safe rather than a corner-cutting bug waiting to happen.
+The first is that a segment is only accepted if `forEachTileOnLine` finds every
+tile under it clear — and that is the same walker the march itself uses, stepping
+one axis at a time, so the tiles it names are exactly the tiles the group will
+round onto. A diagonal line of wall still seals. The second is that the search
+and the pull now ask the same question, `routeBlocked`, instead of each keeping
+its own copy of what counts as impassable; two copies of that rule drifting apart
+is precisely how a route gets planned across ground the walk then refuses.
+
+Buildings get a tile of berth that terrain does not (`buildingNear`). Shorelines
+and cliffs may be hugged — troops filing along the water's edge is what a taut
+route is supposed to look like — but a group is wider than the tile its middle
+stands on, so a line drawn along the very edge of a bank walks the sprites
+through the wall of it. The first taut routes did exactly that, closing to 0.6
+tiles of a building the march had not been sent to touch, and the existing
+regression pin caught it. The berth can only ever be spent by keeping a corner
+the search had already found, so a one-tile gap between two banks is still
+threaded — just not smoothed through.
+
+Side effect worth knowing: **detours are about 11% quicker** (27.3s to 24.3s over
+48 measured marches). The staircase was an artefact, not a design choice, so this
+is a correction rather than a buff — but it does make a flank across rough ground
+cheaper than it was, and if the maps ever feel too small that is one of the
+reasons.
+
+**The motion was five frames a second.** `TICK_MS` is 200 and the server
+broadcasts once a tick, and the client read `a.x` straight off the last message.
+So the canvas drew at sixty and the troops moved at five: a knight covers a fifth
+of a tile a tick, which is a nineteen-pixel hop, and no amount of walk animation
+makes that read as walking. This is the louder half of the complaint and it is
+invisible to every rules test, because nothing about it is a rule.
+
+`trackSmoothing` / `smoothArmies` in the client fix it. Each message opens a
+segment from wherever the group is *drawn* right now to where the server says it
+is, to be covered over one broadcast interval; the frame loop walks along it.
+Starting from the drawn position rather than from the previously reported one is
+what keeps it continuous — a message that arrives late or early bends the segment
+instead of snapping it, and a dropped one is simply a longer stride. Measured by
+driving the real functions over a simulated feed: the biggest frame-to-frame jump
+falls from 0.6 tiles to 0.0595, the drawn position sits 0.22s behind the truth
+(one interval, which is the standard price), and it settles exactly on the true
+position when a group halts. Anything further than `SMOOTH_SNAP` (3 tiles) snaps
+instead — a deployment, a merge, or a group coming into view.
+
+Two ordering rules matter and both are pinned in `client.test.js`, because
+nothing else would notice if they broke:
+
+- `trackSmoothing` must run inside `onState` **before** `latestState = msg`, and
+  must read `msg.armies`. It needs the positions the server reported.
+- `smoothArmies` must run at the top of `render`, and it *overwrites* `a.x`/`a.y`
+  on the state object with the drawn values. That is deliberate: everything
+  downstream — badges, health bars, vision circles, click targeting — then reads
+  the same figures, so what you click on is what you can see. `armyPrev` and the
+  facing are unaffected because `trackArmies` also runs at message time.
+
+**What was measured and deliberately left alone.** The sidestep round an enemy
+group (`AVOID_TURNS`) does not wobble: a column marched 44.8 tiles past a picket
+of five enemy groups and changed heading three times, so it did not get the
+hysteresis I had planned for it. And the walk still spends at most one route leg
+a tick, so a group loses a fraction of a tick at each corner — that was worth
+about 8% when routes had thirty corners and is worth 2.2% now that they have
+nine, which does not justify restructuring a loop that also carries the breach,
+the shoreline slide and the sidestep.
+
+**What the tests now hold.** `rules.test.js` pins the two properties rather than
+a shape, because the shape depends on the map roll: every leg of a planned route
+crosses ground the army could actually walk, and no corner survives that the leg
+before it could already see past. The second is the one that can quietly stop
+working — smoothing is easy to defeat by accident with an over-strict blocking
+test, and it is why `pullTaut` sweeps to convergence instead of stopping at two
+passes. 150 long marches over maze ground all arrived, none stranded.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

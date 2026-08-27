@@ -262,7 +262,9 @@ sprite anchors and layering can be eyeballed as a PNG.
   line crosses a lake goes the long way instead, the same as it does around a
   wall; somewhere there is genuinely no path to, they stop and say so rather
   than swimming. Sealing a keep in still only buys you the time it takes to
-  batter the wall down.
+  batter the wall down. The way round is a taut line and not a staircase — a
+  column skirting a ridge takes the diagonal a person would take, and keeps a
+  body's width off anything built.
 - **Every map is drawn in the lobby**, with the starting positions marked. The
   picture is a sample of what that map makes rather than the one you are about
   to play — those are generated fresh for every match — but it is built by the
