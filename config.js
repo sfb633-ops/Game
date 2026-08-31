@@ -10,7 +10,18 @@ const MAP = {
   height: 160,
   // Pixels per tile at 1x zoom. Matches the native cell size of the tilesets
   // and character sheets in public/assets, so art draws 1:1 with no resampling.
-  tileSize: 32,
+  //
+  // 48 because that is what the Winlu exterior set is drawn at, and terrain is
+  // the one layer that cannot be rescaled without showing it — resampling an
+  // autotile fringes every seam. The sprite packs are on a 16px grid and reach
+  // 48 by a whole-pixel x3 (MINI_SCALE in tools/build-assets.js), so nothing
+  // else is resampled either.
+  //
+  // This number must agree with `tileSize` in public/assets/manifest.json:
+  // the client takes world geometry from this one and sprite scale from that
+  // one, and a mismatch draws correctly sized art in the wrong places. Both
+  // come from TILE in tools/build-assets.js, so change it there and rebuild.
+  tileSize: 48,
   // Starting positions are chosen and cleared when the map is generated, not
   // when players arrive, so the terrain every client is sent stays fixed for
   // the whole match. That fixes how many empires a map can seat.
@@ -48,51 +59,72 @@ const MAP = {
 // out rather than guessed at afterwards from coordinates. With sides on, the
 // map's own layout is overridden by Match.teamSeatTargets, and `group` there is
 // the team; in a free-for-all it only shapes how The Divide hands out seats.
+// Mountain coverage is now the fraction of the map that is impassable rock,
+// set directly — see Match.growRanges. It used to be `mountainFill`, the
+// probability of seeding a tile before smoothing, and that number lied: the
+// smoothing threshold sat on a knife edge, so 0.34 produced 0.8% of the map,
+// 0.42 produced 8%, 0.52 produced 34%, and 0.18 produced nothing whatsoever.
+// The figures below are what each map ACTUALLY had, measured, so nothing about
+// how they play changes — except Lakelands, which was getting 0.8% against a
+// blurb that promises ridges, and now gets a little of what it advertises.
+//
+// Open Field is deliberately zero and must stay zero. Its blurb is literal, and
+// the mirrored-fight invariants in tools/tests are run on it: two identical
+// sides have to reach a draw, which they cannot do if there is unmirrored rock
+// between them. It came out at zero by accident of the old threshold; it is
+// zero on purpose now.
 const MAPS = {
   wilds: {
     name: 'The Wilds',
     blurb: 'Open country. Lakes and ridges wherever they fell, empires wherever they fit.',
     seats: 'scatter',
     lakeCount: 34, lakeSize: [60, 200],
-    mountainFill: 0.42,
+    mountainCover: 0.08,
   },
   lakelands: {
     name: 'Lakelands',
     blurb: 'Water everywhere. Long marches around it, and walls that anchor to a shore.',
     seats: 'ring',
     lakeCount: 60, lakeSize: [80, 260],
-    mountainFill: 0.34,
+    mountainCover: 0.02,
   },
   highlands: {
     name: 'Highlands',
     blurb: 'Rock, and the gaps between it. Ground worth clearing and chokepoints worth holding.',
     seats: 'ring',
     lakeCount: 14, lakeSize: [40, 120],
-    mountainFill: 0.52,
+    mountainCover: 0.34,
   },
   divide: {
     name: 'The Divide',
     blurb: 'A mountain spine down the middle. Two sides, and not many ways through.',
     seats: 'sides',
     lakeCount: 20, lakeSize: [50, 150],
-    mountainFill: 0.40,
-    // A wall of rock down the centre with a few passes cut through it. The one
-    // map whose shape is deliberate rather than grown.
-    spine: { thickness: 5, passes: 3 },
+    mountainCover: 0.05,
+    // A range down the centre with a few passes cut through it. The one map
+    // whose shape is deliberate rather than grown.
+    //
+    // Nine tiles thick rather than five. At five the terrain layer had nothing
+    // to draw but ring — rock on both faces and a single tile between them —
+    // so the map's one landmark came out as a wall rather than as the mountain
+    // range the blurb promises. Nine leaves a plateau along the top of it with
+    // a proper rock face down each side. The passes are unchanged and are still
+    // the only way through.
+    spine: { thickness: 9, passes: 3 },
   },
   fourcorners: {
     name: 'Four Corners',
     blurb: 'Empires bunched into the corners and the whole middle to argue over.',
     seats: 'corners',
     lakeCount: 26, lakeSize: [60, 190],
-    mountainFill: 0.44,
+    mountainCover: 0.11,
   },
   openfield: {
     name: 'Open Field',
     blurb: 'Almost nothing in the way. Armies meet in the middle and that is that.',
     seats: 'ring',
     lakeCount: 6, lakeSize: [30, 80],
-    mountainFill: 0.18,
+    mountainCover: 0,
   },
 };
 
@@ -100,9 +132,8 @@ const DEFAULT_MAP = 'wilds';
 
 // Free-form building placement. A player may place a building on any land tile
 // within their border (and that isn't already occupied by a building or camp);
-// "territory" is simply the disc of tiles around the town center. The live
-// radius comes from CASTLE.buildRadius[level - 1] — upgrading the town center
-// pushes the border out — and this is the level-1 value the client starts from.
+// "territory" is the disc of tiles around the town center, plus a smaller one
+// round every camp they have razed. Match.canBuildAt is the rule.
 // How far each thing sees, in tiles. Vision is what lifts the fog: ground you
 // have never had something near is black, ground you have seen is remembered
 // but not watched, and ground something of yours is standing near is live.
@@ -118,15 +149,19 @@ const VISION = {
   building: 5,
 };
 
+// Sent to the client as the fallback it draws with before the first state
+// message names the empire's own border. The live figure is
+// CASTLE.buildRadius[level - 1] plus any border boon.
 const BUILD = {
-  radius: 7, // starting border radius, in tiles, before any upgrade
+  radius: 9,
 };
 
 // Razing an AI camp doesn't just pay out — the ruins become an outpost, a
 // second disc of ground its conqueror can build inside, half the size of the
 // border they started with. Captured camps never respawn.
 const OUTPOST = {
-  radius: BUILD.radius / 2,
+  // A razed camp is a disc of ground half the size the old starting border was.
+  radius: 3.5,
   // ...and room to actually use it. An outpost handed over a disc of ground and
   // no permission to fill it: the building limit is set by the town center
   // alone, so unless you happened to be under it, a captured camp was ground
@@ -289,7 +324,21 @@ const CASTLE = {
   // real army still takes a fully grown keep in well under a minute, so it is a
   // siege rather than a stalemate. The upgrade is also worth more than it was:
   // levelling used to buy 300 more hit points and now buys 600.
-  hp:            [900, 1500, 2400],
+  //
+  // Raised a further 10% (from 900/1500/2400) when towers were taken out of the
+  // keep's last stand entirely — see the tower entry in BUILDING_TYPES. Towers
+  // were quietly doing a lot of the work of making an assault take time, and
+  // pulling them out made the mean assault 8.9% quicker; this puts that back
+  // where it was, but in the keep's own health, where it does not depend on how
+  // many towers happen to be standing on the far side of the empire.
+  //
+  // Measured over 36 assaults (two keep levels x three garrisons x three tower
+  // counts x two army sizes): mean time to take a keep 40.6s before, 41.0s
+  // after. The redistribution is the point rather than a side effect — an
+  // empire that stacked towers is now easier to storm and one that did not is
+  // slightly harder, which is what "a tower is a weapon, not a wall" means when
+  // you follow it all the way through.
+  hp:            [1000, 1650, 2650],
   incomePerSec:  [3, 5, 7],
   upgradeCost:   [0, 250, 550],     // cost to reach this level from the previous
   upgradeTimeSec:[0, 38, 77],
@@ -297,7 +346,23 @@ const CASTLE = {
   // which is the main reason to do it — more ground means more buildings.
   // The level-1 disc is cleared of mountains and water when the map is built,
   // so an empire's opening ground is always fully buildable.
-  buildRadius:   [7, 11, 15],
+  //
+  // Two wider than they were (7/11/15), because the keep standing in the
+  // middle is six tiles across now rather than three and reserves the ground
+  // under its art (see `footprint`); the ring left to build in at level 1 is
+  // about what it was.
+  buildRadius:   [9, 13, 17],
+  // The tiles the keep's art covers, measured from the base tile it stands on:
+  // so many either side, so many above (the sprite is anchored at its feet and
+  // grows upward), none below, where the gate is. Read by
+  // Match.inCastleFootprint, which is what stops a bank being dropped into the
+  // castle and drawn straight through the wall of it. One footprint for every
+  // level: levelling is mechanical and changes nothing drawn.
+  //
+  // Measured off the keep sprite the build makes — six tiles wide, about eight
+  // tall, its feet on the base row. Re-measure if KEEP_TILES_WIDE moves in
+  // tools/build-assets.js.
+  footprint:     { left: 2, right: 3, up: 6, down: 0 },
   // A keep left alone long enough starts putting itself back together. Slow,
   // and only after a good while undisturbed, so it undoes the scratches from a
   // raid that was driven off without healing a keep that is under siege — any
@@ -313,15 +378,6 @@ const CASTLE = {
   // and counting a 40-segment enclosure against a limit of 10 would delete the
   // wall tool. See Match.buildingsUsed, which is the one place that decides.
   buildLimit:    [10, 15, 20],
-  // The keep's sprite is 96x96 with a 77px foot — about two and a half tiles
-  // wide and three tall, anchored at its feet — but it only ever *blocked* the
-  // single tile underneath it, so a bank could be dropped into the corner of
-  // the castle and drawn straight through the wall of it.
-  //
-  // These are the tiles the art actually covers, measured from the base tile:
-  // one either side, two above (the sprite grows upward from its feet), none
-  // below, where the gate is. Read by Match.inCastleFootprint.
-  footprint:     { left: 1, right: 1, up: 2, down: 0 },
 };
 
 // buildTimeSec is 0 across the board: buildings finish instantly on placement
@@ -331,22 +387,26 @@ const BUILDING_TYPES = {
   barracks: { name: 'Barracks',      cost: 100, buildTimeSec: 0, hp: 150, trains: 'swordsman' },
   stable:   { name: 'Stable',        cost: 200, buildTimeSec: 0, hp: 150, trains: 'knight' },
   siege:    { name: 'Siege Factory', cost: 300, buildTimeSec: 0, hp: 150, trains: 'catapult' },
-  // The one building that fights on its own account, three ways:
-  //   defensePower    what it adds to the garrison's punch when the empire is
-  //                   stormed (walls do not — see below).
-  //   damageReduction what it takes off every blow that lands on the empire,
-  //                   summed across towers and capped by TOWER_REDUCTION_CAP.
+  // The one building that fights on its own account, and it does it entirely
+  // from where it stands:
   //   shot*           the archer on top loosing at whatever comes within range,
   //                   whether or not it is headed for the town center. 12 every
   //                   3s is 4 damage a second — a tower harasses a passing army
-  //                   and wears a besieging one down, but three of them still
-  //                   take the better part of a minute to break a real assault.
-  // Its hp is its own: a tower used to pour its 220 into the garrison's pool
-  // and be chewed through *before* the defenders were touched, so three towers
-  // were a thousand extra health to grind off. Now the towers cut down what
-  // gets through and the garrison takes the blow — much less spongy.
+  //                   and wears a besieging one down.
+  //   defensePower    what it hits back with while it is being torn down. You
+  //                   are standing at its foot to demolish it; that is not free.
+  //
+  // What it deliberately does NOT do is defend the keep from across the map. It
+  // used to add its `defensePower` to the garrison's punch and take a slice off
+  // every blow that landed on the empire, wherever on the map the tower
+  // happened to be — so the answer to being attacked was one more tower, and
+  // three of them with no garrison at all beat twenty swordsmen. A tower is a
+  // thing in a place: it shoots what walks past it and it fights whoever comes
+  // to knock it down, and neither of those reaches the town center.
+  //
+  // Its hp is its own, too — a tower used to pour its 220 into the garrison's
+  // pool and be chewed through *before* the defenders were touched.
   tower:    { name: 'Archer Tower',  cost: 120, buildTimeSec: 0, hp: 220, defensePower: 15,
-              damageReduction: 0.08,
               range: 5, shotSec: 3, shotDamage: 12 },
   // Walls are placed by click-and-drag, one building per dragged tile, so the
   // price is per tile. `isWall` is what tells the client to offer the drag tool
@@ -524,11 +584,22 @@ const AI_CAMP = {
   // swordsmen are no longer enough on their own. It is still the first thing an
   // early empire should be looking at.
   garrison: { swordsman: 8, knight: 2 },
-  lootGold: 200,
-  // Raiding pays twice: gold per point of damage put into the camp (so a raid
-  // that stalls still earns something) and a lump bonus for razing it outright.
-  plunderPerDamage: 0.6,
-  clearBonusGold: 250,
+  // A camp pays no gold. Not per point of damage, not a loot drop, not a bonus
+  // for razing it — it used to pay all three, about 550 gold for a camp taken
+  // cleanly, and that made it an income stream rather than a place.
+  //
+  // The trouble with paying for it is what it lets a player do: farm camps in a
+  // quiet corner of the map, never meet anybody, and come out ahead. Ground is
+  // supposed to be the prize here. What razing a camp is worth is the outpost it
+  // leaves behind — a second disc of buildable ground, OUTPOST.buildLimitBonus
+  // more buildings to run, and a pair of eyes that far forward on a map that is
+  // mostly dark. All three of those are worth having *where the camp is*, which
+  // is what makes the handful on the map worth arguing over, and none of them
+  // can be banked and carried home.
+  //
+  // The economy that lost this income was not rebalanced to make up for it, and
+  // that is deliberate: gold now comes from the keep and its banks, which is one
+  // source with one decision attached rather than two with a grind attached.
   respawnSec: 60,
   spacing: 14,      // minimum tiles between camps, and from any starting position
 };
@@ -707,20 +778,7 @@ const CARDS = {
   },
 };
 
-// However many towers are crammed in, they can never cut more than this off an
-// assault. Without a ceiling, twelve towers is simply immunity.
-//
-// Lowered from 0.5 when the town center's health went up. The two numbers
-// multiply: a keep that lasts twice as long gives its towers twice as long to
-// shoot, and at a cap of 0.5 that tipped six towers with NO GARRISON AT ALL
-// into beating eight hundred gold of swordsmen — which is exactly the "the
-// answer to being attacked is always one more tower" that this ceiling exists
-// to prevent, arrived at from the other direction.
-//
-// At 0.35 the same six towers cost the attacker sixteen men and still lose the
-// keep, while three towers behind a real garrison hold comfortably. Towers are
-// worth building; they are not a substitute for troops.
-const TOWER_REDUCTION_CAP = 0.35;
+
 
 // Paying to make ground buildable. Deliberately dear next to a building: the
 // Reshape the Land card does the same job for free over a whole disc, and a
@@ -757,6 +815,6 @@ module.exports = {
   MAP, MAPS, DEFAULT_MAP, VISION, BUILD, OUTPOST, RACES, RACE_ABILITIES, CASTLE,
   BUILDING_TYPES, UNIT_TYPES,
   AI_CAMP, SHRINE, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
-  TOWER_REDUCTION_CAP, TERRAIN_CLEAR_COST,
+  TERRAIN_CLEAR_COST,
   TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA, TICK_MS, MAX_TEAMS,
 };

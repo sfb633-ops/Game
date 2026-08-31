@@ -641,6 +641,9 @@ wss.on('connection', (ws) => {
       case 'mergeArmy':
         match.cmdMergeArmy(playerId, msg.armyId, msg.targetId);
         break;
+      case 'splitArmy':
+        match.cmdSplitArmy(playerId, msg.armyId, msg.count);
+        break;
       case 'recallArmy':
         match.cmdRecallArmy(playerId, msg.armyId);
         break;

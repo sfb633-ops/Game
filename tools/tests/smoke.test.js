@@ -9,7 +9,9 @@ const { Match } = require('../../game.js');
 function sendAt(m, playerId, units, targetType, targetId) {
   const p = m.players.get(playerId);
   const before = new Set(m.armies.keys());
-  m.cmdDeployUnits(playerId, units, p.baseX, p.baseY);
+  // Troops muster inside the walls, on the courtyard floor.
+  const mp = m.musterPoint(p);
+  m.cmdDeployUnits(playerId, units, mp.x, mp.y);
   for (const id of m.armies.keys()) {
     if (!before.has(id)) m.cmdAttackArmy(playerId, id, targetType, targetId);
   }
@@ -26,10 +28,12 @@ a.gold = b.gold = 999999;
 
 // towers, banks, barracks around both bases
 for (const [id, p] of [['a', a], ['b', b]]) {
-  m.cmdBuild(id, p.baseX + 2, p.baseY, 'tower');
-  m.cmdBuild(id, p.baseX - 2, p.baseY, 'tower');
-  m.cmdBuild(id, p.baseX, p.baseY + 2, 'barracks');
-  m.cmdBuild(id, p.baseX, p.baseY + 2, 'bank');
+  // Five out either side: the keep's art reserves the ground nearer than that.
+  m.cmdBuild(id, p.baseX + 5, p.baseY, 'tower');
+  m.cmdBuild(id, p.baseX - 5, p.baseY, 'tower');
+  // Beside the keep, clear of the ground its art reserves.
+  m.cmdBuild(id, p.baseX - 4, p.baseY - 1, 'barracks');
+  m.cmdBuild(id, p.baseX + 5, p.baseY - 1, 'bank');
   m.cmdUpgradeCastle(id);
 }
 // A ring of wall round each of them, so armies spend the run routing round
@@ -104,8 +108,12 @@ for (let t = 0; t < 1800; t++) {           // 6 minutes at 5Hz
     // An army stopped at a wall has to be stopped at a wall that is there.
     if (army.breach) {
       const owner = m.players.get(army.breach.ownerId);
+      // A breach names the building's anchor tile. Buildings are ground now,
+      // so the thing in the way may be a curtain segment, a bastion, the
+      // gatehouse — or a tower standing in front of the gate. What matters is
+      // that it is still there.
       const wall = owner && owner.buildings[`${army.breach.x},${army.breach.y}`];
-      if (!wall || wall.type !== 'wall') bad(`army ${army.id} breaching nothing, tick ${t}`);
+      if (!wall) bad(`army ${army.id} breaching nothing, tick ${t}`);
     }
     // And no army may ever be standing where a live wall is standing.
     for (const p of m.players.values()) {
@@ -116,8 +124,9 @@ for (let t = 0; t < 1800; t++) {           // 6 minutes at 5Hz
       }
     }
   }
+  // Land, mountain, water, and the cobbles of a courtyard.
   for (const row of m.terrain) for (const v of row) {
-    if (v !== 0 && v !== 1 && v !== 2) { bad(`bad terrain value ${v} at tick ${t}`); break; }
+    if (v !== 0 && v !== 1 && v !== 2 && v !== 3) { bad(`bad terrain value ${v} at tick ${t}`); break; }
   }
   if (JSON.stringify(snap).includes('null,null')) bad(`serialize produced null pair at tick ${t}`);
   if (m.gameOver) break;

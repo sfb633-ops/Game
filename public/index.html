@@ -18,7 +18,7 @@
 
     <div class="menu-cols">
       <!-- Left: who you are -->
-      <div class="frame frame-panel menu-box">
+      <div class="frame frame-ornate menu-box">
         <h2>Commander</h2>
         <input type="text" id="name-input" maxlength="16" placeholder="Your name" autocomplete="off">
         <h2>Empire</h2>
@@ -26,7 +26,7 @@
       </div>
 
       <!-- Right: which game -->
-      <div class="frame frame-panel menu-box">
+      <div class="frame frame-ornate menu-box">
         <h2>Play</h2>
         <div class="card">
           <div class="sub" id="menu-hint">Host a game and share the code, or join a friend with theirs.</div>
@@ -59,7 +59,7 @@
     <canvas id="map"></canvas>
     <!-- Floating over the map so the side panel doesn't have to carry it. -->
     <div id="conn-notice" class="hidden"></div>
-    <div id="hud" class="frame frame-panel">
+    <div id="hud" class="frame frame-plate">
       <div class="hud-stat"><span class="hud-label">Gold</span><span class="gold" id="gold-val">0</span></div>
       <div class="hud-stat"><span class="hud-label">Income</span><span id="income-val">0</span>/s</div>
       <div class="hud-stat"><span class="hud-label">Troops</span><span id="troops-val">0</span></div>
@@ -93,11 +93,14 @@
 
     <!-- Leaving is destructive, so it asks first and says what it will do. -->
     <div id="exit-wrap">
-      <button id="exit-btn" class="btn btn-sm">Exit</button>
-      <div id="exit-confirm" class="frame frame-panel hidden">
+      <div id="exit-row">
+        <button id="sound-btn-game" class="btn btn-sm" title="Toggle music">MUSIC ON</button>
+        <button id="exit-btn" class="btn btn-sm">Exit</button>
+      </div>
+      <div id="exit-confirm" class="frame frame-plate hidden">
         <div class="sub" id="exit-note"></div>
         <div class="btn-row">
-          <button id="exit-yes" class="btn btn-sm">Leave</button>
+          <button id="exit-yes" class="btn btn-sm btn-danger">Leave</button>
           <button id="exit-no" class="btn btn-sm">Cancel</button>
         </div>
       </div>
@@ -105,16 +108,24 @@
     <!-- The log is a running commentary you glance at, not something you
          work in, so it sits in the corner of the map instead of taking a
          fifth of the side panel and pushing the rest below the fold. -->
-    <div id="log" class="frame frame-panel"></div>
+    <div id="log" class="frame frame-plate"></div>
     <!-- One pixel a tile, so the canvas is the map's own dimensions and
          nothing is resampled. Click or drag it to move the camera. -->
-    <div id="minimap-wrap" class="frame frame-panel">
+    <!-- The race ability, on the map rather than in the panel. Beside the
+         minimap because that is the corner you are already looking at when you
+         are reading a fight, and because it was the one gap left along the
+         bottom edge. -->
+    <div id="ability-dock" class="frame frame-plate">
+      <div id="ability-card"></div>
+    </div>
+
+    <div id="minimap-wrap" class="frame frame-plate">
       <canvas id="minimap" width="240" height="160"></canvas>
     </div>
     <!-- The troop roster lives over the map rather than in the panel: it is
          what you look at while deciding where to click, so it belongs where
          you are already looking. -->
-    <div id="troop-bar" class="frame frame-panel">
+    <div id="troop-bar" class="frame frame-plate">
       <div id="unit-inputs"></div>
       <div class="troop-actions">
         <div id="deploy-hint">Pick troops below, then Deploy them onto the map.</div>
@@ -138,22 +149,11 @@
     <div class="sub" id="cost-note"></div>
     <div class="card" id="build-menu"><div class="sub">Drag a building onto your ground.</div></div>
 
-    <!-- The race ability: one button, always the same one, above the drafted
-         hand because it is the thing you never have to check whether you own. -->
-    <h2>Ability</h2>
-    <div class="card" id="ability-card"></div>
-
     <h2>Cards</h2>
     <div class="card" id="card-list"></div>
 
     <h2>Buildings</h2>
     <div id="plots-list"></div>
-
-    <h2>Selected Army</h2>
-    <div class="card" id="army-cmd"></div>
-
-    <h2>Empires</h2>
-    <div class="card" id="player-list"></div>
   </div>
 </div>
 
@@ -167,19 +167,19 @@
       <p class="lobby-sub">Share this code with your friends.</p>
       <button id="lobby-code" title="Click to copy">————</button>
     </div>
-    <div class="frame frame-panel lobby-box">
+    <div class="frame frame-ornate lobby-box">
       <h2>Map <span id="lobby-map-name" class="sub"></span></h2>
       <canvas id="lobby-map-preview" width="192" height="128"></canvas>
       <div id="lobby-map-blurb" class="sub"></div>
       <div class="sub map-sample-note">A map this one makes &mdash; every match generates a fresh one.</div>
       <div id="lobby-maps"></div>
     </div>
-    <div class="frame frame-panel lobby-box">
+    <div class="frame frame-ornate lobby-box">
       <h2>Sides</h2>
       <div id="lobby-teams"></div>
       <div id="lobby-team-mine"></div>
     </div>
-    <div class="frame frame-panel lobby-box">
+    <div class="frame frame-ornate lobby-box">
       <h2>Players <span id="lobby-count" class="sub"></span></h2>
       <div id="lobby-players"></div>
     </div>
@@ -207,7 +207,7 @@
      game they are not, and until now a knocked-out player was left with a dead
      keep, disabled buttons and nothing telling them what had happened. -->
 <div id="defeat-screen" class="hidden">
-  <div class="frame frame-panel defeat-box">
+  <div class="frame frame-ornate defeat-box">
     <h1>YOUR EMPIRE HAS FALLEN</h1>
     <p class="sub" id="defeat-sub"></p>
     <div class="btn-row">
@@ -221,7 +221,7 @@
 <div id="spectating-chip" class="hidden"><span>SPECTATING</span><span id="spectating-note"></span></div>
 
 <div id="game-over-banner">
-  <div class="frame frame-panel game-over-box">
+  <div class="frame frame-ornate game-over-box">
     <h1 id="game-over-text"></h1>
     <p class="sub" id="game-over-sub"></p>
     <div class="btn-row">
@@ -231,9 +231,18 @@
   </div>
 </div>
 
-<!-- Menu theme. Browsers block autoplay until the page has been interacted
-     with, so client.js starts it on the first click or keypress. -->
+<!-- The four sound layers. Browsers block autoplay until the page has been
+     interacted with, so client.js starts them on the first click or keypress
+     and mixes between them from there — see "Music and ambience".
+
+     The theme is preloaded because it is meant to be playing while you are
+     still reading the menu. The other three are not wanted until a match
+     starts, and between them they are thirty megabytes, so they are left to be
+     fetched then rather than racing the art for the connection. -->
 <audio id="menu-music" src="media/menu-theme.mp3" loop preload="auto"></audio>
+<audio id="ambience" src="media/ambience-forest.wav" loop preload="none"></audio>
+<audio id="music-regular" src="media/music-regular.wav" loop preload="none"></audio>
+<audio id="music-battle" src="media/music-battle.wav" loop preload="none"></audio>
 
 <script src="artdefs.js"></script>
 <script src="sprites.js"></script>

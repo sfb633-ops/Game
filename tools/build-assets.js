@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { decodePNG, encodePNG } = require('./png');
 const ops = require('./imageops');
+const rm = require('./rmautotile');
 
 const SRC = process.argv[2] || path.resolve(__dirname, '..', '..', 'assets');
 const OUT = path.resolve(__dirname, '..', 'public', 'assets');
@@ -39,10 +40,23 @@ const GOLEMS = path.join(SRC, 'Golems', 'Golems_Free_Version', 'Golem_1');
 // The other shrine's sleeper, from a pack of its own.
 const GOLLUX = path.join(SRC, 'Golems', 'New GOlem', 'Gollux');
 
-const TILE = 32; // one world tile, and the native cell size of every tileset used
+// One world tile. 48 because that is what the Winlu exterior set is drawn at,
+// and terrain is the one layer that cannot be rescaled without showing it — an
+// autotile whose transitions have been resampled fringes at every seam.
+//
+// Everything else follows from this number rather than fighting it. The sprite
+// packs are all drawn on a 16px grid, so they reach 48 by a clean x3 (see
+// MINI_SCALE) with no interpolation at all; the move from 32 was a change of
+// one constant each, not a resampling pass.
+const TILE = 48;
 // MiniWorldSprites is drawn for a 16px tile grid, so everything taken from it
-// is magnified by whole pixels onto the game's 32px one.
-const MINI_SCALE = 2;
+// is magnified by whole pixels onto the game's tile. 3, not 2, since the tile
+// became 48: still whole pixels, so the art stays as crisp as it was.
+//
+// This is the world-space magnification and nothing else. The UI scales below
+// (UI_BAR_SCALE, TAROT_SCALE, TOME_SCALE) are screen-space and deliberately
+// untouched — a panel should not grow because the ground did.
+const MINI_SCALE = 3;
 
 function need(p) {
   if (!fs.existsSync(p)) throw new Error(`missing source asset: ${p}`);
@@ -65,203 +79,267 @@ const manifest = { tileSize: TILE, terrain: {}, buildings: {}, props: {}, units:
 // ---------------------------------------------------------------------------
 // Terrain
 // ---------------------------------------------------------------------------
-
-// The village "Fields" tileset is a blob autotile: a cobble field whose edges
-// fade to grass. We read the art itself to learn which of the 64 cells carries
-// grass on which side, then invert that into a neighbour-mask -> cell lookup,
-// so the map can blend organically instead of drawing hard tile borders.
-function classifyBlobTileset(img) {
-  const isGrass = (bx, by, x0, y0, x1, y1) => {
-    let n = 0, t = 0;
-    for (let y = y0; y <= y1; y++)
-      for (let x = x0; x <= x1; x++) {
-        const o = ((by + y) * img.width + bx + x) * 4;
-        t++;
-        if (img.data[o + 1] > img.data[o]) n++; // green channel dominant => grass
-      }
-    return n / t > 0.5;
-  };
-  const tiles = [];
-  for (let i = 0; i < 64; i++) {
-    const bx = (i % 8) * TILE, by = Math.floor(i / 8) * TILE;
-    let solid = 0, total = 0;
-    for (let y = 0; y < TILE; y++)
-      for (let x = 0; x < TILE; x++) {
-        const o = ((by + y) * img.width + bx + x) * 4;
-        total++;
-        if (img.data[o + 1] > img.data[o]) solid++;
-      }
-    // A cell's signature bit is set where the blob CONTINUES (i.e. not grass).
-    tiles.push({
-      index: i,
-      allGrass: solid / total > 0.95,
-      sig: {
-        N: !isGrass(bx, by, 6, 0, 25, 1), S: !isGrass(bx, by, 6, 30, 25, 31),
-        W: !isGrass(bx, by, 0, 6, 1, 25), E: !isGrass(bx, by, 30, 6, 31, 25),
-        NW: !isGrass(bx, by, 0, 0, 2, 2), NE: !isGrass(bx, by, 29, 0, 31, 2),
-        SW: !isGrass(bx, by, 0, 29, 2, 31), SE: !isGrass(bx, by, 29, 29, 31, 31),
-      },
-    });
-  }
-  return tiles;
-}
-
-// A corner only matters when both of its edges are part of the blob; otherwise
-// the edge art already covers it. Collapsing to this canonical form is what
-// turns 256 neighbour masks into the ~47 shapes a blob set actually draws.
-function canonical(s) {
-  return [
-    s.N, s.E, s.S, s.W,
-    (s.N && s.E) ? s.NE : 1,
-    (s.S && s.E) ? s.SE : 1,
-    (s.S && s.W) ? s.SW : 1,
-    (s.N && s.W) ? s.NW : 1,
-  ].map(Number);
-}
-
-const MASK_BITS = { N: 1, E: 2, S: 4, W: 8, NE: 16, SE: 32, SW: 64, NW: 128 };
-
-function buildBlobLookup(tiles) {
-  const byKey = new Map();
-  for (const t of tiles) {
-    if (t.allGrass) continue;
-    const key = canonical(t.sig).join('');
-    if (!byKey.has(key)) byKey.set(key, []);
-    byKey.get(key).push(t.index);
-  }
-  const lookup = [];
-  for (let mask = 0; mask < 256; mask++) {
-    const s = {};
-    for (const k in MASK_BITS) s[k] = (mask & MASK_BITS[k]) ? 1 : 0;
-    const want = canonical(s);
-    const key = want.join('');
-    if (byKey.has(key)) { lookup.push(byKey.get(key)); continue; }
-    // No exact cell for this shape: fall back to the closest one the set has.
-    let best = null, bestDist = Infinity;
-    for (const [k, idxs] of byKey) {
-      let d = 0;
-      for (let i = 0; i < 8; i++) if (+k[i] !== want[i]) d++;
-      if (d < bestDist) { bestDist = d; best = idxs; }
-    }
-    lookup.push(best);
-  }
-  return { lookup, shapes: byKey.size };
-}
-
-// Water can't be a recolour of the Fields tileset the way rock and earth are:
-// keep its luminance and the cobbles read as blue paving. What is worth
-// reusing is its *geometry* — the same 64 cells, so water autotiles through
-// exactly the same lookup as everything else. So the blob's shape is kept and
-// its interior repainted: flat water, lightened toward the shore, with the
-// artist's grass fringe left untouched so the edge still blends.
 //
-// "Distance to grass" is measured inside each cell. A cell that is entirely
-// blob has no grass in it at all, which is precisely the fully-surrounded
-// cell — open water — so the ramp falls out of the tileset's own layout.
-function waterize(fields) {
-  const out = ops.blank(fields.width, fields.height);
-  const isGrassPixel = (x, y) => {
-    const o = (y * fields.width + x) * 4;
-    return fields.data[o + 3] > 8 && fields.data[o + 1] > fields.data[o];
-  };
-  const cols = fields.width / TILE, rows = fields.height / TILE;
+// The ground comes out of the Winlu exterior set, which is an RPG Maker tileset:
+// autotiles are 2x3-tile blocks of 24x24 quadrants that the RM renderer composes
+// at draw time. This game does no compositing — sprites.js draws one finished
+// image per tile — so tools/rmautotile.js does the composing here instead, once,
+// and emits the flat blob sheet plus the 256-entry lookup the client expects.
+//
+// Blocks are addressed by their position in the sheet's block grid, and the
+// numbers below were read off a rendered contact sheet rather than guessed.
+const WINLU = path.join(SRC, 'Winlu exterior remaster', 'Winlu exterior remaster', 'Winlu Fantasy Exterior');
+const WINLU_TILESETS = path.join(WINLU, 'tilesets');
 
-  for (let cy = 0; cy < rows; cy++) {
-    for (let cx = 0; cx < cols; cx++) {
-      const bx = cx * TILE, by = cy * TILE;
+// The pack ships the same tileset in three foliage colours, and we were using
+// the wrong one. Stone is identical in all three; what changes is the green.
+//
+//   base   grass rgb(67,146,109)  hue 0.422 — a teal sea-green
+//   green  grass rgb(67,146, 89)  hue 0.380 — a warmer natural green
+//   red    grass rgb(174,80, 74)          — autumn
+//
+// The artist's own sample maps are all tileset 1, which is the GREEN edition,
+// so every reference image is green and everything we built was teal. That is a
+// colour cast across the whole map, and it is why our ground never quite
+// matched the reference no matter what was done to the shapes on top of it.
+// Measured against the reference screenshot's grass, rgb(67,143,89) hue 0.382:
+// green is a match to within three points on one channel, base is not.
+//
+// Prefer the green sheet where one exists and fall back to the base pack, which
+// keeps the character sheets (!Statue, !Decoration, !$Big_Decoration) working —
+// the edition upgrades only ship tilesets and their own big trees.
+const WINLU_GREEN = path.join(SRC, 'Fantasy_Tileset_Green_Edition_upgrade', 'tilesets');
+function winluSheet(name) {
+  const green = path.join(WINLU_GREEN, name + '_green.png');
+  return fs.existsSync(green) ? green : path.join(WINLU_TILESETS, name + '.png');
+}
 
-      // Only grass that reaches the edge of the cell is shoreline. The field
-      // tiles also carry decorative tufts out in the middle of the blob, and
-      // keeping those would litter every lake with little green islands.
-      const bank = new Uint8Array(TILE * TILE);
-      const queue = [];
-      for (let i = 0; i < TILE; i++) {
-        for (const [x, y] of [[i, 0], [i, TILE - 1], [0, i], [TILE - 1, i]]) {
-          if (bank[y * TILE + x] || !isGrassPixel(bx + x, by + y)) continue;
-          bank[y * TILE + x] = 1;
-          queue.push([x, y]);
-        }
-      }
-      for (let head = 0; head < queue.length; head++) {
-        const [x, y] = queue[head];
-        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-          const nx = x + dx, ny = y + dy;
-          if (nx < 0 || ny < 0 || nx >= TILE || ny >= TILE) continue;
-          if (bank[ny * TILE + nx] || !isGrassPixel(bx + nx, by + ny)) continue;
-          bank[ny * TILE + nx] = 1;
-          queue.push([nx, ny]);
-        }
-      }
+// [col, row] of the autotile block within Fantasy_Outside_A2.
+const TERRAIN_BLOCKS = {
+  grass: [0, 0],   // plain meadow, and the base every other layer is drawn onto
+  dirt:  [1, 0],   // bare earth, the cosmetic patches scattered over open ground
+  // Mountain does NOT come from here — see PLATEAU below. A2 has no cliff in
+  // it; every grey block on the sheet is laid paving or brick.
+  water: [4, 3],
+  // Undergrowth and flowers, and the reason they are HERE rather than in the
+  // prop list is the whole point. The artist's forests are carpeted in leaf and
+  // bloom, and looking at the tile ids none of it is objects scattered about —
+  // it is ground autotile, kinds 20 and 28, blob-fitted like any other terrain.
+  // That is why his ground has soft organic patches where ours had a sprinkle
+  // of stamps: a stamp has a fixed outline and forty of them read as forty
+  // stamps, while an autotile takes whatever shape you give it.
+  brush: [4, 0],   // low leafy undergrowth
+  bloom: [4, 1],   // a drift of flowers
+  // The apron of laid stone a building stands on. A2 kind 18, which is cobble
+  // drawn INTO grass — its edge quadrants carry the grass, so a patch of it
+  // feathers into open ground instead of ending on a rectangle. That matters
+  // more than the stone does: the point of the apron is that a building stops
+  // looking like a picture laid on a lawn, and an apron with a hard edge is
+  // just a second picture laid on the lawn.
+  pave:  [2, 0],
+};
 
-      // Chebyshev distance from every water pixel to the nearest bank pixel,
-      // which is what the shallows ramp is drawn from. A cell with no bank at
-      // all is open water, and that is exactly the fully-surrounded cell.
-      const dist = new Int32Array(TILE * TILE).fill(999);
-      const wave = [];
-      for (let i = 0; i < TILE * TILE; i++) if (bank[i]) { dist[i] = 0; wave.push([i % TILE, (i / TILE) | 0]); }
-      for (let head = 0; head < wave.length; head++) {
-        const [x, y] = wave[head];
-        const d = dist[y * TILE + x];
-        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-          const nx = x + dx, ny = y + dy;
-          if (nx < 0 || ny < 0 || nx >= TILE || ny >= TILE) continue;
-          if (dist[ny * TILE + nx] <= d + 1) continue;
-          dist[ny * TILE + nx] = d + 1;
-          wave.push([nx, ny]);
-        }
-      }
+// ---- Mountain: a raised plateau, not a floor -------------------------------
+//
+// Mountain used to be an A2 ground block — the pack's crazy paving, tinted down
+// to stop it reading as a courtyard. It was the best A2 has, and it was still
+// only ever a differently-coloured floor: nothing about a flat patch of stone
+// says an army cannot walk onto it.
+//
+// Fantasy_Outside_A5 has the real thing. Its bottom half is a cliff set: a
+// three-by-three plateau — a raised surface ringed by a rock rim, corners and
+// edges and all — in two finishes, and the wall face to go under them. A rim is
+// exactly what says "raised", and it is exactly what the terrain layer's blob
+// autotiler already knows how to draw, because a blob's edge tiles ARE its rim.
+//
+// The catch is format. These are hand-laid A5 tiles, and rm.blobFromBlock wants
+// an RPG Maker 2x3 autotile block of 24x24 quadrants. So plateauBlock below
+// assembles one: every quadrant role the composer reads is cut from the
+// corresponding tile of the 3x3, and the result goes through the same path as
+// every other terrain.
+//
+// [col, row] of the top-left tile of each 3x3 plateau TOP.
+const PLATEAU = {
+  grass: [0, 11],
+  dirt:  [5, 11],
+};
 
-      for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {
-        const o = ((by + y) * fields.width + bx + x) * 4;
-        if (fields.data[o + 3] <= 8) continue;
-        if (bank[y * TILE + x]) {                       // the shoreline stays grass
-          for (let k = 0; k < 4; k++) out.data[o + k] = fields.data[o + k];
-          continue;
-        }
-        const shore = Math.max(0, 1 - dist[y * TILE + x] / 5);   // 1 at the bank, 0 offshore
-        // Keep a little of the source's own variation so the surface isn't a
-        // flat sheet of colour, but compress it hard — the cobble outlines are
-        // exactly what must not survive.
-        const lum = (fields.data[o] * 0.3 + fields.data[o + 1] * 0.59 + fields.data[o + 2] * 0.11) / 255;
-        const ripple = (lum - 0.55) * 0.10;
-        const [r, g, b] = ops.hslToRgb(
-          0.550 - shore * 0.02,
-          0.34 + shore * 0.08,
-          0.29 + shore * 0.18 + ripple);
-        out.data[o] = r; out.data[o + 1] = g; out.data[o + 2] = b; out.data[o + 3] = 255;
-      }
-    }
+// The cliff, which is a RING and not a front.
+//
+// A plateau is rock the whole way round: the surface sits inside a band of
+// stacked stone a tile thick that wraps every edge. Drawn only across the front,
+// which is where this started, the other three edges kept nothing but the
+// surface's own thin rim and the shape read as a flat patch with a rocky bottom
+// lip.
+//
+// The band is plain opaque tiles picked by hash, not an autotile. Cutting it
+// through the plateau's own block was tried and is worse than it sounds: an A5
+// plateau tile is opaque, so the blob has no soft outline to inherit, and all
+// the edge quadrants did was drag the surface's tan into the OUTER edge of the
+// band — rock in the middle of the tile, plateau at its rim, exactly backwards.
+//
+// A5 rows 9-10 are four columns of seamless wall, tiling both ways, two of them
+// mossed. Rows 14-15 carry the same wall with a strip of the pack's own grass
+// along the bottom, which is a finished base and the wrong green, so it reads as
+// a seam against this game's turf.
+// (1,9) is the plain seamless wall. The mossed columns beside it are lively on
+// a single face and turn into a repeating pattern when a whole ring is cut from
+// them, so the moss comes back through the lip instead, which carries its own.
+const CLIFF_WALL = [1, 9];
+
+// What turns a plateau tile into a cliff tile: keep the rim, replace the
+// surface.
+//
+// This is the piece that was missing, and it is why two earlier attempts read as
+// a stone border lying on the grass rather than as a cliff. A cliff seen from
+// above is not a band of wall — it is the LIP of the plateau, catching the
+// light along its top, with the wall dropping away beneath it. The reference has
+// that lip on every edge; a plain wall tile has no lip at all, so a ring built
+// out of plain wall tiles has nothing to say which side of it is up.
+//
+// The plateau's own edge tiles already carry exactly that lip. It is just that
+// nine tenths of each of them is surface: the dirt top is hue 0.12 and the rim
+// is hue 0.42, and they do not overlap. So the surface is keyed out and the
+// wall put behind it, which leaves the rim untouched and standing on stone.
+const SURFACE_HUE = [0.25, 0.90];   // outside this range is rim, not surface
+
+function rockify(tile, wall) {
+  const out = ops.blank(tile.width, tile.height);
+  out.data.set(tile.data);
+  for (let i = 0; i < tile.width * tile.height; i++) {
+    const o = i * 4;
+    if (tile.data[o + 3] < 8) continue;
+    const h = ops.rgbToHsl(tile.data[o], tile.data[o + 1], tile.data[o + 2])[0];
+    if (h > SURFACE_HUE[0] && h < SURFACE_HUE[1]) continue;   // rim: leave it
+    const w = ((i / tile.width | 0) % wall.height) * wall.width + (i % tile.width) % wall.width;
+    for (let k = 0; k < 4; k++) out.data[o + k] = wall.data[w * 4 + k];
   }
   return out;
 }
+// Which finish the mountains wear. Dirt: the map is green, so a tan mesa ringed
+// in dark rock is legible as somewhere-you-cannot-go from across the screen,
+// and the grass-topped one is a raised meadow that reads as ground you could
+// march over if it were not for the rim.
+const PLATEAU_PICK = 'grass';
+
+// The plateau top is left exactly as the pack drew it.
+//
+// It was tinted down for a while, on the grounds that this surface and the A2
+// bare-earth patches scattered over open ground are the SAME COLOUR — both
+// average #7c735b, to the byte — so mountain and a harmless cosmetic patch
+// share a fill. Dulling it did separate them and it wrecked the thing that
+// matters: the rim is grey-green rock, and pulling the tan underneath it
+// towards grey pulled the contrast out from under the rim until the stones
+// stopped reading as stones. The rim is what says "raised", so the rim wins.
+//
+// The two are told apart by the rim and the crags on it, which is the honest
+// signal anyway: a dirt patch has neither.
+
+// The one role a 3x3 cannot supply is inner — the concave notch where two
+// edges of the blob meet around a diagonal that is not part of it. RPG Maker
+// blocks carry dedicated art for it; a corner/edge/fill set has nowhere to keep
+// it. Filled rather than faked: a concave junction simply does not get a rim,
+// which is a rim missing, whereas every attempt at faking one (the outer corner
+// rotated, the edge art mirrored) puts rock in the middle of the plateau, which
+// is a hole. Missing beats wrong.
+function plateauBlock(a5, [c0, r0], wall) {
+  const Q = TILE / 2;
+  const block = ops.blank(TILE * 2, TILE * 3);
+  // The 3x3, addressed the way it is laid out on the sheet.
+  const tile = (cx, ry) => {
+    const t = ops.crop(a5, (c0 + cx) * TILE, (r0 + ry) * TILE, TILE, TILE);
+    return wall ? rockify(t, wall) : t;
+  };
+  const T = {
+    nwC: tile(0, 0), nEdge: tile(1, 0), neC: tile(2, 0),
+    wEdge: tile(0, 1), fill: tile(1, 1), eEdge: tile(2, 1),
+    swC: tile(0, 2), sEdge: tile(1, 2), seC: tile(2, 2),
+  };
+  // One 24x24 quadrant of a source tile, written to a quadrant of the block.
+  const put = (src, qx, qy, bx, by) =>
+    ops.blit(block, ops.crop(src, qx * Q, qy * Q, Q, Q), bx * Q, by * Q);
+
+  // The quadrant map is SLOTS in tools/rmautotile.js, read role by role. For a
+  // corner of the output tile, edgeSide is the run whose boundary is east or
+  // west of it and edgeCap the one whose boundary is north or south — so
+  // edgeSide comes off the left/right edge tiles and edgeCap off the top/bottom
+  // ones, which is the pairing that is easy to get backwards.
+  //        role        source        src quad   block quad
+  const map = [
+    ['fill',     T.fill,  0, 0, 2, 4], ['fill',     T.fill,  1, 0, 1, 4],
+    ['fill',     T.fill,  0, 1, 2, 3], ['fill',     T.fill,  1, 1, 1, 3],
+    ['edgeSide', T.wEdge, 0, 0, 0, 4], ['edgeSide', T.eEdge, 1, 0, 3, 4],
+    ['edgeSide', T.wEdge, 0, 1, 0, 3], ['edgeSide', T.eEdge, 1, 1, 3, 3],
+    ['edgeCap',  T.nEdge, 0, 0, 2, 2], ['edgeCap',  T.nEdge, 1, 0, 1, 2],
+    ['edgeCap',  T.sEdge, 0, 1, 2, 5], ['edgeCap',  T.sEdge, 1, 1, 1, 5],
+    ['outer',    T.nwC,   0, 0, 0, 2], ['outer',    T.neC,   1, 0, 3, 2],
+    ['outer',    T.swC,   0, 1, 0, 5], ['outer',    T.seC,   1, 1, 3, 5],
+    // inner, filled — see above.
+    ['inner',    T.fill,  0, 0, 2, 0], ['inner',    T.fill,  1, 0, 3, 0],
+    ['inner',    T.fill,  0, 1, 2, 1], ['inner',    T.fill,  1, 1, 3, 1],
+  ];
+  for (const [, src, qx, qy, bx, by] of map) put(src, qx, qy, bx, by);
+  return block;
+}
 
 function buildTerrain() {
-  const fields = decodePNG(need(path.join(VILLAGE, '1 Tiles', 'FieldsTileset.png')));
-  const tiles = classifyBlobTileset(fields);
-  const { lookup, shapes } = buildBlobLookup(tiles);
+  const a2 = decodePNG(need(winluSheet('Fantasy_Outside_A2')));
+  const a5 = decodePNG(need(winluSheet('Fantasy_Outside_A5')));
 
-  const grassCell = tiles.find(t => t.allGrass);
-  if (!grassCell) throw new Error('no all-grass cell found in FieldsTileset');
-  const grass = ops.crop(fields, (grassCell.index % 8) * TILE, Math.floor(grassCell.index / 8) * TILE, TILE, TILE);
+  // Grass is a single tile, not a blob: it is what every other layer is drawn
+  // on top of, so it never needs an edge. Taken from the middle of its block's
+  // bottom half, which is solid fill in every RM autotile.
+  const grassBlock = rm.blockAt(a2, TILE, TERRAIN_BLOCKS.grass[0], TERRAIN_BLOCKS.grass[1]);
+  const grass = ops.crop(grassBlock, TILE / 2, TILE * 1.5, TILE, TILE);
 
-  // Two palettes off one tileset so both share the blob geometry exactly:
-  // the source orange stays as bare earth, a near-neutral grey copy becomes
-  // mountain rock. Only the warm hues are touched, so the green fringe that
-  // blends either one into grass survives in both.
-  const rock = ops.recolor(fields, { hueFrom: 0.88, hueTo: 0.16, hueShift: 0.03, satMul: 0.13, lightAdd: -0.06 });
-  // The raw orange is far too loud to scatter across open ground; muted right
-  // down it reads as dry earth showing through the grass.
-  const dirt = ops.recolor(fields, { hueFrom: 0.88, hueTo: 0.16, hueShift: 0.028, satMul: 0.30, lightAdd: -0.15 });
+  const files = {};
+  let shapes = 0, cols = 8, lookup = null;
+  for (const name of ['dirt', 'brush', 'bloom', 'pave', 'water']) {
+    const block = rm.blockAt(a2, TILE, TERRAIN_BLOCKS[name][0], TERRAIN_BLOCKS[name][1]);
+    const built = rm.blobFromBlock(block, TILE, cols);
+    shapes = built.shapes;
+    cols = built.cols;
+    // All three are composed through the same quadrant map, so cell N means the
+    // same shape in all three sheets and one lookup serves them — exactly as it
+    // did when the three were recolours of a single hand-classified tileset.
+    lookup = built.lookup;
+    files[name] = write(built.sheet, 'terrain', name + '.png');
+  }
+
+  // The courtyard floor: one plain cobble tile, no blending, since a courtyard
+  // is always walled and the walls draw its edge.
+  const cobbleBlock = rm.blockAt(a2, TILE, 0, 2);
+  const cobble = ops.crop(cobbleBlock, TILE / 2, TILE * 1.5, TILE, TILE);
 
   manifest.terrain = {
     grass: write(grass, 'terrain', 'grass.png'),
-    dirt: write(dirt, 'terrain', 'dirt.png'),
-    rock: write(rock, 'terrain', 'rock.png'),
-    water: write(waterize(fields), 'terrain', 'water.png'),
-    sheetCols: 8,
+    cobble: write(cobble, 'terrain', 'cobble.png'),
+    // The pack's own cliff kit, lifted whole: A5 columns 0-3, rows 11-15, as a
+    // 4x5 sheet indexed by [col, row - 11].
+    //
+    // This replaces a rim invented with rockify, and the sample maps are why.
+    // Map001 of "Winlu Master Sample_maps" is a cliff demo, and reading the tile
+    // ids straight out of it shows the author building a plateau from three
+    // things and nothing else: ONE row of lip (row 13 — grass with a rock fringe
+    // hanging under it), then three or four rows of solid wall (rows 14 and 15),
+    // and for the top of the plateau no tile whatsoever — just the same grass as
+    // the field below. There is no ring, and no second surface. What separates
+    // the two levels is the height of the face and the fringe along its top.
+    // Rows 9 to 15, not 11 to 15. Rows 9 and 10 are the plain wall courses,
+    // and the artist mixes them into the body of a cliff at random — read his
+    // terraces and a run of (1,14) has (1,9), (0,9) and (0,10) dropped through
+    // it. That is why his faces do not look machined and ours did.
+    cliffKit: write(ops.crop(a5, 0, 9 * TILE, 4 * TILE, 7 * TILE), 'terrain', 'cliffkit.png'),
+    cliffKitCols: 4,
+    dirt: files.dirt,
+    brush: files.brush,
+    bloom: files.bloom,
+    pave: files.pave,
+    water: files.water,
+    sheetCols: cols,
     blobLookup: lookup,
   };
-  console.log(`  terrain: ${shapes} blob shapes -> 256-entry lookup`);
+  console.log('  terrain: ' + shapes + ' blob shapes -> 256-entry lookup, ' + TILE + 'px tiles');
 }
 
 // ---------------------------------------------------------------------------
@@ -273,38 +351,16 @@ function buildTerrain() {
 // addressed by its cell rectangle in source pixels (16 = one pack tile).
 // Rectangles were read off the sheets; see the folder layout in the pack.
 const BUILDING_CELLS = {
-  // The keep is the town center and gets a bigger, grander sheet cell at each
-  // level, so upgrading is visible on the map and not just in the panel.
-  //
-  // It is the one building magnified past MINI_SCALE. The sheet has no cell
-  // larger than 32px, so the only way to make the capital outrank a two-tile
-  // barracks and a three-tile tower is to blow it up a step further: three
-  // tiles square, against the tower's two by three. Its pixels come out
-  // coarser than the rest, which is the trade — and it reads as the deliberate
-  // centrepiece rather than as a mistake.
-  castle:   { sheet: 'Keep', scale: 3, levels: [[0, 0, 32, 32], [32, 0, 32, 32], [32, 32, 32, 32]] },
+  // No castle here: the keep comes off the Winlu assembled structures now, and
+  // is built by buildKeeps. It used to be the one MiniWorldSprites cell
+  // magnified past MINI_SCALE, because that sheet had nothing bigger than 32px
+  // and the capital had to outrank a two-tile barracks somehow.
   barracks: { sheet: 'Barracks',  rect: [0, 48, 16, 16] },   // guardhouse with a lean-to
   bank:     { sheet: 'Market',    rect: [32, 32, 16, 16] },  // the stall stacked with gold
   stable:   { sheet: 'Resources', rect: [0, 32, 16, 16] },   // open-sided barn
   siege:    { sheet: 'Workshops', rect: [0, 0, 16, 16] },
   // No tower here: the archer tower comes off its own pack, further down.
 };
-
-// Walls are the only thing still cut from the MiniWorldSprites Tower sheet.
-// The bottom band of it is a continuous battlement: rounded ends left and
-// right, a middle that butts up seamlessly against itself. `post` is the
-// standalone block from a higher band, which carries its own footing and so
-// works both alone and stacked vertically.
-const WALL_CELLS = {
-  capW: [0, 80, 16, 16],
-  mid:  [16, 80, 16, 16],
-  capE: [32, 80, 16, 16],
-  post: [0, 48, 16, 16],
-};
-
-// Turned a quarter turn clockwise for north-south runs. The west end of a
-// horizontal run becomes the north end of a vertical one.
-const WALL_TURNED = { vertCapN: 'capW', vertMid: 'mid', vertCapS: 'capE' };
 
 // The pack ships one folder per faction colour with identical layouts, so an
 // empire's buildings can match its troops. `Wood` is the uncoloured set and
@@ -322,14 +378,85 @@ function miniBuildingSheet(colour, sheet) {
 // Describe an already-prepared image: bottom-center anchor (the pack draws in
 // elevation, footprint at the bottom edge) plus the footprint width the ground
 // shadow uses.
+// The shadow a building throws, projected from its own silhouette.
+//
+// It used to be an ellipse under everything, and an ellipse is wrong twice
+// over: it is the same shape whatever stands on it, so a round tower and a long
+// barn get the same blob, and it sits centred under the sprite where a shadow
+// should be leaning AWAY from the light. Everything on these sheets is lit from
+// the upper left, so a shadow belongs down and to the right.
+//
+// This takes the sprite's own alpha and projects it onto the ground: a pixel at
+// height h above the base lands h * SHEAR to the right and is squashed into
+// SQUASH of its height, which is what a vertical face does when it falls on a
+// horizontal plane. Then a couple of box blurs, because a hard-edged shadow is
+// as much of a cut-out as no shadow at all.
+const SHADOW_SQUASH = 0.20, SHADOW_SHEAR = 0.34, SHADOW_ALPHA = 0.38;
+
+function buildShadow(img, ...outParts) {
+  const box = ops.bbox(img);
+  if (!box) return null;
+  const H = box.y1 + 1;                      // the sprite stands on its bbox foot
+  const shH = Math.max(4, Math.round(H * SHADOW_SQUASH));
+  const lean = Math.round(H * SHADOW_SHEAR);
+  const w = img.width + lean, h = shH;
+  const mask = new Float32Array(w * h);
+  // Row 0 of the shadow IS the building's foot, and rows below it are further
+  // out along the ground. Light comes from the upper left on every sheet in
+  // this pack, so the shadow falls down and to the right — which means it lies
+  // BELOW the base line on screen, not above it.
+  for (let sy = 0; sy < h; sy++) {
+    const height = sy / SHADOW_SQUASH;       // how high up the sprite this came from
+    const srcY = Math.round(H - height);
+    if (srcY < 0 || srcY >= img.height) continue;
+    const shift = Math.round(height * SHADOW_SHEAR);
+    for (let sx = 0; sx < w; sx++) {
+      const srcX = sx - shift;
+      if (srcX < 0 || srcX >= img.width) continue;
+      if (img.data[(srcY * img.width + srcX) * 4 + 3] > 40) mask[sy * w + sx] = 1;
+    }
+  }
+  // Soften. Two cheap box passes read better than one wide one.
+  let cur = mask;
+  for (let pass = 0; pass < 2; pass++) {
+    const next = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      let sum = 0, n = 0;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        sum += cur[ny * w + nx]; n++;
+      }
+      next[y * w + x] = sum / n;
+    }
+    cur = next;
+  }
+  const out = ops.blank(w, h);
+  for (let i = 0; i < w * h; i++) {
+    out.data[i * 4 + 3] = Math.round(Math.min(1, cur[i]) * 255 * SHADOW_ALPHA);
+  }
+  return {
+    file: write(out, ...outParts),
+    w, h,
+    // Where the sprite's own foot sits inside this image, so the caller can line
+    // the two up without knowing how the projection was done. The foot is the
+    // TOP edge here, since the shadow runs away from the building.
+    anchorX: Math.round(img.width / 2), anchorY: 0,
+  };
+}
+
 function describeBuilding(img, ...outParts) {
   const box = ops.bbox(img);
+  const shadowParts = outParts.slice();
+  shadowParts[shadowParts.length - 1] =
+    String(shadowParts[shadowParts.length - 1]).replace(/.png$/, '_shadow.png');
   return {
     file: write(img, ...outParts),
     w: img.width, h: img.height,
     anchorX: Math.round(img.width / 2),
     anchorY: box ? box.y1 + 1 : img.height,
     footW: box ? Math.round(box.w * 0.8) : img.width,
+    shadow: buildShadow(img, ...shadowParts),
   };
 }
 
@@ -356,6 +483,514 @@ function turnedWall(sheet, rect, ...outParts) {
   return describeBuilding(ops.scaleUp(ops.rotate90(cut, true), MINI_SCALE), ...outParts);
 }
 
+// ---- The compound ----------------------------------------------------------
+//
+// Every empire starts inside a walled compound, and the compound is drawn the
+// way the pack's own castles are: in three-quarter view, from the parts the
+// set is made of. The back wall is a row of merlons over a row of inner face,
+// the sides are walkways seen from above with merlons up the outside, the
+// front is merlons over two rows of face with a taller gatehouse in the
+// middle, and a round bastion with a roof stands at each front corner. The
+// layout — which tile is which — lives in CASTLE.compound in config.js and
+// Match.placeCompound; this file only makes the sprites, one per piece name
+// that curtainPiece there hands out.
+//
+// Parts are [sheet, col, row, wTiles, hTiles].
+const COMPOUND_PART = {
+  // Three phases of merlon, alternated along a run so the crenellations do not
+  // repeat every tile.
+  merlon: [['B', 8, 0], ['B', 9, 0], ['B', 10, 0]],
+  cornerL: ['B', 11, 0], cornerR: ['B', 12, 0],
+  // The north-south run. The pack draws a wall going away from you as its
+  // walkway seen from above with a parapet down each edge, and ships all three
+  // pieces: (11,4) is the walkway's stonework, and (11,1) and (12,1) are the
+  // parapets, each drawn in the outer eleven pixels of an otherwise empty cell
+  // so they can be laid straight over it.
+  walkway:  ['B', 11, 4],
+  parapetW: ['B', 11, 1],
+  parapetE: ['B', 12, 1],
+  // The low parapet along the near edge of a wall-walk — the one between a man
+  // on the wall and the drop into his own courtyard.
+  copingS:  ['B', 11, 3],
+  // Where a run turns. The battlement kit draws all four, and they are what
+  // carries the parapet round the bend and into the merlon row — the two
+  // northern ones are the same cells as cornerL/cornerR above, which the
+  // compound uses for the same job on its own curtain.
+  // What actually turns a corner on this pack's own castle.
+  //
+  // Map008 never bends a curtain wall. Straight east-west runs terminate into
+  // round towers and the tower makes the turn — which is how real curtain walls
+  // are built, and why our corners looked like a wall folded rather than a
+  // castle. The full tower is two tiles wide and seven tall (B 13-14, rows
+  // 0-6). Rows 0-2 are the crenellated head and the shaft under it, and row 6
+  // is the BASE — a rounded foot that meets the ground. Taking rows 0-3 gave a
+  // tower four tiles tall that ended in the middle of a course, sliced off flat
+  // on the grass; skipping to row 6 for the last of them keeps that height and
+  // lands it on something. Rows 3-5 are more shaft and are simply not needed at
+  // this scale.
+  towerRows: [0, 1, 2, 6],
+  cornerNW: ['B', 11, 0], cornerNE: ['B', 12, 0],
+  cornerSW: ['B', 11, 2], cornerSE: ['B', 12, 2],
+  // The same battlement seen from the other side.
+  //
+  // A wall is only ever drawn from the south — that is where the camera is — so
+  // a run on the north side of a castle shows the camera its INNER face, and
+  // its crenellations should be the ones you look over from the walkway rather
+  // than the ones you meet coming at it. The pack draws both: row 0 is the
+  // outer side, its merlon blocks in shadow at a mean brightness of 119, and
+  // row 1 is the inner side at 148. Same for the corners — (11,0)/(12,0) are
+  // the outer pair at 132 and (11,2)/(12,2) the inner at 151, identical in
+  // shape and different only in which side is lit.
+  //
+  // The crenellations are the SAME course seen from the other side. Row 1 is
+  // not an inner-facing merlon and never was — Map008 puts B(9,0) directly
+  // above B(9,1) in a wall, so row 1 is the course BELOW the merlons, and using
+  // it as a back-facing battlement was drawing a piece of wall face up where a
+  // merlon belongs. That is why the northern runs never looked like the back of
+  // anything. What actually changes from inside is what lies under the
+  // merlons — the wall-walk instead of the wall's face — and buildWallPieces
+  // handles that.
+  merlonBack: [['B', 8, 0], ['B', 9, 0], ['B', 10, 0]],
+  backCornerNW: ['B', 11, 2], backCornerNE: ['B', 12, 2],
+  backCornerSW: ['B', 11, 2], backCornerSE: ['B', 12, 2],
+  // Both faces were chosen by tiling every candidate three high and scoring
+  // the seam between top and bottom rows: an RPG Maker wall sheet is full of
+  // tiles that are really the TOP EDGE of a wall.
+  // What a curtain wall is made of, taken off the artist's own castle.
+  //
+  // Map008 lays a wall as an A4 WALL AUTOTILE on the ground layer with the
+  // battlement pieces dropped on top of it — the body is kind 105, which
+  // resolves to the light ashlar block at A4 (2-3, 8-9). We had a dark rubble
+  // wall here instead, small broken stones where the reference has big dressed
+  // blocks, and that is most of why our walls did not look like the picture.
+  facePale: ['A4', 2, 9], faceDark: ['A4', 8, 8],
+  gate: ['A4', 2, 3, 2, 2],            // timber double door
+  window: ['B', 5, 8, 1, 2],           // one lit gothic light, drawn twice
+  towerBody: ['B', 13, 3, 2, 4],       // the round tower's drum, rows repeat
+  spire: ['BIGDEC', 0, 0, 4, 6],       // grey shingle cone
+  horned: ['BIGDEC', 4, 12, 4, 6],     // the black castle's horned top
+  knight: ['STATUE', 1, 0, 1, 3],
+  gargoyle: ['STATUE', 3, 0, 1, 3],
+  brazier: ['DECO', 0, 0, 1, 2],
+  torch: ['DECO', 9, 1, 1, 1],
+};
+
+// Which sets are the black castle. Their curtain is the pack's dark stone and
+// every pale piece is taken down to match it before the empire's cast goes on.
+const DARK_SETS = new Set(['red', 'purple']);
+
+// The cast is hue and saturation only — lightness is left alone, because
+// lightness is what says "stone" or "iron" and the dark sets have already had
+// theirs set. Human and elf both take the pale stonework, so without a cast
+// their compounds would be the same castle, and the castle is the one thing
+// you look at to know whose ground you are on.
+const COMPOUND_CAST = {
+  cyan:   { hue: 0.55, sat: 0.16 },   // human: cold grey-blue ashlar
+  lime:   { hue: 0.30, sat: 0.14 },   // elf: stone with moss in it
+  red:    { hue: 0.99, sat: 0.20 },   // orc: iron with rust in it
+  purple: { hue: 0.74, sat: 0.22 },   // undead: cold violet
+};
+
+function compoundSheets() {
+  return {
+    A2:     decodePNG(need(winluSheet('Fantasy_Outside_A2'))),
+    A4:     decodePNG(need(winluSheet('Fantasy_Outside_A4'))),
+    B:      decodePNG(need(winluSheet('Fantasy_Outside_B'))),
+    BIGDEC: decodePNG(need(path.join(WINLU, 'characters', '!$Big_Decoration.png'))),
+    STATUE: decodePNG(need(path.join(WINLU, 'characters', '!Statue.png'))),
+    DECO:   decodePNG(need(path.join(WINLU, 'characters', '!Decoration.png'))),
+  };
+}
+function partImg(sheets, spec) {
+  const [sheet, col, row, wt = 1, ht = 1] = spec;
+  return ops.crop(sheets[sheet], col * TILE, row * TILE, wt * TILE, ht * TILE);
+}
+// A part cropped to its own art, anything touching it on the sheet dropped.
+function partTrimmed(sheets, spec) {
+  let img = partImg(sheets, spec);
+  img = largestIsland(img) || img;
+  const box = ops.bbox(img);
+  return box ? ops.crop(img, box.x0, box.y0, box.w, box.h) : img;
+}
+// Set hue and saturation, scale lightness. Scaled rather than offset so the
+// art keeps its own modelling; an offset flattens the shadows to one tone.
+function recast(img, hue, sat, light) {
+  return ops.mapPixels(img, (r, g, b, a) => {
+    if (a <= 8) return [r, g, b, a];
+    const l = ops.rgbToHsl(r, g, b)[2];
+    const [nr, ng, nb] = ops.hslToRgb(hue, sat, Math.max(0, Math.min(1, l * light)));
+    return [nr, ng, nb, a];
+  });
+}
+function fitW(img, px) { return ops.resize(img, px, Math.max(1, Math.round(img.height * px / img.width))); }
+
+// How wide each composed building stands, in tiles. The keep is six, so these
+// are deliberately smaller — a barracks that rivals the castle for size reads
+// as a second castle.
+const SOURCE_TILES_WIDE = { barracks: 3, bank: 3, stable: 3, siege: 3 };
+const BUILDING_SRC_DIR = 'buildings-src';
+
+// A building composed from the pack and left in assets/buildings-src as a PNG.
+// Returns null when there is no file for this type, which is most of them for
+// now — the rest still come off MiniWorldSprites until they are made.
+function buildFromSource(type, setName) {
+  const file = path.join(SRC, BUILDING_SRC_DIR, type + '.png');
+  if (!fs.existsSync(file)) return null;
+  let img = decodePNG(file);
+  const box = ops.bbox(img);
+  if (box) img = ops.crop(img, box.x0, box.y0, box.w, box.h);
+  img = fitW(img, (SOURCE_TILES_WIDE[type] || 3) * TILE);
+  return describeBuilding(img, 'buildings', setName, type + '.png');
+}
+
+// ---- The keep ---------------------------------------------------------------
+//
+// The town center is a whole castle drawn by the owner in Godot and exported
+// as one PNG: assets/CastleEvil/*.png. It is used as-is — no cast, no tint —
+// for every race until there is a second one; drop a PNG into
+// assets/CastleStone/ and human and elf will take that instead. Six tiles
+// wide on the map, which puts it inside a level-1 border with a ring to build
+// in; CASTLE.footprint in config.js reserves the ground under it and has to be
+// re-measured if KEEP_TILES_WIDE moves.
+const KEEP_TILES_WIDE = 6;
+// Drop a PNG in any of these and it becomes that faction's keep. Several names
+// for the pale one because the folder is made by hand and the name it happens
+// to be made under is not worth being strict about.
+const KEEP_DIRS = { dark: ['CastleEvil'], pale: ['goodcastle', 'CastleStone', 'CastleGood'] };
+
+function firstPng(dirs) {
+  for (const dir of [].concat(dirs)) {
+    const full = path.join(SRC, dir);
+    if (!fs.existsSync(full)) continue;
+    const f = fs.readdirSync(full).find(n => /\.png$/i.test(n));
+    if (f) return path.join(full, f);
+  }
+  return null;
+}
+
+function buildKeep(setName) {
+  const dark = DARK_SETS.has(setName);
+  // A keep composed by tools/make-building.js wins, then a hand-made one.
+  //
+  // Seth's own keep is still in assets/goodcastle and still works: delete
+  // buildings-src/castle.png and it comes straight back. The composed one is
+  // here because it is made of pack pieces rather than being a fixed picture —
+  // it tints per faction from one recipe, and its gateway is the pack's real
+  // animated portcullis rather than bars cut out of a finished image.
+  const composed = path.join(SRC, BUILDING_SRC_DIR, 'castle.png');
+  const useComposed = fs.existsSync(composed);
+  const file = (useComposed ? composed : null) ||
+    (dark ? null : firstPng(KEEP_DIRS.pale)) || firstPng(KEEP_DIRS.dark);
+  if (!file) throw new Error('no keep art: put a PNG in assets/' + KEEP_DIRS.dark + '/');
+  let img = decodePNG(file);
+  // The export carries no alpha: whatever the editor had behind the castle
+  // came with it — a checkerboard in one export, a flat grey in the next. The
+  // corner pixel is taken as the backdrop and everything within a few levels
+  // of it is keyed out; light neutral greys go too, which covers a checker's
+  // other square. The castle itself is blue-grey stone, never neutral, so it
+  // survives. Export with alpha and none of this fires.
+  // The light-grey rule is for a CHECKERBOARD, whose second square the corner
+  // pixel misses, and it now fires only when no flat backdrop was found. It
+  // used to run always, which was safe while the only keep was dark blue-grey
+  // stone and is not safe any more: a pale ashlar castle has highlights in
+  // exactly that range. On the stone keep it punched holes through most of a
+  // percent of the art — the brightest pixels on every coping and merlon, which
+  // is precisely where they would show.
+  // An export that already carries alpha is left completely alone.
+  //
+  // This is the case that was quietly broken. Both branches below exist to
+  // RESCUE an export with no transparency, and running either over art that is
+  // already keyed can only damage it: the stone keep arrived properly cut out,
+  // fell through to the checkerboard branch because its corner pixel was
+  // transparent rather than a flat colour, and had the brightest pixel of every
+  // coping and merlon punched out as though it were backdrop. Speckle all over
+  // the towers, from a rule that had no business running at all.
+  let keyed = false;
+  for (let k = 3; k < img.data.length; k += 4) {
+    if (img.data[k] < 250) { keyed = true; break; }
+  }
+  const bg = (!keyed && img.data[3] > 8) ? [img.data[0], img.data[1], img.data[2]] : null;
+  if (keyed) {
+    // Nothing to do.
+  } else if (bg) {
+    // Flood the backdrop in from the edges rather than keying every pixel that
+    // matches it. A castle is grey and so is the sheet behind it, so a global
+    // key takes bites out of the art wherever a shadow happens to land on the
+    // backdrop's own value — on the stone keep that came out as green speckle
+    // scattered over every tower. Only backdrop CONNECTED to the border is
+    // background; a grey pixel walled in by castle is castle.
+    const { width: w, height: h } = img;
+    // Tight, because the backdrop is flat — every border pixel of the stone
+    // keep is the same value to the bit. At a loose tolerance the flood comes in
+    // through the gaps between merlons and then keeps going, since the castle's
+    // own shadow tone sits within ten levels of the backdrop; that ate the dark
+    // line out of every crenellation and left the art speckled.
+    const NEAR = 3;
+    const near = (i) => Math.abs(img.data[i] - bg[0]) <= NEAR &&
+      Math.abs(img.data[i + 1] - bg[1]) <= NEAR && Math.abs(img.data[i + 2] - bg[2]) <= NEAR;
+    const seen = new Uint8Array(w * h);
+    const stack = [];
+    for (let x = 0; x < w; x++) { stack.push([x, 0], [x, h - 1]); }
+    for (let y = 0; y < h; y++) { stack.push([0, y], [w - 1, y]); }
+    while (stack.length) {
+      const [x, y] = stack.pop();
+      if (x < 0 || y < 0 || x >= w || y >= h) continue;
+      const k = y * w + x;
+      if (seen[k] || !near(k * 4)) continue;
+      seen[k] = 1;
+      stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+    }
+    for (let k = 0; k < w * h; k++) if (seen[k]) img.data[k * 4 + 3] = 0;
+  } else {
+    // No flat backdrop: this is a checkerboard export, whose light square the
+    // corner pixel misses. This rule is only safe here — a pale ashlar castle
+    // has highlights in the same range, and run unconditionally it punched
+    // holes through the brightest pixel of every coping and merlon.
+    img = ops.mapPixels(img, (r, g, b, a) => {
+      const lo = Math.min(r, g, b), hi = Math.max(r, g, b);
+      return (lo >= 170 && hi - lo <= 12) ? [r, g, b, 0] : [r, g, b, a];
+    });
+  }
+  // A composed keep takes the faction's colour, and that is most of the reason
+  // to compose one: it is the same stone as that empire's curtain wall and its
+  // towers instead of every empire sharing one picture. A hand-made keep is
+  // left exactly as it was drawn — recolouring somebody's artwork uninvited is
+  // not the same thing at all.
+  if (useComposed) {
+    const cast = COMPOUND_CAST[setName];
+    if (cast) {
+      img = recast(img, cast.hue, cast.sat, 1);
+      if (dark) img = recast(img, cast.hue, cast.sat, 0.62);
+    }
+  }
+  const box = ops.bbox(img);
+  if (box) img = ops.crop(img, box.x0, box.y0, box.w, box.h);
+  img = fitW(img, KEEP_TILES_WIDE * TILE);
+  const def = describeBuilding(img, 'buildings', setName, 'castle.png');
+  const gate = buildKeepGate(img, setName);
+  if (gate) def.gate = gate;
+  return def;
+}
+
+// The portcullis, taken whole off the pack's own animated gate sheet.
+//
+// !$Gate_Stone1.png is twelve frames of a stone gateway, three across and four
+// down at 144x192 each, running shut to fully raised. It was hand-cut out of
+// the keep's finished artwork before — bars lifted from the picture and
+// repeated upward — which worked but was a copy of a copy, and only ever moved
+// by sliding a strip.
+//
+// It turns out to be the very piece the keep was built from. The frame's dark
+// interior measures 120x143 and the keep's archway 123x143 — the same art at
+// 1:1 — so the frames drop straight in with no scaling, and lining up the two
+// dark openings puts them exactly where the keep already has an arch.
+//
+// Both boxes are measured here rather than written down, so a re-exported keep
+// still lands its gate correctly.
+const GATE_SHEET = '!$Gate_Stone1.png';
+const GATE_FW = 144, GATE_FH = 192, GATE_COLS = 3, GATE_ROWS = 4;
+
+// The bounding box of everything darker than `max` — an arch opening in both
+// the gate frame and the keep.
+function darkBox(img, max, x0, y0, x1, y1) {
+  let ax = 1e9, ay = 1e9, bx = -1, by = -1;
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+    const i = (y * img.width + x) * 4;
+    if (img.data[i + 3] < 128) continue;
+    const l = 0.299 * img.data[i] + 0.587 * img.data[i + 1] + 0.114 * img.data[i + 2];
+    if (l > max) continue;
+    if (x < ax) ax = x; if (x > bx) bx = x;
+    if (y < ay) ay = y; if (y > by) by = y;
+  }
+  return bx < 0 ? null : { x: ax, y: ay, w: bx - ax + 1, h: by - ay + 1 };
+}
+
+function buildKeepGate(img, setName) {
+  const src = decodePNG(need(path.join(WINLU, 'characters', GATE_SHEET)));
+  const inner = darkBox(src, 95, 0, 0, GATE_FW, GATE_FH);
+  // The keep's own opening: dark, low down, and near the middle.
+  // Tight to the lower middle. Opened wider than this it catches the shadow
+  // under the statues and the dark inside the tower tops, and the gate lands
+  // forty pixels high.
+  const arch = darkBox(img, 70, Math.round(img.width * 0.30), Math.round(img.height * 0.55),
+    Math.round(img.width * 0.70), img.height);
+  if (!inner || !arch) return null;
+  // A keep with no archway of about the right size has no gate to raise.
+  if (Math.abs(arch.h - inner.h) > inner.h * 0.35) return null;
+
+  const frames = GATE_COLS * GATE_ROWS;
+  const strip = ops.blank(frames * GATE_FW, GATE_FH);
+  for (let f = 0; f < frames; f++) {
+    const c = f % GATE_COLS, r = Math.floor(f / GATE_COLS);
+    ops.blit(strip, ops.crop(src, c * GATE_FW, r * GATE_FH, GATE_FW, GATE_FH), f * GATE_FW, 0);
+  }
+  // A pale stone arch dropped into the evil castle read as somebody else's
+  // gateway bolted on. The dark keeps get the same darkening their walls do;
+  // the pale ones are left alone, because their keep is untinted grey and the
+  // gate already matches it.
+  // Darkened, not tinted. Running it through the faction cast turned the arch
+  // rust-red on the evil castle, which reads as a different material bolted on;
+  // what it needs is the same stone in less light.
+  const shaded = DARK_SETS.has(setName)
+    ? ops.mapPixels(strip, (r, g, b, a) => [Math.round(r * 0.5), Math.round(g * 0.52), Math.round(b * 0.56), a])
+    : strip;
+  return {
+    file: write(shaded, 'buildings', setName, 'castle_gate.png'),
+    frames, w: GATE_FW, h: GATE_FH,
+    x: arch.x - inner.x, y: arch.y - inner.y,
+  };
+}
+
+
+// Player-dragged walls, cut from the same battlements as the compound so a run
+// laid outside the castle is the castle's own stone continued. An east-west
+// run is merlons over a row of face, two tiles tall on its tile; a north-south
+// run is the side walkway. The three horizontal names all take the same art —
+// the set has no end caps, and a wall that simply stops reads fine — and so
+// do the three vertical ones.
+function buildWallPieces(setName) {
+  const S = compoundSheets();
+  const T = TILE;
+  const dark = DARK_SETS.has(setName);
+  const cast = COMPOUND_CAST[setName];
+  const tint = (img) => recast(img, cast.hue, cast.sat, 1);
+  const prep = dark ? (img) => tint(recast(img, 0.62, 0.10, 0.62)) : tint;
+  const face = tint(partImg(S, dark ? COMPOUND_PART.faceDark : COMPOUND_PART.facePale));
+  const merlon = prep(partImg(S, COMPOUND_PART.merlon[1]));
+  const run = ops.blank(T, 2 * T);
+  ops.drawOver(run, merlon, 0, 0);
+  ops.blit(run, face, 0, T);
+  // A north-south run, which is a different drawing of a wall and not the same
+  // one turned.
+  //
+  // It used to be exactly that: the face laid down as a floor with a merlon
+  // rotated a quarter turn onto it. A merlon is drawn to be seen from the
+  // front, and rotating it does not produce a parapet seen from above — it
+  // produces a light rectangle lying on a brick square. A run of them read as a
+  // stone path, which is what walls running north-south looked like, and no
+  // amount of adjusting the rotation was going to fix a piece that was the
+  // wrong drawing to begin with.
+  //
+  // The pack has the right drawing. A wall going away from you is its walkway
+  // seen from above with a parapet down each edge, and the parapets are their
+  // own art — see walkway/parapetW/parapetE above.
+  //
+  // Both edges, not one. The old piece carried its battlement down a single
+  // side, which made it a wall with a definite outside, so drawWall had to
+  // mirror the western half of every run to keep the crenellations pointing
+  // away from the keep. A walkway has a parapet on both sides; drawn that way
+  // it is the same wall whichever flank it is on, and the mirroring goes.
+  // And it is as TALL as the east-west run, which is what was wrong with it.
+  //
+  // The walkway is one tile and the face-on run is two, so a wall that turned
+  // south dropped its walk a full two tiles at the corner and carried on at the
+  // wrong level: the same wall drawn at two different heights, meeting at a
+  // step. The fix is not to shorten the run but to give the strip the same
+  // frame. The walk goes in the UPPER tile, where the east-west run keeps its
+  // merlon course, so the two walks meet on one line and the turn is
+  // continuous; the wall's face goes underneath.
+  //
+  // Along a run that face is never seen — the next tile south draws its own
+  // walk over it, and buildings paint north to south — so it shows at exactly
+  // one place, the southern end of the run, which is the one spot where a wall
+  // going away from you does present a face. That falls out of the geometry
+  // rather than needing a special piece for it.
+  const walkTop = ops.blank(T, T);
+  ops.blit(walkTop, prep(partImg(S, COMPOUND_PART.walkway)), 0, 0);
+  ops.drawOver(walkTop, prep(partImg(S, COMPOUND_PART.parapetW)), 0, 0);
+  ops.drawOver(walkTop, prep(partImg(S, COMPOUND_PART.parapetE)), 0, 0);
+  const strip = ops.blank(T, 2 * T);
+  ops.drawOver(strip, walkTop, 0, 0);
+  ops.blit(strip, face, 0, T);
+  // drawWall puts the sprite's anchor at the tile's base, which sits 0.35 of a
+  // tile below the centre; the anchor is set so the art's bottom edge lands on
+  // the tile's bottom edge instead, flush with the compound.
+  const seat = Math.round(0.15 * T);
+  const desc = (img, name) => ({
+    file: write(img, 'buildings', setName, 'wall_' + name + '.png'),
+    w: img.width, h: img.height, anchorX: Math.round(img.width / 2), anchorY: img.height - seat,
+    footW: Math.round(img.width * 0.8),
+  });
+  // A corner is built like the horizontal run so it keeps that height — the
+  // turn happens on the merlon course, and the face below it is the same face
+  // the run either side of it stands on, so the three butt together with no
+  // step. Without this the corner drew as a plain horizontal cap: the run
+  // stopped dead and the walkway started, with nothing carrying the parapet
+  // round.
+  const cornerRun = (part, base) => {
+    const img = ops.blank(T, 2 * T);
+    ops.drawOver(img, prep(partImg(S, part)), 0, 0);
+    ops.blit(img, base, 0, T);
+    return img;
+  };
+
+  // The same run and the same corners seen from behind — and what is under the
+  // merlons changes with them, which is the whole point.
+  //
+  // A curtain wall carries its crenellations on its OUTER edge only; the inner
+  // side is the wall-walk, open to the courtyard. So from inside you do not see
+  // a wall's face at all. You see the walk, with the parapet standing along its
+  // far edge — which is what the aerial photographs of Pembroke and Windsor
+  // show, and what a back wall drawn with a face underneath gets wrong: it
+  // reads as a second outward-facing rampart with its back to the keep.
+  //
+  // Putting the walk under it also joins the run to the north-south pieces
+  // either side of it, which are that same walk seen from above. The walkway
+  // turns the corner and carries on, as it does on a real curtain.
+  // The walk as the camera sees it from inside: the walkway with a low parapet
+  // along its NEAR edge.
+  //
+  // Without that edge the back run was an open slab of flagstone that stopped
+  // dead on the grass, and it read as front-facing for want of anything saying
+  // otherwise. A wall-walk has a parapet on both sides — the crenellated one
+  // outside, a plain one in — and the north-south piece has had both all along,
+  // which is also why the corner between them jarred: a framed walk running into
+  // an unframed one. Both are framed now and the junction is continuous.
+  // The walk is a STRIP along the top of the wall's inner face, not a floor.
+  //
+  // It used to be a whole tile of flagstone, and from inside that reads as a
+  // pale slab lying on the grass rather than as the top of a wall — there was
+  // nothing between the walk and the ground. Standing in a courtyard you see
+  // the inner face rising out of the floor, the walk foreshortened along the
+  // top of it, and the merlons beyond; so the tile is the face, with the walk
+  // laid across its upper edge.
+  const walk = ops.blank(T, T);
+  ops.blit(walk, face, 0, 0);
+  // No coping bar over the top of it. That piece draws its rail low in the
+  // tile, which is right under a full tile of flagstone and wrong here: it put
+  // a pale bar along the FOOT of the wall, and that bar — not the walkway — was
+  // the flat slab the wall appeared to be standing on.
+  const walkBand = Math.round(T * 0.34);
+  ops.drawOver(walk, ops.crop(prep(partImg(S, COMPOUND_PART.walkway)), 0, 0, T, walkBand), 0, 0);
+
+  const runBack = ops.blank(T, 2 * T);
+  ops.drawOver(runBack, prep(partImg(S, COMPOUND_PART.merlonBack[1])), 0, 0);
+  ops.blit(runBack, walk, 0, T);
+
+  const out = {};
+  const tower = ops.blank(2 * T, COMPOUND_PART.towerRows.length * T);
+  COMPOUND_PART.towerRows.forEach((row, i) => {
+    ops.drawOver(tower, prep(partImg(S, ['B', 13, row, 2, 1])), 0, i * T);
+  });
+  out.tower = desc(tower, 'tower');
+  for (const name of ['mid', 'capE', 'capW', 'post']) {
+    out[name] = desc(run, name);
+    out['back_' + name] = desc(runBack, 'back_' + name);
+  }
+  for (const name of ['vertMid', 'vertCapN', 'vertCapS']) out[name] = desc(strip, name);
+  for (const name of ['cornerNW', 'cornerNE', 'cornerSW', 'cornerSE']) {
+    out[name] = desc(cornerRun(COMPOUND_PART[name], face), name);
+    const back = 'back' + name[0].toUpperCase() + name.slice(1);
+    out['back_' + name] = desc(cornerRun(COMPOUND_PART[back], walk), 'back_' + name);
+  }
+  return out;
+}
+
+
+
+
+
+
 function buildBuildingSet(setName, colour) {
   const out = {};
   const sheets = {};
@@ -370,21 +1005,22 @@ function buildBuildingSet(setName, colour) {
       out[type] = cutBuildingAt(sheet, def.rect, scale, 'buildings', setName, `${type}.png`);
     }
   }
-  // The tower is the one building that does not come off the MiniWorldSprites
-  // sheets at all.
-  out.tower = buildTowerArt(setName);
-
-  // Nothing in BUILDING_CELLS reads the Tower sheet any more, so the walls
-  // have to ask for it themselves.
-  const towerSheet = sheets.Tower || (sheets.Tower = miniBuildingSheet(colour, 'Tower'));
-  out.wall = {};
-  for (const [piece, rect] of Object.entries(WALL_CELLS)) {
-    out.wall[piece] = cutBuilding(towerSheet, rect, 'buildings', setName, `wall_${piece}.png`);
+  // The keep and the tower are the two buildings that do not come off the
+  // MiniWorldSprites sheets at all.
+  // The compound, the tower and the walls are the buildings that do not come
+  // off the MiniWorldSprites sheets at all.
+  // Anything with a PNG in assets/buildings-src wins over the MiniWorldSprites
+  // cut above. That folder is where tools/make-building.js puts what it
+  // composes out of the Winlu sheets, and once a file is there it is ART — open
+  // it, repaint it, and the build takes what it finds. Same contract as the
+  // keep, which is a PNG somebody drew.
+  for (const type of Object.keys(BUILDING_CELLS)) {
+    const made = buildFromSource(type, setName);
+    if (made) out[type] = made;
   }
-  // The same three cells again, turned, for runs going north-south.
-  for (const [piece, from] of Object.entries(WALL_TURNED)) {
-    out.wall[piece] = turnedWall(towerSheet, WALL_CELLS[from], 'buildings', setName, `wall_${piece}.png`);
-  }
+  out.castle = buildKeep(setName);
+  out.tower = buildWinluTower(setName);
+  out.wall = buildWallPieces(setName);
   return out;
 }
 
@@ -458,40 +1094,193 @@ function splitSprites(img, minW = 6, minH = 6) {
   }
   return out;
 }
+// Map dressing, out of the Winlu object sheet (Fantasy_Outside_D).
+//
+// These sheets are a tile grid, not a sprite atlas: objects are packed
+// tile-tight and touch each other, so the row-band/column-run split that works
+// on the older packs returns the whole sheet as one island. They are cut by
+// tile rectangle instead, and each rectangle is deliberately drawn a little
+// generous and then cleaned up by keeping only its largest connected blob —
+// which is what stops the corner of the neighbouring tree coming along without
+// anyone having to find a pixel-exact rectangle by eye.
+//
+// Every pick is then brought down to a size that dresses a strategy map rather
+// than hiding armies on it. The pack draws a tree at four to six tiles tall,
+// which is a fine thing to walk a hero past and hopeless to fight a battle
+// under; the last number of each row is the height in tiles it ends up.
+//
+// [name, col, row, wTiles, hTiles, tilesTall]
+// The big-tree sheet ships per edition alongside the tilesets.
+function bigTreeSheet() {
+  const roots = [
+    path.join(SRC, 'Fantasy_Tileset_Green_Edition_upgrade', 'characters'),
+    path.join(SRC, 'Winlu exterior remaster', 'Winlu exterior remaster',
+      'Fantasy_Tileset_Green_Edition_upgrade', 'characters'),
+  ];
+  for (const r of roots) {
+    const f = path.join(r, '!$Big_Trees_green.png');
+    if (fs.existsSync(f)) return f;
+  }
+  return null;
+}
+
+const WINLU_PROPS = {
+  // The pine starts at row 9, not row 8. Row 8 holds a smaller conifer whose
+  // foliage touches this one's tip, and largestIsland cannot help there — the
+  // two are genuinely one blob of opaque pixels, so the tall pine shipped with
+  // a dark lump balanced on its point.
+  tree: [
+    ['round',  0,  0, 4, 4, 2.4],
+    ['lean',   3,  1, 5, 4, 2.4],
+    ['broad',  0,  8, 5, 5, 2.6],
+    ['pine',   5, 10, 3, 5, 2.8],
+    ['broad2', 0, 12, 4, 4, 2.4],
+  ],
+  // The canopy trees, off !$Big_Trees_green. That sheet is a three-by-four grid
+  // of cells four tiles wide and six tall. Only three of the green ones are any
+  // use loose on a map: the other two grow OUT OF A CLIFF and come with a lump
+  // of stone attached to the trunk, which is the same trap as the objects drawn
+  // on grey shadow tiles — opaque art, joined to the thing you want, so
+  // largestIsland keeps it. The bottom two rows are the autumn colourway and
+  // belong to the red edition.
+  bigtree: [
+    ['pineBig',  8,  0, 4, 6, 4.4, null, 'BIGTREE'],
+    ['pineTall', 4,  6, 4, 6, 4.2, null, 'BIGTREE'],
+    ['canopy',   8,  6, 4, 6, 4.6, null, 'BIGTREE'],
+  ],
+  // Stumps, dead trunks and a fallen log live here rather than in `crag`,
+  // because `crag` is what dresses mountain tiles and a tree stump standing
+  // on a bare crag reads as a mistake — which is exactly how it looked the
+  // first time round.
+  // The bare-trunk cluster at (0,4) and the small conifer at (5,7) are both
+  // gone, and this is the trap on these sheets: several objects are drawn
+  // sitting on a HARD-EDGED GREY SHADOW TILE, which is opaque art, connected to
+  // the object, and therefore survives largestIsland untouched. They shipped as
+  // trees standing in grey boxes. Anything picked from this sheet has to be
+  // looked at on a contrasting background before it is trusted — the check
+  // renders every prop on magenta for exactly this reason.
+  bush: [
+    ['a',      9,  7, 1, 1, 0.9],
+    ['b',     10,  7, 1, 1, 0.9],
+    ['c',     11,  7, 1, 1, 0.9],
+    ['log',   14,  4, 2, 1, 1.1],
+    ['stump',  4,  0, 1, 2, 1.0],
+  ],
+  // What stands on a plateau, now that the plateau has a cliff face of its own.
+  //
+  // These have to belong to the SAME ROCK as the cliff, and that is the whole
+  // brief. The A5 cliff is angular: flat stones stacked in courses, crisp edges,
+  // moss in the joints. Sheet D's big outcrops at (8,0) are the opposite —
+  // rounded, bulbous, smoothly shaded, and two and a half tiles of it. Standing
+  // on the plateau next to a stacked-stone cliff they read as boulders from a
+  // different game dropped onto the map, and the two of them were the whole of
+  // what was wrong with the ridges.
+  //
+  // So the big masses are gone and what is left is small and angular: three
+  // grass-topped rock ledges, which are the same courses of flat stone the cliff
+  // is built from with growth on top, and one bare stone. Nothing here is over
+  // a tile and a half. The cliff carries the silhouette; these are texture on
+  // the ground behind it.
+  //
+  // Every one is free-standing art, which is not a given on this sheet and is
+  // the reason the picks are what they are — the cliff pieces on
+  // !$Cliff_decoration.png and the grass-topped mesas further down D are all
+  // EDGE pieces cut to butt against an A4 wall, with straight verticals and
+  // notches taken out of them. (8,3) is a cave mouth, (11,3) is a rock and a
+  // bowl that largestIsland cannot separate, and (14,5) and (12,5) are logs.
+  // All tried, all out.
+  //
+  // [name, col, row, wTiles, hTiles, tilesTall, flip?]
+  crag: [
+    ['ledge',   12, 0, 3, 1, 1.1],
+    ['moss',    13, 2, 2, 2, 1.5],
+    ['spur',    12, 2, 1, 2, 1.3],
+    ['stone',   13, 1, 2, 1, 0.85],
+    ['ledgeB',  12, 0, 3, 1, 1.0, 'flip'],
+  ],
+  // Ground cover, and it has to stay quiet: this group lands on a large share
+  // of open ground, so anything with a saturated colour in it becomes the first
+  // thing the eye finds on the whole map. The pack's yellow mushroom cluster was
+  // in here and read as a dropped item rather than as scenery.
+  tuft: [
+    ['grass', 12, 10, 1, 1, 0.8],
+    ['white', 13, 10, 1, 1, 0.8],
+    ['red',    8,  7, 1, 1, 0.7],
+  ],
+  pebble: [
+    ['scatter', 13, 4, 1, 1, 0.6],
+    ['stone',   10, 6, 1, 1, 0.6],
+  ],
+};
+
+// The biggest connected run of opaque pixels in an image, everything else
+// dropped. Diagonal-connected, because a canopy's outline is ragged and
+// four-connectivity shreds it into confetti.
+function largestIsland(img) {
+  const n = img.width * img.height;
+  const seen = new Uint8Array(n);
+  let best = null, bestSize = 0;
+  const stack = [];
+  for (let s = 0; s < n; s++) {
+    if (seen[s] || img.data[s * 4 + 3] <= 8) continue;
+    stack.length = 0; stack.push(s); seen[s] = 1;
+    const cells = [];
+    while (stack.length) {
+      const i = stack.pop();
+      cells.push(i);
+      const x = i % img.width, y = (i / img.width) | 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= img.width || ny >= img.height) continue;
+          const j = ny * img.width + nx;
+          if (seen[j] || img.data[j * 4 + 3] <= 8) continue;
+          seen[j] = 1; stack.push(j);
+        }
+      }
+    }
+    if (cells.length > bestSize) { bestSize = cells.length; best = cells; }
+  }
+  if (!best) return null;
+  const keep = ops.blank(img.width, img.height);
+  for (const i of best) img.data.copy(keep.data, i * 4, i * 4, i * 4 + 4);
+  return keep;
+}
 
 function buildProps() {
-  const groups = {};
+  const d = decodePNG(need(winluSheet('Fantasy_Outside_D')));
+  // The big trees live on their own character sheet, not on the object sheet.
+  // They are what the artist's own maps are full of — canopies three and four
+  // tiles across, with their own shadow baked in — and next to them the trees
+  // cut from sheet D are saplings. A group can name its sheet; everything that
+  // does not still comes off D.
+  const sheets = { D: d, BIGTREE: decodePNG(need(bigTreeSheet())) };
 
-  // Trees and bushes: Cainos plants come with a baked shadow, which grounds
-  // them on the grass without extra draw calls.
-  // The pack draws them at roughly 4 tiles tall, which swamps a strategy map —
-  // brought down to ~2 tiles so they dress the ground without hiding armies.
-  const plants = splitSprites(decodePNG(need(path.join(CAINOS, 'Extra', 'TX Plant with Shadow.png'))), 10, 10);
-  groups.tree = plants.filter(p => p.height >= 60).slice(0, 3)
-    .map(p => ops.resizeToWidth(p, Math.round(p.width * 0.55)));
-  groups.bush = plants.filter(p => p.height >= 18 && p.height < 60).slice(0, 6)
-    .map(p => ops.resizeToWidth(p, Math.round(p.width * 0.7)));
-
-  // Boulders for mountain tiles: the rock cluster row at the bottom of TX Props.
-  const props = splitSprites(decodePNG(need(path.join(CAINOS, 'Extra', 'TX Props with Shadow.png'))), 12, 10);
-  groups.boulder = props.filter(p => p.height >= 14 && p.height <= 50 && p.width >= 16).slice(-6);
-
-  // Small village dressing, already one file per sprite.
-  const pick = (dir, names) => names.map(n => decodePNG(need(path.join(VILLAGE, '2 Objects', dir, n))));
-  groups.tuft = pick('5 Grass', ['1.png', '2.png', '3.png', '4.png', '5.png', '6.png']);
-  groups.pebble = pick('2 Stone', ['1.png', '2.png', '3.png', '4.png', '5.png', '6.png']);
-
-  for (const [kind, imgs] of Object.entries(groups)) {
+  for (const [kind, picks] of Object.entries(WINLU_PROPS)) {
+    const imgs = [];
+    for (const [name, col, row, wt, ht, tall, flip, sheet] of picks) {
+      const src = sheets[sheet || 'D'];
+      let img = ops.crop(src, col * TILE, row * TILE, wt * TILE, ht * TILE);
+      img = largestIsland(img) || img;
+      // A mirrored second cut of the same rock, so a ridge is not one
+      // silhouette repeated. Flipped before the trim, which does not care.
+      if (flip === 'flip') img = ops.flipX(img);
+      const box = ops.bbox(img);
+      if (!box) throw new Error('empty prop rectangle: ' + kind + '/' + name);
+      img = ops.crop(img, box.x0, box.y0, box.w, box.h);
+      const want = Math.max(8, Math.round(tall * TILE));
+      imgs.push(ops.resize(img, Math.max(1, Math.round(img.width * want / img.height)), want));
+    }
     manifest.props[kind] = imgs.map((img, i) => {
       const box = ops.bbox(img);
       return {
-        file: write(img, 'props', `${kind}${i + 1}.png`),
+        file: write(img, 'props', kind + (i + 1) + '.png'),
         w: img.width, h: img.height,
         anchorX: Math.round(img.width / 2),
         anchorY: box ? box.y1 + 1 : img.height,
       };
     });
-    console.log(`  props/${kind}: ${imgs.length}`);
+    console.log('  props/' + kind + ': ' + imgs.length);
   }
 }
 
@@ -714,14 +1503,19 @@ const COLOSSUS_SHEETS = {
 // mirrored. Getting it backwards is silent in exactly the way BALLISTA_ROWS
 // was: every colossus simply walks backwards for ever.
 //
-// **It is used at 1:1**, alone among the character art, which is the same call
-// the archer tower's pack got and for the same reason. Its body is 71x62 in the
-// source, and the first golem's is 38x38 doubled to 76x76 — so at 1:1 the two
-// prizes are already the same size on the map, and putting MINI_SCALE through
-// this one would give a five-tile monster. Its pixels are therefore finer than
-// the units it stands beside. That is the trade, and it is the one the
-// skeletons pass was reverted for getting wrong: measure the sprite that
-// actually ships, not the one you meant to build.
+// **It is not magnified like the rest of the character art**, which is the same
+// call the archer tower's pack got and for the same reason. Its body is 71x62 in
+// the source and the first golem's is 38x38, so putting the full MINI_SCALE
+// through this one would give a five-tile monster standing beside a two-tile
+// one. Its pixels are therefore finer than the units it stands beside. That is
+// the trade, and it is the one the skeletons pass was reverted for getting
+// wrong: measure the sprite that actually ships, not the one you meant to build.
+//
+// The *rule* is "the two shrine prizes are the same size on the map", not any
+// particular factor — this was 1:1 while the golem was doubled, and had to move
+// when the tile went to 48 and the golem tripled. rules.test.js pins the rule,
+// and it is what caught the colossus being left at half the golem's height.
+const COLOSSUS_SCALE = MINI_SCALE / 2;
 function buildColossus() {
   if (!fs.existsSync(GOLLUX)) {
     console.log('  units/colossus: Gollux pack not found, skipping');
@@ -729,8 +1523,16 @@ function buildColossus() {
   }
   const sheets = {};
   for (const [name, def] of Object.entries(COLOSSUS_SHEETS)) {
-    const img = decodePNG(need(path.join(GOLLUX, def.file)));
-    sheets[name] = { img, frame: def.frame, count: Math.round(img.width / def.frame) };
+    let img = decodePNG(need(path.join(GOLLUX, def.file)));
+    let frame = def.frame;
+    // Not 1:1 any more — see COLOSSUS_SCALE. Scaled here, before anything
+    // measures it, so the anchors, the reach and the frame box below are all
+    // taken from the art that actually ships rather than from the source.
+    if (COLOSSUS_SCALE !== 1) {
+      img = ops.resize(img, Math.round(img.width * COLOSSUS_SCALE), Math.round(img.height * COLOSSUS_SCALE));
+      frame = Math.round(frame * COLOSSUS_SCALE);
+    }
+    sheets[name] = { img, frame, count: Math.round(img.width / frame) };
   }
   // Where the body stands inside its own cell, taken from the first frame of
   // each sheet — a calm one in all three. The cells are different widths, so
@@ -811,9 +1613,16 @@ const ELF_ATTACK_ROW = 4;
 // labelled with them — and rules.test.js pins that they stay matched, because a
 // unit that is a different size from its counterparts reads as a bug long
 // before anybody works out which pack it came from.
-const ELF_CELL = { swordsman: 32, knight: 64 };
-const ELF_CHAR_H = { swordsman: 24, knight: 48 };
-const ELF_FOOT_MARGIN = 2;                 // pixels of cell left under the feet
+//
+// Expressed as multiples of MINI_SCALE rather than as the finished pixel
+// numbers, because the finished numbers are only ever "whatever the other races
+// come out at". They were written out flat when the tile was 32, and the move
+// to 48 left the elves at two thirds the size of everybody else with every
+// other check still passing — the frame-size pin in rules.test.js was the only
+// thing that caught it.
+const ELF_CELL = { swordsman: 16 * MINI_SCALE, knight: 32 * MINI_SCALE };
+const ELF_CHAR_H = { swordsman: 12 * MINI_SCALE, knight: 24 * MINI_SCALE };
+const ELF_FOOT_MARGIN = MINI_SCALE;        // pixels of cell left under the feet
 // Bringing 3:1 pixel art down averages it, and averaging costs contrast: the
 // elves came out soft and muted beside the hard-edged, black-outlined placeholder
 // art they stand next to, and read as washed out on a green field. A modest lift
@@ -1013,42 +1822,92 @@ function buildUnits() {
 // UI frames
 // ---------------------------------------------------------------------------
 
-// Kenney's 9-slice panels, doubled so their pixels are the same size as the
-// sprites'. Each is 96x96 after scaling; the stylesheet slices 16px corners off
-// it with border-image, which keeps the art at 1:1 whatever the element's size.
+// Every frame the interface is built from is cut from the one Dark Ages sheet.
 //
-// The pack's browns are a cheerful mid-tone that fights the game's dark wood,
-// so the chrome frames are darkened here rather than in CSS — a filter would
-// have to be reapplied everywhere the frame is used, and would dim the text
-// with it. The tan card and the yellow buttons are left alone: they are meant
-// to read as parchment and as the one loud thing on the panel.
-const DARKEN = { satMul: 0.85, lightAdd: -0.20 };
-const DEEP = { satMul: 0.55, lightAdd: -0.42 };
-const LIFT = { satMul: 0.9, lightAdd: -0.05 };
+// It used to be two packs. Kenney's 9-slices drew the panels, cards and
+// buttons; this sheet drew the health bar and the attack banner. They never sat
+// together and no amount of recolouring fixed it — Kenney's browns are a
+// cheerful mid-tone with soft bevels, and this sheet is charcoal, gold leaf and
+// deep blue with knotwork. Half the interface belonged to a different game from
+// the other half. So the whole thing comes off one sheet now, and the recolours
+// below are no longer trying to drag one pack towards another: they are the
+// pack's own navy button turned gold for a primary and red for a danger, by
+// hue, which is the only honest way to get a matching set out of art that ships
+// in one colour.
+//
+// Each frame quotes its corner in SOURCE pixels and the scale it is drawn at.
+// The stylesheet's border-width has to equal slice * scale or the corner art is
+// resampled into the wrong space — see the check in tools/tests/client.test.js
+// that holds the two together. The scales differ on purpose: a panel wraps
+// something big and can afford an ornate corner, a button is forty pixels tall
+// and cannot.
+const DEEP = { satMul: 0.55, lightAdd: -0.12 };
+// The navy fill is hue 0.59; gold is 0.09 and the pack's alarm red is 0.02.
+// Both shifts are fenced to the blues so the tan rim and the gold scrollwork
+// come through untouched — the frame is already the right colour, it is only
+// ever the panel inside it that changes.
+const BLUES = { hueFrom: 0.45, hueTo: 0.75 };
+const TO_GOLD = { ...BLUES, hueShift: 0.50, satMul: 1.15, lightAdd: 0.30 };
+const TO_RED = { ...BLUES, hueShift: 0.43, satMul: 1.30, lightAdd: 0.06 };
+// A pressed primary is the same gold pushed in, so it is cut from the navy
+// button like the primary is rather than from the olive one — the olive has no
+// blue in it for the hue fence to catch, and came out plain grey.
+const TO_GOLD_DOWN = { ...BLUES, hueShift: 0.50, satMul: 1.05, lightAdd: 0.18 };
+// Not fenced: a disabled control should lose its colour everywhere, rim
+// included. Lifted rather than sunk, because the olive it starts from is
+// already dark enough to swallow the label.
+const FADE = { satMul: 0.12, lightAdd: 0.10 };
+
 const UI_FRAMES = {
-  panel:          { file: ['Ancient', 'brown.png'], recolor: DARKEN },
-  panelPressed:   { file: ['Ancient', 'brown_pressed.png'], recolor: DARKEN },
-  // A shade lighter than the panel, so a button is visible as one against it.
-  button:         { file: ['Ancient', 'brown.png'], recolor: LIFT },
-  buttonPressed:  { file: ['Ancient', 'brown_pressed.png'], recolor: LIFT },
-  card:           { file: ['Ancient', 'tan.png'] },
-  inset:          { file: ['Ancient', 'grey.png'], recolor: DEEP },
-  disabled:       { file: ['Ancient', 'grey.png'], recolor: { satMul: 0.6, lightAdd: -0.3 } },
-  primary:        { file: ['Colored', 'yellow.png'] },
-  primaryPressed: { file: ['Colored', 'yellow_pressed.png'] },
-  danger:         { file: ['Colored', 'red.png'] },
+  // The charcoal knotwork box, at two weights of the same art. The panel runs
+  // down the whole side of the screen and can carry a 28px frame; the small
+  // things floating on the map — the log, the minimap, the roster — cannot, and
+  // squeezing the same art into a thinner border would resample the corner,
+  // which is the one thing this pipeline exists to avoid. So the light one is
+  // the same box at 1:1.
+  panel:          { x: 210, y:  18, w: 60, h: 60, slice: 14, scale: 2 },
+  plate:          { x: 210, y:  18, w: 60, h: 60, slice: 14, scale: 1 },
+  // The same box, sunk: what a log or a minimap is recessed into.
+  inset:          { x: 306, y:  18, w: 60, h: 60, slice: 14, scale: 2, recolor: DEEP },
+  // Torn-edged parchment. The one warm surface, and the only thing dark text
+  // is ever set on.
+  card:           { x:  96, y:   0, w: 96, h: 96, slice: 10, scale: 2 },
+  // Gold and lapis with corner scrolls. Too loud to wrap a log in, exactly
+  // right for the things that stop the game: the menu, the lobby, the endings.
+  // Kept at 1:1 — the corner scroll is 22 source pixels and doubling it puts a
+  // 44px frame around boxes that are only a few hundred wide.
+  ornate:         { x:   0, y:   0, w: 96, h: 96, slice: 22, scale: 1 },
+  // A scroll-capped plaque, for the headings that divide the side panel.
+  header:         { x:   0, y: 104, w: 64, h: 19, slice: [4, 14], scale: 2 },
+  button:         { x: 288, y: 106, w: 32, h: 15, slice: 4, scale: 3 },
+  buttonPressed:  { x: 320, y: 106, w: 32, h: 15, slice: 4, scale: 3 },
+  primary:        { x: 288, y: 106, w: 32, h: 15, slice: 4, scale: 3, recolor: TO_GOLD },
+  primaryPressed: { x: 288, y: 106, w: 32, h: 15, slice: 4, scale: 3, recolor: TO_GOLD_DOWN },
+  danger:         { x: 288, y: 106, w: 32, h: 15, slice: 4, scale: 3, recolor: TO_RED },
+  disabled:       { x: 320, y: 106, w: 32, h: 15, slice: 4, scale: 3, recolor: FADE },
 };
 
 function buildUi() {
+  const sheet = decodePNG(need(DARKAGES));
+  const borders = [];
   for (const [name, def] of Object.entries(UI_FRAMES)) {
-    let img = decodePNG(need(path.join(UI, ...def.file)));
+    let img = ops.crop(sheet, def.x, def.y, def.w, def.h);
     if (def.recolor) img = ops.recolor(img, def.recolor);
-    img = ops.scaleUp(img, MINI_SCALE);
-    manifest.ui[name] = { file: write(img, 'ui', `${name}.png`), size: img.width, slice: 16 };
+    img = ops.scaleUp(img, def.scale);
+    const slice = (Array.isArray(def.slice) ? def.slice : [def.slice, def.slice])
+      .map(n => n * def.scale);
+    manifest.ui[name] = {
+      file: write(img, 'ui', `${name}.png`), w: img.width, h: img.height,
+      slice: slice[0] === slice[1] ? slice[0] : slice,
+    };
+    borders.push(`${name} ${slice[0] === slice[1] ? slice[0] : slice.join('/')}`);
   }
   buildKeepBar();
   buildBanner();
+  // Printed because these are the numbers the stylesheet has to repeat, and
+  // reading them off the build beats measuring the PNGs by hand.
   console.log(`  ui: ${Object.keys(manifest.ui).length} pieces`);
+  console.log(`       borders: ${borders.join(', ')}`);
 }
 
 // The town center's health bar, from the Dark Ages UI sheet.
@@ -1066,6 +1925,21 @@ function buildUi() {
 // held and its middle repeated, and the crest goes out as its own sprite for
 // the page to centre over it.
 const UI_BAR_SCALE = 3;
+// The health bar is back at three, having been to five and to four on the way,
+// and the number that decides it is not legibility — it is the top edge.
+//
+// The bar hangs from the top of the map with its crest ABOVE the trough, so the
+// whole assembly is crest + trough tall and none of it can go off-screen. The
+// corner buttons finish 46px down. For the trough's bottom to land on that same
+// line, crest and trough together have to fit in 46px, and 21 + 24 = 45 does.
+// At four it was 28 + 32 = 60 and the bar had to sit fifteen pixels below the
+// buttons; at five it was worse and short with it, because a tall bar has to be
+// short to fit between the stat row and the Music/Exit row.
+//
+// So the scale is set by where the bar has to line up, and the length it gains
+// by being thin is the reason it reads at all. The banner keeps UI_BAR_SCALE —
+// it is already the width of the screen when it fires.
+const KEEP_BAR_SCALE = 3;
 const DARKAGES_BAR = { x: 197, y: 135, w: 86, h: 15 };   // frame incl. crest
 const DARKAGES_CREST_H = 7;                               // rows 0-6 of it
 const DARKAGES_FILLS = {
@@ -1085,24 +1959,24 @@ function buildKeepBar() {
   const d = DARKAGES_BAR;
 
   const trough = ops.scaleUp(
-    ops.crop(sheet, d.x, d.y + DARKAGES_CREST_H, d.w, d.h - DARKAGES_CREST_H), UI_BAR_SCALE);
-  manifest.ui.keepbar = { file: write(trough, 'ui', 'keepbar.png'), w: trough.width, h: trough.height, slice: [0, 6 * UI_BAR_SCALE] };
+    ops.crop(sheet, d.x, d.y + DARKAGES_CREST_H, d.w, d.h - DARKAGES_CREST_H), KEEP_BAR_SCALE);
+  manifest.ui.keepbar = { file: write(trough, 'ui', 'keepbar.png'), w: trough.width, h: trough.height, slice: [0, 6 * KEEP_BAR_SCALE] };
 
   // The crest, trimmed to itself so the page can centre it without knowing how
   // much empty sheet was around it.
   const crestBand = ops.crop(sheet, d.x, d.y, d.w, DARKAGES_CREST_H);
   const cb = ops.bbox(crestBand);
-  const crest = ops.scaleUp(ops.crop(crestBand, cb.x0, 0, cb.x1 - cb.x0 + 1, DARKAGES_CREST_H), UI_BAR_SCALE);
+  const crest = ops.scaleUp(ops.crop(crestBand, cb.x0, 0, cb.x1 - cb.x0 + 1, DARKAGES_CREST_H), KEEP_BAR_SCALE);
   manifest.ui.keepbarCrest = { file: write(crest, 'ui', 'keepbar-crest.png'), w: crest.width, h: crest.height };
 
   const fills = { ...DARKAGES_FILLS, amber: DARKAGES_FILLS.red };
   for (const [name, f] of Object.entries(fills)) {
     let img = ops.crop(sheet, f.x, f.y, f.w, f.h);
     if (name === 'amber') img = ops.recolor(img, AMBER_FROM_RED);
-    img = ops.scaleUp(img, UI_BAR_SCALE);
+    img = ops.scaleUp(img, KEEP_BAR_SCALE);
     manifest.ui[`keepbarFill_${name}`] = {
       file: write(img, 'ui', `keepbar-fill-${name}.png`), w: img.width, h: img.height,
-      slice: [0, 3 * UI_BAR_SCALE],
+      slice: [0, 3 * KEEP_BAR_SCALE],
     };
   }
 }
@@ -1405,6 +2279,69 @@ function timberBand(img, box, from) {
   return { top: top - 1 - box.y0, h: y - top + 1 };   // the outline row caps it
 }
 
+// The archer tower: the curtain wall's own round tower under the pack's own
+// conical roof.
+//
+// The roof is a real piece and always was — !$Big_Decoration.png carries a
+// scalloped slate cone with a timber eave, drawn in elevation, sized for a
+// round tower. It sits at (9,37) on that sheet, 127x228.
+//
+// It was missed twice. First by not opening characters/ at all, and then by
+// rendering that very file and looking at the sheet beside it instead. A cone
+// was hand-built out of A3 shingle in the meantime, which was decent and is
+// gone, because a piece the artist drew beats a piece assembled from his
+// texture every time.
+//
+// That sheet also has a belfry — the same cone over an open timber gallery —
+// which is the "roof on posts" that would let an archer stand under a roof
+// and be seen. It has a bell hanging in it. Worth returning to if the archer
+// comes back.
+const WINLU_TOWER_ROWS = [2, 3, 6];   // plain shaft, plain shaft, rounded base
+const CONE_SRC = { file: '!$Big_Decoration.png', x: 9, y: 37, w: 127, h: 228 };
+const CONE_SET = 26;                  // how far the eave comes down over the drum
+
+function buildWinluTower(setName) {
+  const S = compoundSheets();
+  const T = TILE;
+  const dark = DARK_SETS.has(setName);
+  const cast = COMPOUND_CAST[setName];
+  const tint = (img) => recast(img, cast.hue, cast.sat, 1);
+  const prep = dark ? (img) => tint(recast(img, 0.62, 0.10, 0.62)) : tint;
+
+  const shaft = ops.blank(2 * T, WINLU_TOWER_ROWS.length * T);
+  WINLU_TOWER_ROWS.forEach((row, i) => {
+    ops.drawOver(shaft, prep(partImg(S, ['B', 13, row, 2, 1])), 0, i * T);
+  });
+
+  const deco = decodePNG(need(path.join(WINLU, 'characters', CONE_SRC.file)));
+  const roof = prep(ops.crop(deco, CONE_SRC.x, CONE_SRC.y, CONE_SRC.w, CONE_SRC.h));
+  const inset = Math.round((roof.width - shaft.width) / 2);
+  const shaftTop = roof.height - CONE_SET;
+  const body = ops.blank(roof.width, shaftTop + shaft.height);
+  ops.drawOver(body, shaft, inset, shaftTop);
+  ops.drawOver(body, roof, 0, 0);
+  // An arrow slit, so its shots have somewhere to come from.
+  ops.drawOver(body, prep(partImg(S, ['B', 2, 4, 1, 2])), inset + Math.round(T / 2), shaftTop + 18);
+
+  return {
+    file: write(body, 'buildings', setName, 'tower.png'),
+    w: body.width, h: body.height, frames: 1, fps: 6,
+    anchorX: Math.round(body.width / 2), anchorY: body.height,
+    footW: Math.round(shaft.width * 0.62),
+    shadow: buildShadow(body, 'buildings', setName, 'tower_shadow.png'),
+    bannerAt: 0.78,
+    mountX: Math.round(body.width / 2), mountY: shaftTop + 34,
+  };
+}
+
+// The old archer tower, off the separate archers-and-archer-towers pack: a
+// six-frame animated tower with a real archer standing in its open top, idle
+// and loose clips in three facings.
+//
+// Nothing calls it. The tower is roofed now and a roof over an open top hides
+// whoever is standing in it, so the archer went — Seth said "for now", so this
+// is left whole rather than deleted. Point out.tower back at it and the archer
+// comes back exactly as he was, along with buildTowerArcher below.
 function buildTowerArt(setName) {
   const src = decodePNG(need(path.join(ARCHER, '2 Idle', TOWER_TIER + '.png')));
   const box = stripBox(src, TOWER_FRAME_W);

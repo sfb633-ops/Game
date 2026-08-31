@@ -91,13 +91,278 @@ const missing = [...new Set(wanted)].filter(id => !ids.has(id) && !client.includ
 check('every getElementById target exists somewhere', missing.length === 0,
   missing.length ? `missing: ${missing.join(', ')}` : `${new Set(wanted).size} ids`);
 
-// A north-south wall is mirrored on the west side of an empire, and the only
-// thing that knows which side that is, is the keep passed in with it. A call
-// site that forgets it draws the whole run facing one way.
-const wallCalls = [...client.matchAll(/Sprites\.drawWall\([^)]*\)/g)].map(m => m[0]);
-const noInside = wallCalls.filter(c => !c.includes('insideX'));
-check('every drawWall call says which side is inside', noInside.length === 0,
-  noInside.length ? noInside.join(' | ') : `${wallCalls.length} calls`);
+// A north-south wall has a parapet down BOTH edges, and that is what lets it
+// be the same sprite on either flank of an empire.
+//
+// This replaces a check that every drawWall call passed the keep in, which was
+// there because the old piece carried its battlement down one side only: it
+// had an outside, so the western half of every run had to be mirrored to point
+// it the right way. The piece is cut from the pack's own parapet kit now and
+// is the same wall whichever side you stand on, so the mirroring is gone — and
+// the thing worth guarding is the property that made it safe to remove. Ship a
+// one-sided piece again without restoring the mirror and this fails.
+//
+// Measured rather than asserted by eye: a parapet is the lit top of a wall and
+// the walkway between them is not, so both edges read brighter than the middle.
+// The margin is 11 or more in every faction set; 6 catches a missing parapet
+// without tripping on a recolour.
+// The cliff kit's diagonal cells are the orientation the terrain layer assumes.
+//
+// buildTerrainCanvas picks (3,11) for a lip with open ground west and (3,14)
+// for one open east, and the mirror of that for the base course. Those choices
+// only make sense for a particular corner layout, and the layout is not visible
+// in the code — it lives in the artwork. Crop the kit a row out, or point the
+// build at an edition whose A5 is laid out differently, and every diagonal
+// silently points the wrong way while every other check still passes.
+//
+// So classify each cell's sixteenths as rock or grass and assert which corner
+// the rock sits in.
+{
+  const kit = decodePNG(path.join(SRC, 'assets', 'terrain', 'cliffkit.png'));
+  const T = kit.width / 4;
+  const rockAt = (kc, kr, qx, qy) => {
+    let rock = 0, other = 0;
+    const x0 = kc * T + qx * (T / 2), y0 = kr * T + qy * (T / 2);
+    for (let y = y0; y < y0 + T / 2; y++) for (let x = x0; x < x0 + T / 2; x++) {
+      const o = (y * kit.width + x) * 4;
+      if (kit.data[o + 3] < 128) continue;
+      const mx = Math.max(kit.data[o], kit.data[o + 1], kit.data[o + 2]);
+      const mn = Math.min(kit.data[o], kit.data[o + 1], kit.data[o + 2]);
+      const sat = mx ? (mx - mn) / mx : 0;
+      sat < 0.25 ? rock++ : other++;
+    }
+    return rock > other;
+  };
+  // [kit row, corner the rock occupies] — kit rows are A5 rows 9..15, so the
+  // block's own rows start two down. The sheet grew upwards to take in the
+  // plain wall courses the body of a face is varied with, and every index in
+  // the terrain layer moved with it; this is the check that says so.
+  const want = [
+    [2, 'SE'],   // (3,11) lip, used where open ground lies WEST
+    [4, 'NW'],   // (3,13) base, used where open ground lies EAST
+    [5, 'SW'],   // (3,14) lip, used where open ground lies EAST
+    [6, 'NE'],   // (3,15) base, used where open ground lies WEST
+  ];
+  const corner = (kr) => {
+    const nw = rockAt(3, kr, 0, 0), ne = rockAt(3, kr, 1, 0);
+    const sw = rockAt(3, kr, 0, 1), se = rockAt(3, kr, 1, 1);
+    if (se && !nw) return 'SE';
+    if (nw && !se) return 'NW';
+    if (sw && !ne) return 'SW';
+    if (ne && !sw) return 'NE';
+    return 'none';
+  };
+  const wrong = [];
+  for (const [kr, expect] of want) {
+    const got = corner(kr);
+    if (got !== expect) wrong.push(`row ${kr} has rock ${got}, expected ${expect}`);
+  }
+  check("the cliff kit's diagonals point the way the terrain layer thinks",
+    wrong.length === 0, wrong.join('; ') || 'all four diagonals oriented as expected');
+}
+
+// Every wall piece stands at the same height, so a run that turns keeps its
+// walk on one line.
+//
+// This is the bug that made walls look broken for a long time and was hard to
+// name from a screenshot: the east-west run was two tiles and the north-south
+// run was one, so a wall turning a corner dropped its walkway a full two tiles
+// and carried on at the wrong level. Both are two tiles now. Anything that
+// reverts one of them without the other puts the step back, and the step is
+// invisible in any single piece — it only shows where two of them meet, which
+// is why it is worth a check of its own.
+{
+  const manifest = JSON.parse(fs.readFileSync(path.join(SRC, 'assets', 'manifest.json'), 'utf8'));
+  const bad = [];
+  for (const [name, set] of Object.entries(manifest.buildings.sets)) {
+    if (!set.wall) continue;
+    const heights = new Set(), anchors = new Set();
+    for (const [piece, def] of Object.entries(set.wall)) {
+      // The tower is exempt, and deliberately so. This invariant is about the
+      // pieces that carry the wall-WALK: they have to agree on height so a run
+      // that turns keeps its walk on one line. A tower does not carry a walk,
+      // it interrupts one — it is meant to stand above the wall, and pinning it
+      // to the wall's height would defeat the reason it is there.
+      if (piece === 'tower' || piece === 'back_tower') continue;
+      heights.add(def.h); anchors.add(def.anchorY);
+      if (def.h !== 2 * manifest.tileSize) bad.push(name + '/' + piece + ' is ' + def.h + 'px');
+    }
+    // It still has to be TALLER than the wall, or it is not doing its job.
+    const tower = set.wall.tower;
+    if (tower && tower.h <= 2 * manifest.tileSize)
+      bad.push(name + '/tower is only ' + tower.h + 'px, no taller than the wall');
+    // And centred on its own width, or it will not sit astride the corner.
+    if (tower && tower.anchorX !== Math.round(tower.w / 2))
+      bad.push(name + '/tower is not centred (anchorX ' + tower.anchorX + ' of ' + tower.w + ')');
+    if (heights.size !== 1) bad.push(name + ' mixes heights ' + [...heights].join(','));
+    if (anchors.size !== 1) bad.push(name + ' mixes anchors ' + [...anchors].join(','));
+  }
+  check('every wall piece is two tiles tall on one anchor, so a turn keeps its level',
+    bad.length === 0, bad.slice(0, 4).join('; ') || 'all sets level');
+}
+
+for (const set of ['cyan', 'red', 'purple', 'lime']) {
+  const wall = decodePNG(path.join(SRC, 'assets', 'buildings', set, 'wall_vertMid.png'));
+  // Only the walk course, which is the top tile of the piece. The north-south
+  // run is two tiles now — the walk where an east-west run keeps its merlons,
+  // and the wall's face underneath — so averaging the whole sprite mixes the
+  // parapets in with a plain brick face and washes the contrast out. The
+  // property being guarded is about the walk, so measure the walk.
+  const course = Math.min(wall.height, Math.round(wall.width));
+  const band = (x0, x1) => {
+    let sum = 0, n = 0;
+    for (let y = 0; y < course; y++) for (let x = x0; x < x1; x++) {
+      const o = (y * wall.width + x) * 4;
+      if (wall.data[o + 3] < 200) continue;
+      sum += (wall.data[o] + wall.data[o + 1] + wall.data[o + 2]) / 3; n++;
+    }
+    return n ? sum / n : 0;
+  };
+  const mid = Math.round(wall.width / 2);
+  const left = band(0, 8), centre = band(mid - 8, mid + 8), right = band(wall.width - 8, wall.width);
+  check(`  ${set}'s north-south wall has a parapet down both edges`,
+    left - centre >= 6 && right - centre >= 6,
+    `left +${Math.round(left - centre)}, right +${Math.round(right - centre)} against the walkway`);
+}
+// Where a run turns, it draws a TOWER. A turn is one horizontal neighbour and
+// one vertical one and nothing else; a T-junction has more and keeps the
+// horizontal art, which is what it always did and still looks right.
+//
+// All four turns give the same answer now, which is the point rather than a
+// loss of precision: this pack's castle never bends a curtain wall. Map008 runs
+// straight sections into round towers and lets the tower make the turn, so
+// there is no north-west corner piece to get backwards any more — there is a
+// tower, and it looks the same whichever way the wall arrives at it.
+//
+// The four cases are still spelled out separately, because the property worth
+// keeping is that every turn is RECOGNISED as a turn. Getting a 'mid' or a
+// 'capE' out of one of these would put a straight section where the wall
+// changes direction, and that is the failure this has always guarded.
+const ArtDefs = require('../../public/artdefs.js');
+const turns = {
+  'tower/NW': [[1, 0], [0, 1]], 'tower/NE': [[-1, 0], [0, 1]],
+  'tower/SW': [[1, 0], [0, -1]], 'tower/SE': [[-1, 0], [0, -1]],
+  mid: [[1, 0], [-1, 0]], vertMid: [[0, 1], [0, -1]], post: [],
+};
+const wrongTurns = Object.entries(turns).filter(([want, ns]) => {
+  const set = new Set(ns.map(([dx, dy]) => dx + ',' + dy).concat('0,0'));
+  const expect = want.split('/')[0];
+  return ArtDefs.wallPiece((x, y) => set.has(x + ',' + y), 0, 0) !== expect;
+});
+check('a wall that turns runs into a tower',
+  wrongTurns.length === 0,
+  wrongTurns.length ? wrongTurns.map(([w]) => w).join(', ') : `${Object.keys(turns).length} shapes`);
+
+// A T-junction is not a corner, and must not be dressed as one.
+{
+  const tee = new Set(['0,0', '1,0', '-1,0', '0,1']);
+  const piece = ArtDefs.wallPiece((x, y) => tee.has(x + ',' + y), 0, 0);
+  check('  and a T-junction is not mistaken for one', piece === 'mid', piece);
+}
+
+// Every piece the chooser can name has to have been built, for every set.
+{
+  const named = [...fs.readFileSync(path.join(SRC, 'artdefs.js'), 'utf8')
+    .matchAll(/return '(mid|capE|capW|post|vert[A-Za-z]+|corner[A-Z]{2})'/g)].map(m => m[1]);
+  const missing = [];
+  for (const set of ['cyan', 'red', 'purple', 'lime']) {
+    for (const piece of new Set(named)) {
+      const f = path.join(SRC, 'assets', 'buildings', set, `wall_${piece}.png`);
+      if (!fs.existsSync(f)) missing.push(`${set}/${piece}`);
+    }
+  }
+  check('  and every piece it can name was built', missing.length === 0,
+    missing.length ? missing.join(', ') : `${new Set(named).size} pieces x 4 sets`);
+}
+// A wall is only ever drawn from the south, so one of its two faces is the one
+// the camera gets, and which one is a question about the wall's own shape: a
+// run that turns south at its end is wrapping something below it, so the face
+// towards us is its inside.
+//
+// This replaces a check that every drawWall call passed the keep row. Deciding
+// it from the keep was wrong, and this is the case that proved it: a barrier
+// laid SOUTH of the keep still has an inside, and the keep rule called both of
+// its runs outward-facing.
+const shape = (tiles) => {
+  const set = new Set(tiles.map(t => t.join(',')));
+  return (x, y) => set.has(x + ',' + y);
+};
+const ring = [];
+for (let x = 1; x <= 6; x++) { ring.push([x, 1]); ring.push([x, 5]); }
+for (let y = 1; y <= 5; y++) { ring.push([1, y]); ring.push([6, y]); }
+// Two runs joined on the right only — the shape in the screenshot that broke
+// the old rule, with the keep nowhere near it.
+const cee = [];
+for (let x = 1; x <= 6; x++) { cee.push([x, 1]); cee.push([x, 5]); }
+for (let y = 1; y <= 5; y++) cee.push([6, y]);
+const faces = [
+  ['ring, north run', shape(ring), 3, 1, true],
+  ['ring, south run', shape(ring), 3, 5, false],
+  ['C, upper run', shape(cee), 3, 1, true],
+  ['C, lower run', shape(cee), 3, 5, false],
+  ['a run that never turns', shape([[1, 3], [2, 3], [3, 3], [4, 3], [5, 3]]), 3, 3, false],
+];
+const wrongFace = faces.filter(([, has, x, y, want]) => ArtDefs.wallShowsInside(has, x, y) !== want);
+check('a wall knows which of its faces the camera is on', wrongFace.length === 0,
+  wrongFace.length ? wrongFace.map(f => f[0]).join(', ') : `${faces.length} shapes`);
+
+// Every piece that carries a merlon needs its other side built. The walkway
+// pieces deliberately do not: seen from straight above with a parapet down
+// both edges, they have no side to be on the wrong one of.
+{
+  const twoSided = ['mid', 'capE', 'capW', 'post', 'cornerNW', 'cornerNE', 'cornerSW', 'cornerSE'];
+  const absent = [];
+  for (const set of ['cyan', 'red', 'purple', 'lime']) {
+    for (const piece of twoSided) {
+      const f = path.join(SRC, 'assets', 'buildings', set, `wall_back_${piece}.png`);
+      if (!fs.existsSync(f)) absent.push(`${set}/${piece}`);
+    }
+  }
+  check('  and every merlon piece has an inward-facing twin', absent.length === 0,
+    absent.length ? absent.join(', ') : `${twoSided.length} pieces x 4 sets`);
+}
+
+// The two sides have to actually differ, and the difference has to be in the
+// right PLACE: under the merlons, not in them.
+//
+// This used to compare the brightness of the merlon course, on the theory that
+// row 1 of the battlement kit was an inner-facing merlon lit from the other
+// side. The artist's own castle says otherwise — Map008 lays B(9,0) directly
+// above B(9,1) in a single wall, so row 1 is the course BELOW the crenellations
+// and never was a second face of them. Cutting a "back merlon" from it was
+// putting a piece of wall face up where a merlon belongs, which is why northern
+// runs never looked like the back of anything.
+//
+// A curtain wall carries ONE set of crenellations and you see the same ones from
+// either side. What changes is what lies under them: the wall's face from
+// outside, the wall-walk from inside. So the merlon course is expected to match
+// and the course below it is expected not to. Brightness cannot see this —
+// ashlar and flagstone are both pale stone and came out within a point of each
+// other — so it is counted in pixels instead.
+{
+  const differs = (a, b, y0, y1) => {
+    let n = 0, tot = 0;
+    for (let y = y0; y < y1; y++) for (let x = 0; x < a.width; x++) {
+      const o = (y * a.width + x) * 4; tot++;
+      let d = 0;
+      for (let c = 0; c < 4; c++) d += Math.abs(a.data[o + c] - b.data[o + c]);
+      if (d > 12) n++;
+    }
+    return tot ? n / tot : 0;
+  };
+  const wrong = [];
+  for (const set of ['cyan', 'red', 'purple', 'lime']) {
+    const dir = path.join(SRC, 'assets', 'buildings', set);
+    const front = decodePNG(path.join(dir, 'wall_mid.png'));
+    const back = decodePNG(path.join(dir, 'wall_back_mid.png'));
+    const under = differs(front, back, 48, 96);
+    const crown = differs(front, back, 0, 40);
+    if (under < 0.25) wrong.push(`${set} shows the same thing under the merlons (${Math.round(under * 100)}%)`);
+    if (crown > 0.10) wrong.push(`${set} changed the merlon course itself (${Math.round(crown * 100)}%)`);
+  }
+  check('  and the two sides differ under the merlons, not in them', wrong.length === 0,
+    wrong.length ? wrong.join(', ') : 'the walk shows under the merlons in every set');
+}
 
 // ---------------------------------------------------------------------------
 // The territory outline is real geometry, so it gets a real test. The block is
@@ -260,11 +525,24 @@ if (geomStart > 0 && geomEnd > geomStart) {
     wrong.join(' | ') || 'slice and border-width agree');
 
   // The two variables the health bar uses must equal the slices they stand for.
+  //
+  // Read out of the stylesheet rather than written down here. The bar is drawn
+  // at whatever scale build-assets.js is set to, and it has already moved once
+  // — a pair of numbers copied into a test is a pair of numbers that goes stale
+  // the moment that scale changes, and then fails for the wrong reason. What
+  // actually has to hold is that the variable and the slice it stands for
+  // agree, whatever they happen to be.
+  const sliceOf = (file) => {
+    const m = css.match(new RegExp(`url\\("assets/ui/${file}\\.png"\\)\\s+0 (\\d+) fill`));
+    return m && Number(m[1]);
+  };
   const capVar = css.match(/--keep-cap: (\d+)px/);
   const fillVar = css.match(/--keep-fill-cap: (\d+)px/);
+  const capSlice = sliceOf('keepbar'), fillSlice = sliceOf('keepbar-fill-green');
   check('  and the health bar\'s variables match its own slices',
-    capVar && Number(capVar[1]) === 18 && fillVar && Number(fillVar[1]) === 9,
-    `--keep-cap ${capVar && capVar[1]}, --keep-fill-cap ${fillVar && fillVar[1]}`);
+    !!capVar && !!capSlice && Number(capVar[1]) === capSlice &&
+    !!fillVar && !!fillSlice && Number(fillVar[1]) === fillSlice,
+    `--keep-cap ${capVar && capVar[1]} against slice ${capSlice}, --keep-fill-cap ${fillVar && fillVar[1]} against slice ${fillSlice}`);
 
   // Both overlays sit over a live game, and the lobby is drawn over that game
   // after a rematch. `.hidden` is one class; `#attack-alert` is an id. A bare
@@ -340,6 +618,132 @@ if (geomStart > 0 && geomEnd > geomStart) {
     check('  and it colours nothing that has been renamed or cut',
       stale.length === 0, stale.join(', ') || `${keys.length} entries`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Dragging a wall out and pulling it back in.
+//
+// The complaint this pins: the drag only ever grew, so overshooting a run meant
+// releasing and paying for the overshoot — and walls have no pull-down button,
+// so it was permanent. `stepWallDrag` is pure and takes its Set, its tiles and
+// its placement rule as arguments precisely so it can be lifted out and run
+// here; the browser client has no harness and this rule is fiddly enough to
+// deserve one.
+//
+// The case that makes it fiddly is the enclosure. A rectangle drawn in one drag
+// finishes on the tile it started on, so a naive "this tile is already in the
+// run, so the player must be reversing" deletes the entire loop on the closing
+// tile. Reversing has to mean stepping back onto the second-to-last tile.
+{
+  const fnStart = client.indexOf('function stepWallDrag(');
+  const fnEnd = client.indexOf('function onCanvasMouseDown(');
+  check('the wall-drag stepper is where the test expects it',
+    fnStart > 0 && fnEnd > fnStart);
+
+  if (fnStart > 0 && fnEnd > fnStart) {
+    const { stepWallDrag } = new Function(
+      client.slice(fnStart, fnEnd) + '\nreturn { stepWallDrag };')();
+    const all = () => true;
+    const run = (pairs, canPlace = all) => {
+      const drag = new Set();
+      for (const [x, y] of pairs) stepWallDrag(drag, [{ x, y }], canPlace);
+      return [...drag];
+    };
+    const line = (n) => Array.from({ length: n }, (_, i) => [i, 0]);
+
+    check('a straight drag lays every tile it crosses',
+      run(line(5)).join(' ') === '0,0 1,0 2,0 3,0 4,0');
+
+    // Out five, back two: the run should end at the third tile.
+    check('  and dragging back along it takes the overshoot off',
+      run([...line(5), [3, 0], [2, 0]]).join(' ') === '0,0 1,0 2,0',
+      run([...line(5), [3, 0], [2, 0]]).join(' '));
+
+    check('  all the way back to a single tile',
+      run([...line(5), [3, 0], [2, 0], [1, 0], [0, 0]]).join(' ') === '0,0');
+
+    // Having backtracked, going on in a new direction extends again rather than
+    // being stuck — otherwise the correction is only half a correction.
+    check('  and then off in another direction from there',
+      run([...line(4), [2, 0], [1, 0], [1, 1], [1, 2]]).join(' ') === '0,0 1,0 1,1 1,2',
+      run([...line(4), [2, 0], [1, 0], [1, 1], [1, 2]]).join(' '));
+
+    // The enclosure: four sides back to the anchor. Nothing may be deleted.
+    const box = [];
+    for (let x = 0; x < 4; x++) box.push([x, 0]);
+    for (let y = 1; y < 4; y++) box.push([3, y]);
+    for (let x = 2; x >= 0; x--) box.push([x, 3]);
+    for (let y = 2; y >= 0; y--) box.push([0, y]);
+    check('closing an enclosure on its own start tile keeps the whole loop',
+      run(box).length === 12, `${run(box).length} tiles of 12`);
+
+    // Crossing your own run is not reversing either.
+    const cross = [[0, 0], [1, 0], [2, 0], [2, 1], [1, 1], [1, 0], [1, -1]];
+    check('crossing the run does not eat it',
+      run(cross).join(' ') === '0,0 1,0 2,0 2,1 1,1 1,-1',
+      run(cross).join(' '));
+
+    // A tile the rule refuses is simply skipped, and skipping it must not make
+    // the next tile look like a backtrack.
+    const refuse = (x) => x !== 2;
+    check('a tile that cannot be built on is skipped, not counted',
+      run(line(5), (x) => refuse(x)).join(' ') === '0,0 1,0 3,0 4,0',
+      run(line(5), (x) => refuse(x)).join(' '));
+
+    // A fast drag hands over a whole run at once; reversing over several tiles
+    // in one move event has to unwind all of them.
+    const drag = new Set();
+    stepWallDrag(drag, line(6).map(([x, y]) => ({ x, y })), all);
+    stepWallDrag(drag, [4, 3, 2].map((x) => ({ x, y: 0 })), all);
+    check('one fast move backwards unwinds every tile it swept',
+      [...drag].join(' ') === '0,0 1,0 2,0', [...drag].join(' '));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Splitting and control groups.
+//
+// The dead-function check above catches a helper that stops being called at
+// all. What it cannot see is a helper still called from somewhere useless, so
+// the bindings themselves are pinned here: every one of these is a key that
+// silently does nothing if the wiring goes, and nothing else would notice.
+{
+  const keys = bodyOf('onKeyDown');
+  check('X splits the selected groups', /'x'/.test(keys) && keys.includes('splitSelection('));
+  check('  and asks the server for it rather than deciding locally',
+    bodyOf('splitSelection').includes("type: 'splitArmy'"));
+  check('  leaving somebody behind, so the server never has to refuse a whole group',
+    /\/\s*2\)/.test(bodyOf('splitSelection')) && bodyOf('splitSelection').includes('< 1'));
+
+  check('a bare digit selects a control group', keys.includes('recallControlGroup('));
+  check('  and shift+digit assigns one',
+    keys.includes('assignControlGroup(') && /shiftKey/.test(keys));
+
+  // Shift, not Ctrl, and this is the trap. onKeyDown returns early on ctrlKey,
+  // so a Ctrl-based binding would be unreachable dead code that still reads
+  // correctly — and Chrome does not let a page cancel Ctrl+1..9 anyway, so the
+  // player would be assigning groups while the browser changed tabs.
+  const digitLine = (keys.match(/^.*Digit.*$/m) || [''])[0];
+  check('the digit binding reads e.code, not e.key',
+    /e\.code/.test(digitLine) && !/e\.key/.test(digitLine), digitLine.trim());
+  check('  and is not bound behind Ctrl, which this handler returns early on',
+    /if \(e\.ctrlKey/.test(keys) && !/ctrlKey[^)]*\)\s*(assign|recall)/.test(keys));
+
+  // A slot is a list of army ids, and ids are handed out afresh every match, so
+  // a slot carried over from the last one points at whatever group happens to
+  // be dealt the same id. Both places that end a match have to clear them.
+  const resets = (client.match(/controlGroups = \{\}/g) || []).length;
+  check('control groups are cleared when a match ends or a new one starts',
+    resets >= 2, `${resets} reset sites`);
+  check('  and a slot prunes its dead rather than selecting nothing',
+    bodyOf('liveControlGroup').includes('delete controlGroups[slot]'));
+
+  // Selecting must not move the camera on its own — only the second press of
+  // the same digit does, which is what makes one press safe to use for orders.
+  const recall = bodyOf('recallControlGroup');
+  check('one press selects without moving the camera, two presses go there',
+    recall.includes('centerCameraOn(') && recall.includes('lastGroupKey'),
+    recall.includes('centerCameraOn(') ? 'both present' : 'no centerCameraOn');
 }
 
 console.log(failures ? `\n${failures} FAILURES` : '\nall client checks pass');

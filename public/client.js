@@ -42,6 +42,10 @@ let lobbySeatsPerTeam = 0; // how many empires one side holds
 let maxTeams = 4;
 let armedAbility = false;  // an aimed race ability waiting for its map click
 let mapCfg = null, terrain = null, buildCfg = null;
+// Only ever used before the server's `init` lands, which is the one moment the
+// real tile size is not known yet. It has to track MAP.tileSize in config.js:
+// guessing low here draws one frame of a world at the wrong scale.
+const MAP_TILE_FALLBACK = 48;
 let buildingTypes = null, unitTypes = null, castleCfg = null;
 let terrainClearCost = 0;  // gold per tile of rock or water bought back
 let latestState = null;
@@ -50,6 +54,10 @@ let armedClear = false;    // buying a tile of rock or water back as open ground
 // The groups under orders. A set rather than one id, because a drag across the
 // map selects everything inside it and every order below goes to all of them.
 let selectedArmies = new Set();
+// Control-group slot ('1'..'9') -> the army ids in it. Ids and not indices into
+// the state array, because that array is rebuilt every broadcast and a group
+// that dies shifts everything after it along.
+let controlGroups = {};
 let selectStart = null;    // world tile the drag began on, while the box is open
 let selectBox = null;      // { x0, y0, x1, y1 } in world tiles
 let suppressNextClick = false;   // a drag ends in a click; don't re-read it
@@ -73,6 +81,15 @@ let fogLayer = null;        // viewport-sized veil the vision holes are cut from
 let fogLayerCtx = null;
 let wallMode = false;      // wall drag tool active?
 let wallDrag = null;       // Set of "x,y" tiles in the in-progress drag
+// The building you have clicked on the map, and the world-space box its delete
+// badge was last drawn in. Pulling something down is a map gesture now — click
+// the thing, click the cross over it — rather than a row in the side panel, so
+// it also reaches walls, which the panel could never list one by one.
+let selectedBuilding = null;   // { x, y }
+// Whether the Town Center card is showing the garrison broken down by kind.
+// Click your keep on the map, or the garrison line itself, to open it.
+let garrisonOpen = false;
+let demolishHit = null;        // { x0, y0, x1, y1 } in tiles, set while drawn
 let camera = { x: 0, y: 0 }; // viewport top-left in world pixels
 let cameraReady = false;     // have we centered on the player's base yet?
 const keysDown = {};         // held keys for continuous WASD/arrow panning
@@ -130,6 +147,9 @@ let lastStateAt = 0;
 // fifth of a second would be a lie about where it has been.
 const SMOOTH_SNAP = 3;
 let effects = [];          // transient smoke puffs: { x, y, start, scale, life }
+// When each keep last threw its gate open, keyed by tile. A keep with no entry
+// keeps its portcullis down.
+const gateOpened = new Map();
 let spellFlash = [];       // one-shot rings where a spell landed
 let arrows = [];           // tower shots in flight
 const towerShots = new Map(); // "x,y" -> the last shot that tower took
@@ -241,22 +261,128 @@ function previewFrame(ts) {
   if (!menuEl.classList.contains('hidden')) requestAnimationFrame(previewFrame);
 }
 
-// ---------- Menu music ----------
+// ---------- Music and ambience ----------
 
+// Four loops, mixed rather than switched. At any moment each one has a volume
+// it is meant to be at, and a ticker walks it there; nothing here ever cuts.
+//
+//   ambience  Forest Night, under everything, always, at a whisper. The one
+//             layer that does not care which screen you are on.
+//   menu      the theme, on the menu and in the lobby.
+//   regular   Goblins' Den — the match, while nobody is swinging anything.
+//   battle    Goblins' Dance — the match, while somebody is.
+//
 // Autoplay with sound is blocked until the page has been interacted with, so
-// the first click or keypress is what actually starts it. Muting is sticky.
-const music = document.getElementById('menu-music');
-const soundBtn = document.getElementById('sound-btn');
+// the first click or keypress is what actually starts any of it. Muting is
+// sticky, and mutes all four.
+const soundBtns = ['sound-btn', 'sound-btn-game']
+  .map(id => document.getElementById(id)).filter(Boolean);
 let muted = remembered(STORE.muted, '0') === '1';
-music.volume = 0.45;
 
-function syncSound() {
-  soundBtn.textContent = muted ? 'MUSIC OFF' : 'MUSIC ON';
-  soundBtn.classList.toggle('active', !muted);
-  if (muted || menuEl.classList.contains('hidden')) music.pause();
-  else music.play().catch(() => { /* still waiting for a gesture */ });
+// A layer's peak is how loud it is when it is the one playing, and its fade is
+// how many seconds it takes to get there. The two music beds are the slow ones:
+// a cut between them would announce the fight a beat before the fight, and be
+// the most conspicuous thing in the game.
+const layers = {
+  ambience: { el: document.getElementById('ambience'),      peak: 0.11, fade: 2.5 },
+  menu:     { el: document.getElementById('menu-music'),    peak: 0.45, fade: 0.8 },
+  regular:  { el: document.getElementById('music-regular'), peak: 0.34, fade: 1.6 },
+  battle:   { el: document.getElementById('music-battle'),  peak: 0.40, fade: 1.6 },
+};
+const allLayers = Object.values(layers);
+for (const l of allLayers) { l.el.volume = 0; l.want = 0; }
+
+// A skirmish is a handful of seconds and the war music is a minute long, so
+// without a floor under it the score would spend the match sliding between two
+// moods and settling in neither. Combat holds the battle bed up for this long
+// past the last blow, and any fresh blow pushes the deadline back.
+const BATTLE_HOLD_MS = 12000;
+let battleUntil = 0;
+function noteCombat() {
+  const wasCalm = Date.now() >= battleUntil;
+  battleUntil = Date.now() + BATTLE_HOLD_MS;
+  if (wasCalm) syncSound();
 }
-soundBtn.addEventListener('click', () => {
+
+// Which bed the match should be on. Two ways in: a group of mine trading blows,
+// and the banner that says somebody is at my walls — raiseAttackAlert calls
+// noteCombat for that one.
+//
+// Losing health counts as well as standing in 'fight', because a group on
+// 'hold' inside an enemy tower's reach is being shot at without ever entering
+// 'fight' — which is a fight to everyone except the order it is under.
+const armyHpSeen = new Map();
+function watchForCombat(msg) {
+  const mine = msg.armies.filter(a => a.ownerId === myId);
+  for (const a of mine) {
+    const before = armyHpSeen.get(a.id);
+    if (a.order === 'fight' || (before !== undefined && a.hp < before)) noteCombat();
+    armyHpSeen.set(a.id, a.hp);
+  }
+  // Groups that are gone are gone. Without this the map grows for the whole
+  // match, one dead entry per group ever raised.
+  if (armyHpSeen.size > mine.length) {
+    const live = new Set(mine.map(a => a.id));
+    for (const id of armyHpSeen.keys()) if (!live.has(id)) armyHpSeen.delete(id);
+  }
+}
+
+// The one place that decides what should be audible. Called on every screen
+// change, on the first gesture, and once a second by the ticker — so a fight
+// that ends while nothing else is happening still lets the music back down.
+function syncSound() {
+  for (const b of soundBtns) {
+    b.textContent = muted ? 'MUSIC OFF' : 'MUSIC ON';
+    b.classList.toggle('active', !muted);
+  }
+  const onMenu = !menuEl.classList.contains('hidden');
+  const onGameScreen = !document.getElementById('game-ui').classList.contains('hidden');
+  // The lobby is drawn over the match it follows and sends no state of its own:
+  // a menu screen in the game's clothes, and the theme belongs to it.
+  const inMatch = onGameScreen && !onMenu && !inLobby;
+  const fighting = inMatch && Date.now() < battleUntil;
+
+  layers.ambience.want = 1;
+  layers.menu.want = onMenu || inLobby ? 1 : 0;
+  layers.regular.want = inMatch && !fighting ? 1 : 0;
+  layers.battle.want = fighting ? 1 : 0;
+  // A hidden tab is not allowed to start media and should not be playing any
+  // either — see the visibilitychange handler below.
+  if (muted || document.hidden) for (const l of allLayers) l.want = 0;
+  for (const l of allLayers) {
+    if (l.want > 0 && l.el.paused) l.el.play().catch(() => { /* still waiting for a gesture */ });
+  }
+  driveAudio(0);
+}
+
+// Walks every layer's volume toward what it wants and starts or stops it at the
+// ends. Starting is where autoplay gets refused, and that refusal is not an
+// error worth reporting: the next gesture calls syncSound again and it takes.
+function driveAudio(dt) {
+  for (const l of allLayers) {
+    const to = l.want * l.peak;
+    const step = (l.peak / l.fade) * dt;
+    const v = to > l.el.volume ? Math.min(to, l.el.volume + step)
+                               : Math.max(to, l.el.volume - step);
+    // The element clamps to [0,1] by throwing, and arithmetic on floats can
+    // leave a hair either side of it.
+    l.el.volume = Math.max(0, Math.min(1, v));
+    if (to === 0 && l.el.volume <= 0.001 && !l.el.paused) l.el.pause();
+  }
+}
+
+// One ticker for the whole mix, running whether or not a match is on screen —
+// the menu fades too. 40ms is plenty for ramps measured in seconds.
+const AUDIO_TICK_MS = 40;
+let audioTick = 0;
+setInterval(() => {
+  driveAudio(AUDIO_TICK_MS / 1000);
+  // The battle hold expires on a clock rather than on a message, so something
+  // has to notice. Once a second is soon enough for a fade that takes 1.6.
+  if ((audioTick += AUDIO_TICK_MS) >= 1000) { audioTick = 0; syncSound(); }
+}, AUDIO_TICK_MS);
+
+for (const b of soundBtns) b.addEventListener('click', () => {
   muted = !muted;
   remember(STORE.muted, muted ? '1' : '0');
   syncSound();
@@ -272,11 +398,14 @@ for (const evt of ['pointerdown', 'keydown']) {
 //
 // pagehide rather than beforeunload: it fires for a tab going into the back/
 // forward cache as well, which beforeunload does not.
+function silence() {
+  for (const l of allLayers) { l.want = 0; l.el.volume = 0; l.el.pause(); }
+}
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) music.pause();
+  if (document.hidden) silence();
   else syncSound();
 });
-window.addEventListener('pagehide', () => music.pause());
+window.addEventListener('pagehide', silence);
 syncSound();
 
 // ---------- Connection ----------
@@ -381,6 +510,8 @@ function abandonSession(reason) {
   myId = null;
   myRoom = null;
   selectedArmies.clear(); selectStart = null; selectBox = null;
+  controlGroups = {};
+  selectedBuilding = null; demolishHit = null;
   armedSpell = null; armedAbility = false; armedBuild = null; armedDeploy = false;
   // The tools too, or the next match opens with the wall tool still on and a
   // half-drawn drag from the last one still in memory.
@@ -388,15 +519,17 @@ function abandonSession(reason) {
   if (wallMode) toggleWallMode(false);
   wallDrag = null; wallLast = null;
   releaseHeldKeys();
-  showLobby(false);
   lobbyHostId = null;
   document.getElementById('game-ui').classList.add('hidden');
+  showLobby(false);
   document.getElementById('draft').classList.add('hidden');
   document.getElementById('game-over-banner').classList.remove('show');
   document.getElementById('defeat-screen').classList.add('hidden');
   document.getElementById('spectating-chip').classList.add('hidden');
   clearAttackAlert();
   showExitConfirm(false);
+  battleUntil = 0;
+  armyHpSeen.clear();
   menuEl.classList.remove('hidden');
   syncSound();
   menuError(reason || '');
@@ -575,6 +708,9 @@ function onInit(msg) {
   latestState = null;
   terrainCanvas = null;
   selectedArmies.clear(); armedDeploy = false;
+  // Army ids restart from scratch in a new match, so a slot held over would
+  // point at whatever group happened to be dealt the same id.
+  controlGroups = {};
   armedSpell = null; armedAbility = false; armedClear = false; draftShown = null;
   // Held in the lobby, or straight into a match already in progress. Either
   // way everything below is built now, so pressing Start costs nothing.
@@ -591,6 +727,7 @@ function onInit(msg) {
   document.getElementById('draft').classList.add('hidden');
   cameraReady = false;
   effects = [];
+  gateOpened.clear();
   seenArmies.clear();
   for (const k of Object.keys(armyPrev)) delete armyPrev[k];
   for (const k of Object.keys(armyFacing)) delete armyFacing[k];
@@ -651,6 +788,7 @@ function onInit(msg) {
 function showLobby(on) {
   inLobby = on;
   document.getElementById('lobby').classList.toggle('hidden', !on);
+  syncSound();
   // The lobby is drawn over the game it followed. Anything shouting about the
   // last match has to stop shouting.
   if (on) {
@@ -1013,6 +1151,10 @@ function markTakenCards(me) {
 //
 // `keep` is the tool being picked up; everything else is put down.
 function disarmTools(keep) {
+  // Picking up any tool puts the demolish cross away. The click handler hands
+  // the canvas to whatever is armed, so a cross left on screen under a live
+  // wall drag is a button that visibly does nothing when pressed.
+  selectedBuilding = null; demolishHit = null;
   if (keep !== 'build' && armedBuild) {
     armedBuild = null;
     document.querySelectorAll('.build-item').forEach(el => el.classList.remove('armed'));
@@ -1076,12 +1218,17 @@ function renderAbility(me) {
   const st = me.ability || { cooldownRemaining: 0, activeRemaining: 0 };
   // The name, the face and the rules never change, so they are written once
   // and the two countdowns are poked into the nodes below every tick.
+  //
+  // The three lines of rules that used to sit under the name are a tooltip now.
+  // This moved out of the side panel onto the map, where the space it takes is
+  // space the map is not using — and the rules of your own race's one ability
+  // are something you read once in the first minute and never again, while the
+  // button under them is something you reach for mid-battle.
   if (syncSection(holder, me.race, `
-    <div class="ability-head">
+    <div class="ability-head" title="${escapeText(ab.desc)}">
       <span class="ability-sigil">${ab.sigil}</span>
       <span class="ability-name">${ab.name}</span>
     </div>
-    <div class="sub ability-desc">${ab.desc}</div>
     <div class="ability-timer"><span data-live="timer"></span></div>
     <button class="btn btn-sm" id="ability-btn"><span data-live="label">Use</span><span class="btn-note">Q</span></button>
   `)) {
@@ -1300,7 +1447,30 @@ function buildTerrainLayer() {
   terrainCanvas = Sprites.buildTerrainCanvas(
     mapCfg.width, mapCfg.height,
     (x, y) => terrain[y][x] === 1,        // mountain
-    (x, y) => terrain[y][x] === 2);       // water
+    (x, y) => terrain[y][x] === 2,        // water
+    (x, y) => terrain[y][x] === 3,        // cobbles: a compound's courtyard
+    (x, y) => sceneryBlock.has(x + ',' + y),
+    (x, y) => apronSet.has(x + ',' + y));
+}
+
+// The terrain layer is expensive and is only worth rebuilding when something in
+// it actually changed. Scenery now depends on where the buildings are, so it has
+// to be redone when they move — but state arrives ten times a second and almost
+// none of those carry a new building, so the occupied tiles are reduced to a
+// signature and the canvas is rebuilt only when that changes.
+let occupancySig = '';
+function occupancyChanged() {
+  let n = 0, sum = 0;
+  for (const set of [sceneryBlock, apronSet]) {
+    for (const k of set) {
+      n++;
+      for (let i = 0; i < k.length; i++) sum = (sum * 31 + k.charCodeAt(i)) >>> 0;
+    }
+  }
+  const sig = n + ':' + sum;
+  if (sig === occupancySig) return false;
+  occupancySig = sig;
+  return true;
 }
 
 function colorForPlayer(id) {
@@ -1317,19 +1487,70 @@ const BUILDING_COLOR = { bank: '#e6c14a', barracks: '#c0392b', stable: '#3498db'
 // that only change when a state message arrives, five times a second. Rebuilt
 // in onState, not on demand.
 let wallSet = new Set(), occupiedSet = new Set(), rubbleSet = new Set();
+// Where scenery is not allowed to grow, which is NOT the same as where a
+// building stands. A keep occupies one tile and is drawn six tiles wide and
+// seven tall; clearing only the tile it sits on left pines growing through its
+// towers. This is the tiles the SPRITE covers, so a prop is taken out wherever
+// the building will actually be.
+let sceneryBlock = new Set();
+// The ground a building stands on, laid as cobble so it is not a picture on a
+// lawn. Just wide enough to reach past the sprite and a row either side of the
+// tile it sits on — the point is to blend the building into the map, not to
+// give it a courtyard.
+let apronSet = new Set();
+function addApron(b, race) {
+  const ts = mapCfg && mapCfg.tileSize;
+  const def = ts && Sprites.buildingDef && Sprites.buildingDef(b.type, { race, level: b.level });
+  const halfW = (def && def.w) ? Math.round(def.w / 2 / ts) : 1;
+  for (let dy = -1; dy <= 1; dy++)
+    for (let dx = -halfW; dx <= halfW; dx++) apronSet.add((b.x + dx) + ',' + (b.y + dy));
+}
+function addSceneryFootprint(b, race) {
+  const ts = mapCfg && mapCfg.tileSize;
+  const def = ts && Sprites.buildingDef && Sprites.buildingDef(b.type, { race, level: b.level });
+  if (!def || !def.w) { sceneryBlock.add(b.x + ',' + b.y); return; }
+  const x0 = b.x * ts - def.anchorX, y0 = b.y * ts + ts * 0.35 - def.anchorY;
+  const tx0 = Math.floor(x0 / ts), tx1 = Math.floor((x0 + def.w - 1) / ts);
+  const ty0 = Math.floor(y0 / ts), ty1 = Math.floor((y0 + def.h - 1) / ts);
+  for (let ty = ty0; ty <= ty1; ty++)
+    for (let tx = tx0; tx <= tx1; tx++) sceneryBlock.add(tx + ',' + ty);
+}
 
 function rebuildTileSets(msg) {
   wallSet = new Set(); occupiedSet = new Set(); rubbleSet = new Set();
+  sceneryBlock = new Set(); apronSet = new Set();
   for (const p of msg.players) {
     for (const b of p.buildings) {
       if (!b.type) continue;
-      occupiedSet.add(`${b.x},${b.y}`);
+      // A bastion or gatehouse stands on several tiles, anchored at its
+      // bottom-left; every one of them is taken.
+      for (const [x, y] of buildingTiles(b)) occupiedSet.add(`${x},${y}`);
+      // A wall is one tile wide and two tall as drawn; everything else asks its
+      // own sprite.
+      if (b.type === 'wall') { sceneryBlock.add(b.x + ',' + b.y); sceneryBlock.add(b.x + ',' + (b.y - 1)); }
+      // Walls get no apron: they run in lines, and a cobble strip following one
+      // reads as a road laid under the battlements.
+      else { addSceneryFootprint(b, p.race); addApron(b, p.race); }
       if (b.type === 'wall') wallSet.add(`${b.x},${b.y}`);
     }
   }
   // A razed camp leaves ruins standing, so its tile stays taken.
-  for (const c of msg.aiCamps) if (!c.defeated || c.capturedBy) occupiedSet.add(`${c.x},${c.y}`);
+  for (const c of msg.aiCamps) if (!c.defeated || c.capturedBy) {
+    occupiedSet.add(`${c.x},${c.y}`);
+    addSceneryFootprint({ x: c.x, y: c.y, type: c.shrine ? 'shrine' : 'camp' }, null);
+    addApron({ x: c.x, y: c.y, type: c.shrine ? 'shrine' : 'camp' }, null);
+  }
   for (const r of msg.rubble || []) rubbleSet.add(`${r.x},${r.y}`);
+}
+
+// The tiles a building stands on. One, unless the server said it is wider —
+// the compound's bastions and gatehouse carry `w`/`h` and are anchored on
+// their bottom-left tile.
+function buildingTiles(b) {
+  if (!b.w) return [[b.x, b.y]];
+  const out = [];
+  for (let dy = 0; dy < b.h; dy++) for (let dx = 0; dx < b.w; dx++) out.push([b.x + dx, b.y - b.h + 1 + dy]);
+  return out;
 }
 
 // Every wall tile currently on the map, so each one can pick the rampart
@@ -1342,10 +1563,10 @@ function wallLookup() {
 // Draw one building on its tile. Walls are rampart sections keyed off their
 // neighbours; everything else is a structure sprite with a ground shadow and
 // the owner's pennant.
-function drawBuilding(b, px, py, color, hasWall, race, pop, insideX) {
+function drawBuilding(b, px, py, color, hasWall, race, pop) {
   const ts = mapCfg.tileSize;
   if (b.type === 'wall') {
-    if (!Sprites.drawWall(ctx, b.x, b.y, hasWall, { race, insideX, alpha: pop && pop.alpha })) {
+    if (!Sprites.drawWall(ctx, b.x, b.y, hasWall, { race, alpha: pop && pop.alpha })) {
       ctx.fillStyle = BUILDING_COLOR.wall;
       ctx.fillRect(px - ts / 2, py - ts / 2, ts, ts);
     }
@@ -1354,6 +1575,7 @@ function drawBuilding(b, px, py, color, hasWall, race, pop, insideX) {
   // The art set follows the owner's race, and the town center's sprite follows
   // its level, so an upgraded keep is visibly a bigger keep.
   const art = Object.assign({ race, level: b.level, time: clock }, pop || {});
+  if (b.type === 'castle') art.gateOpen = gateOpenAt(b.x, b.y);
   if (!Sprites.drawBuilding(ctx, b.type, px, py, art)) {
     ctx.fillStyle = b.type === 'castle' ? color : (BUILDING_COLOR[b.type] || '#888');
     ctx.fillRect(px - ts / 2, py - ts / 2, ts, ts);
@@ -1371,9 +1593,10 @@ function drawBuilding(b, px, py, color, hasWall, race, pop, insideX) {
       shotAge: live ? shotAge : null,
     }));
   }
-  // The pennant is planted once the building has actually settled — watching
-  // it fade up out of the dust with the roof looks like part of the sprite.
-  if (!pop) Sprites.drawBanner(ctx, b.type, px, py, color, art);
+  // No pennant. Buildings already wear their owner's colour in the stone and
+  // the roof, and a little drawn flag on every one of them read as UI stuck to
+  // the art rather than as part of the world. Camps keep theirs, where it means
+  // something specific: that one has been taken.
 }
 
 // Tiles occupied by any building or a live camp — used to mirror the server's
@@ -1537,7 +1760,7 @@ function isMyBuildable(tx, ty, occupied) {
   const me = myPlayer();
   if (!me || !me.alive || !buildCfg || !terrain) return false;
   if (tx < 0 || ty < 0 || tx >= mapCfg.width || ty >= mapCfg.height) return false;
-  if (terrain[ty][tx] !== 0) return false;
+  if (terrain[ty][tx] !== 0 && terrain[ty][tx] !== 3) return false;   // land or cobbles
   if (isRubble(tx, ty)) return false;              // still choked from a breach
   // The keep covers more ground than the tile it stands on — the same
   // footprint the server enforces, so the hover highlight never offers a tile
@@ -1545,13 +1768,8 @@ function isMyBuildable(tx, ty, occupied) {
   if (castleCfg && castleCfg.footprint) {
     const f = castleCfg.footprint, dx = tx - me.baseX, dy = ty - me.baseY;
     if (dx >= -f.left && dx <= f.right && dy >= -f.up && dy <= f.down) return false;
-  } else if (Math.hypot(tx - me.baseX, ty - me.baseY) < 0.5) return false;
-  let inside = Math.hypot(tx - me.baseX, ty - me.baseY) <= borderRadius(me);
-  for (const o of me.outposts || []) {
-    if (inside) break;
-    inside = Math.hypot(tx - o.x, ty - o.y) <= outpostRadius();
   }
-  if (!inside) return false;
+  if (!isMyTerritory(tx, ty)) return false;
   return !(occupied || occupiedTiles()).has(`${tx},${ty}`);
 }
 
@@ -1666,7 +1884,7 @@ function render() {
     ctx.save();
     ctx.globalAlpha = 0.6;
     for (const [x, y] of dragged) {
-      if (!Sprites.drawWall(ctx, x, y, inDrag, { race: myRaceNow, insideX: me ? me.baseX : null })) {
+      if (!Sprites.drawWall(ctx, x, y, inDrag, { race: myRaceNow })) {
         ctx.fillStyle = 'rgba(154,139,111,0.85)';
         ctx.fillRect(x * ts - ts / 2, y * ts - ts / 2, ts, ts);
       }
@@ -1718,6 +1936,7 @@ function render() {
   // and an army marching behind a castle is correctly hidden by it.
   drawDamageBars(ts);
   for (const a of latestState.armies) drawArmyBadge(a, ts);
+  drawDemolishBadge(ts);
 
   // ---- Transient effects, above everything ----
   effects = effects.filter(fx => {
@@ -1835,11 +2054,11 @@ function drawPlayerBuilding(b, p, ts, hasWall) {
     if (t >= 1) buildingPop.delete(key);
     else {
       const ease = t * t * (3 - 2 * t);
-      drawBuilding(b, px, py, color, hasWall, p.race, { alpha: 0.15 + 0.85 * ease, lift: (1 - ease) * 5 }, p.baseX);
+      drawBuilding(b, px, py, color, hasWall, p.race, { alpha: 0.15 + 0.85 * ease, lift: (1 - ease) * 5 });
       return;
     }
   }
-  drawBuilding(b, px, py, color, hasWall, p.race, null, p.baseX);
+  drawBuilding(b, px, py, color, hasWall, p.race, null);
   if (b.underConstruction || b.upgrading) {
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fillRect(px - ts / 2, py - ts / 2, ts, ts);
@@ -2126,13 +2345,46 @@ function tilesBetween(x0, y0, x1, y1) {
   return pts;
 }
 
+// One drag's worth of wall, treated as an ordered run rather than a bag of
+// tiles — which is what makes backtracking possible at all.
+//
+// `wallDrag` is a Set, and a Set keeps insertion order. The tile before the end
+// of the run is the one the cursor steps back onto when the player pulls the
+// mouse back along what they have just laid, and taking the last tile off is
+// exactly what they mean by it. Before this the drag only ever grew: overshoot a
+// run by four tiles and you released, paid for the four, and then found there is
+// no way to pull a wall down at all — so an overshoot was permanent.
+//
+// It tests against the **second-to-last** tile rather than "is this tile already
+// in the run", and that distinction is the whole of the tricky part. An
+// enclosure drawn in one drag finishes on the tile it started on, so "already in
+// the run" would fire on the closing tile and delete the entire loop back to the
+// anchor. Reversing is step-by-step: the only tile you can take back is the one
+// you just laid. Crossing your own run, or closing it, is not reversing.
+//
+// Kept free of globals so it can be lifted out and tested on its own — the
+// browser client has no harness, and this is fiddly enough to be worth one.
+function stepWallDrag(drag, tiles, canPlace) {
+  for (const t of tiles) {
+    const key = `${t.x},${t.y}`;
+    const keys = [...drag];
+    if (keys.length >= 2 && keys[keys.length - 2] === key) {
+      drag.delete(keys[keys.length - 1]);
+      continue;
+    }
+    if (drag.has(key)) continue;
+    if (canPlace(t.x, t.y)) drag.add(key);
+  }
+  return drag;
+}
+
 function onCanvasMouseDown(e) {
   if (e.button !== 0 || !latestState) return;
   if (wallMode) {
     const { ix, iy } = tileFromEvent(e);
     wallDrag = new Set();
     wallLast = { x: ix, y: iy };
-    if (isMyBuildable(ix, iy) && !wouldThicken(ix, iy)) wallDrag.add(`${ix},${iy}`);
+    stepWallDrag(wallDrag, [{ x: ix, y: iy }], canLayWall);
     render();
     return;
   }
@@ -2166,11 +2418,19 @@ function onCanvasMouseMove(e) {
   if (!wallMode || !wallDrag || !wallLast) return;
   const { ix, iy } = tileFromEvent(e);
   if (ix === wallLast.x && iy === wallLast.y) return;
-  for (const t of tilesBetween(wallLast.x, wallLast.y, ix, iy)) {
-    if (isMyBuildable(t.x, t.y) && !wouldThicken(t.x, t.y)) wallDrag.add(`${t.x},${t.y}`);
-  }
+  // The whole run between the last cursor tile and this one, so a fast drag
+  // lays — or takes back — every tile it swept over rather than only the ones a
+  // mousemove happened to fire on.
+  stepWallDrag(wallDrag, tilesBetween(wallLast.x, wallLast.y, ix, iy), canLayWall);
   wallLast = { x: ix, y: iy };
   render();
+}
+
+// Where a wall may go: your own ground, and not somewhere that would make the
+// run two tiles thick. Named because both ends of the drag ask the same
+// question and they must not drift apart.
+function canLayWall(x, y) {
+  return isMyBuildable(x, y) && !wouldThicken(x, y);
 }
 
 // Client-side echo of Match.wouldThickenWall, counting the tiles already in
@@ -2179,7 +2439,9 @@ function onCanvasMouseMove(e) {
 function wouldThicken(x, y) {
   const me = myPlayer();
   if (!me) return false;
-  const standing = new Set(me.buildings.filter(b => b.type === 'wall').map(b => `${b.x},${b.y}`));
+  // The compound's own walls are left out, as the server leaves them out: its
+  // back wall is two tiles thick by design.
+  const standing = new Set(me.buildings.filter(b => b.type === 'wall' && !b.builtin).map(b => `${b.x},${b.y}`));
   const has = (tx, ty) => standing.has(`${tx},${ty}`) || (wallDrag && wallDrag.has(`${tx},${ty}`));
   // A wall may not complete a 2x2 block of walls — which is exactly what "one
   // tile thick" means on a grid. A parallel run laid alongside an existing one
@@ -2381,6 +2643,21 @@ function onCanvasClick(e) {
     return;
   }
 
+  // The cross over a selected building beats everything, including an army
+  // standing on top of it. It is a small target that only exists because you
+  // put it there on the previous click, so a click inside it can only have
+  // meant one thing.
+  if (demolishHit && tileX >= demolishHit.x0 && tileX <= demolishHit.x1 &&
+      tileY >= demolishHit.y0 && tileY <= demolishHit.y1) {
+    const b = selectedBuildingLive();
+    if (b) send({ type: 'demolish', x: b.x, y: b.y });
+    selectedBuilding = null;
+    demolishHit = null;
+    render();
+    renderPanel();
+    return;
+  }
+
   // 1) Select one of my armies (left-click). Highest priority so armies parked
   //    on a base/target are still clickable.
   const armyHit = nearestMyArmy(tileX, tileY);
@@ -2398,9 +2675,120 @@ function onCanvasClick(e) {
     return;
   }
 
+  // 2) One of my own buildings, which selects it and raises the cross over it.
+  //    Below armies deliberately — a group parked on your barracks is the thing
+  //    you are far more often reaching for — and the castle is left out because
+  //    the server refuses to pull it down anyway.
+  const mine = myPlayer();
+  // ...except that the keep now answers a click of its own: it opens the
+  // garrison standing in it. The compound's built-in pieces count, because to
+  // anyone clicking they are the keep. Nothing is selected by this and no cross
+  // goes up — the keep is not for sale — so it can sit above the sale branch
+  // without taking a click away from it.
+  if (mine && mine.buildings) {
+    const keepHit = mine.buildings.find(b =>
+      (b.type === 'castle' || b.builtin) && withinBuilding(b, ix, iy));
+    if (keepHit) {
+      garrisonOpen = !garrisonOpen;
+      selectedBuilding = null;
+      selectedArmies.clear();
+      render();
+      renderPanel();
+      return;
+    }
+  }
+  if (mine && mine.buildings) {
+    // The compound is not for sale, so its pieces do not take the click.
+    const hit = mine.buildings.find(b => b.type && b.type !== 'castle' && !b.builtin && b.x === ix && b.y === iy);
+    if (hit) {
+      selectedBuilding = (selectedBuilding && selectedBuilding.x === ix && selectedBuilding.y === iy)
+        ? null                                  // clicking it again puts the cross away
+        : { x: ix, y: iy };
+      selectedArmies.clear();
+      render();
+      renderPanel();
+      return;
+    }
+  }
+
+  selectedBuilding = null;
   if (!e.shiftKey) selectedArmies.clear();
   render();
   renderPanel();
+}
+
+// Buildings are one tile each except the castle compound, whose pieces carry
+// their own width and height. Everything asking "is this tile part of that
+// building" has to read those when they are there.
+function withinBuilding(b, x, y) {
+  const w = b.w || 1, h = b.h || 1;
+  return x >= b.x && x < b.x + w && y >= b.y && y < b.y + h;
+}
+
+// The building you have selected, as a live state object — or null if it has
+// since been pulled down, destroyed, or the empire lost. Everything that reads
+// the selection goes through here, so a stale `{x, y}` can never draw a cross
+// over open ground or aim a demolish at nothing.
+function selectedBuildingLive() {
+  if (!selectedBuilding || !latestState) return null;
+  const me = myPlayer();
+  if (!me || !me.buildings) return null;
+  const b = me.buildings.find(v => v.x === selectedBuilding.x && v.y === selectedBuilding.y && v.type);
+  if (!b || b.type === 'castle') { selectedBuilding = null; return null; }
+  return b;
+}
+
+// The cross over the selected building, and the refund beside it.
+//
+// Drawn in world space so it stays on the building while the camera moves, and
+// last of all so nothing is drawn over the one thing on screen you are being
+// asked to click. `demolishHit` is written here rather than computed again in
+// the click handler: the box you can click and the box you can see are then the
+// same box by construction, which is the bug this shape exists to avoid.
+function drawDemolishBadge(ts) {
+  demolishHit = null;
+  const b = selectedBuildingLive();
+  if (!b) return;
+  const def = buildingTypes[b.type];
+  const px = b.x * ts, py = b.y * ts;
+
+  // The building itself, ringed, so it is obvious which one is about to go.
+  ctx.strokeStyle = '#ffd76a';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(px - ts / 2 + 0.5, py - ts / 2 + 0.5, ts - 1, ts - 1);
+
+  const size = ts * 0.72;
+  const bx = px - size / 2, by = py - ts * 1.25 - size;
+  const refund = def ? Math.floor(priceFor(def.cost) / 3) : 0;
+  const label = `+${refund}g`;
+
+  ctx.font = '11px monospace';
+  ctx.textAlign = 'left';
+  const labelW = ctx.measureText(label).width;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.72)';
+  ctx.fillRect(bx - 3, by - 3, size + labelW + 12, size + 6);
+  ctx.fillStyle = '#c0392b';
+  ctx.fillRect(bx, by, size, size);
+  ctx.strokeStyle = '#ffd76a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(bx + 0.5, by + 0.5, size - 1, size - 1);
+
+  // The cross itself, drawn rather than typed: a glyph at this size lands on a
+  // different pixel in every browser and this has to be square.
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  const pad = size * 0.28;
+  ctx.beginPath();
+  ctx.moveTo(bx + pad, by + pad); ctx.lineTo(bx + size - pad, by + size - pad);
+  ctx.moveTo(bx + size - pad, by + pad); ctx.lineTo(bx + pad, by + size - pad);
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffd76a';
+  ctx.fillText(label, bx + size + 5, by + size * 0.72);
+
+  // In tiles, because that is what tileFromEvent hands the click handler.
+  demolishHit = { x0: bx / ts, y0: by / ts, x1: (bx + size) / ts, y1: (by + size) / ts };
 }
 
 // The groups currently under orders, as live state objects, with anything that
@@ -2515,7 +2903,93 @@ function onKeyDown(e) {
     if (armedClear) { armClear(false); return; }
   }
   if (k === 'q') { useAbility(); return; }
-  if (k === 'r') for (const a of selectedList()) send({ type: 'recallArmy', armyId: a.id });
+  if (k === 'r') { for (const a of selectedList()) send({ type: 'recallArmy', armyId: a.id }); return; }
+  // Halve every selected group. Halving rather than a typed number because it
+  // is the only split that needs no second input and it composes: half, half
+  // again is a quarter. The server takes a count, so a precise split is one
+  // message away the day the UI wants to offer one.
+  if (k === 'x') { splitSelection(); return; }
+
+  // Control groups. Shift+digit assigns, a bare digit selects, and the same
+  // digit twice in quick succession also brings the camera to them.
+  //
+  // Shift and not Ctrl, which is the usual binding, because this runs in a tab:
+  // Ctrl+1..9 switches browser tabs and Chrome does not let a page cancel that,
+  // so the group would be assigned to a window the player is no longer looking
+  // at. `e.code` rather than `e.key` because Shift+1 arrives as '!'.
+  const digit = /^Digit([1-9])$/.exec(e.code || '');
+  if (digit) {
+    const slot = digit[1];
+    if (e.shiftKey) assignControlGroup(slot);
+    else recallControlGroup(slot);
+    e.preventDefault();
+  }
+}
+
+// ---------- Splitting and control groups ----------
+
+// Peel half off each selected group. The new groups hold where they stand, and
+// the selection is left on the parents — the half you kept is the half you were
+// already commanding, and it is what the next order should reach.
+function splitSelection() {
+  const groups = selectedList();
+  if (!groups.length) { log('Select a group first — X splits it in half.'); return; }
+  let sent = 0;
+  for (const a of groups) {
+    const half = Math.floor((a.count || 0) / 2);
+    if (half < 1) continue;                    // a group of one has no halves
+    send({ type: 'splitArmy', armyId: a.id, count: half });
+    sent++;
+  }
+  if (!sent) log('Nothing to split — a group needs at least two soldiers.');
+}
+
+let lastGroupKey = null, lastGroupAt = 0;
+const GROUP_DOUBLE_TAP_MS = 400;
+
+function assignControlGroup(slot) {
+  const ids = selectedList().map(a => a.id);
+  if (!ids.length) {
+    // Assigning nothing is how you clear a slot, which is worth saying out loud
+    // rather than looking like the key did not register.
+    if (controlGroups[slot]) { delete controlGroups[slot]; log(`Control group ${slot} cleared.`); }
+    return;
+  }
+  controlGroups[slot] = ids;
+  log(`Control group ${slot}: ${ids.length} group${ids.length === 1 ? '' : 's'}.`);
+}
+
+function recallControlGroup(slot) {
+  const live = liveControlGroup(slot);
+  if (!live.length) return;
+  selectedArmies = new Set(live.map(a => a.id));
+  selectedBuilding = null; demolishHit = null;
+  // Pressed twice quickly: go and look at them. One press should never move the
+  // camera on its own — selecting a group to give it an order is much more
+  // common than wanting to be taken to it, and a camera that jumps every time
+  // you select is a camera you fight.
+  const now = performance.now();
+  if (lastGroupKey === slot && now - lastGroupAt < GROUP_DOUBLE_TAP_MS) {
+    let sx = 0, sy = 0;
+    for (const a of live) { sx += a.x; sy += a.y; }
+    centerCameraOn(sx / live.length, sy / live.length);
+  }
+  lastGroupKey = slot; lastGroupAt = now;
+  render();
+  renderPanel();
+}
+
+// The slot's groups as live state objects, with the dead pruned and the slot
+// dropped once it is empty. A control group is a handle on whatever of it is
+// still alive, so a slot whose army was wiped out goes quiet rather than
+// selecting nothing and clearing what you had.
+function liveControlGroup(slot) {
+  const ids = controlGroups[slot];
+  if (!ids || !latestState) return [];
+  const live = latestState.armies.filter(a => a.ownerId === myId && ids.includes(a.id));
+  if (!live.length) { delete controlGroups[slot]; return []; }
+  if (live.length !== ids.length) controlGroups[slot] = live.map(a => a.id);
+  return live;
 }
 
 function onKeyUp(e) {
@@ -2608,8 +3082,11 @@ function rebuildMinimapBase() {
     miniBaseCtx.fillStyle = colorForPlayer(pl.id);
     for (const bd of pl.buildings) {
       if (!isExplored(bd.x, bd.y)) continue;
-      const big = bd.type === 'castle';
-      miniBaseCtx.fillRect(bd.x - (big ? 1 : 0), bd.y - (big ? 1 : 0), big ? 3 : 1, big ? 3 : 1);
+      // The compound's walls are one pixel a tile and its bastions and
+      // gatehouse fill every tile they stand on, so the castle's outline is
+      // its outline on the minimap too; the keep tile itself is inside it.
+      if (bd.type === 'castle') continue;
+      for (const [x, y] of buildingTiles(bd)) miniBaseCtx.fillRect(x, y, 1, 1);
     }
   }
   miniBaseCtx.fillStyle = '#d8c08a';
@@ -2618,6 +3095,35 @@ function rebuildMinimapBase() {
     miniBaseCtx.fillRect(camp.x - 1, camp.y - 1, 2, 2);
   }
   miniBuiltAt = clock;
+}
+
+// One group on the minimap: a core in its owner's colour, rimmed in near-black.
+//
+// The rim is the whole of why a group can be seen at all. Your border is
+// already a wash of your own colour and your buildings are flat squares of that
+// same colour sitting in it, so a flat square in your colour was being drawn in
+// exactly the right place and was still indistinguishable from the stonework
+// underneath it. The rim is what separates a unit from the ground it stands on
+// and from anything built there — in your colours and in everybody else's.
+//
+// A big group gets a pixel more, so twenty men read differently from a scout of
+// two. One step and not a scale: a marker that grows smoothly with the count
+// turns the corner of the screen into a bar chart, and what you want off a
+// glance is "that is the army", not "that is nineteen".
+const MINI_GROUP_RIM = 'rgba(10, 8, 14, 0.9)';
+const MINI_BIG_GROUP = 8;
+
+function miniGroupSize(army) {
+  return (army.count || 0) >= MINI_BIG_GROUP ? 4 : 2;
+}
+
+function drawMiniGroup(g, army) {
+  const s = miniGroupSize(army);
+  const x = Math.round(army.x) - (s >> 1), y = Math.round(army.y) - (s >> 1);
+  g.fillStyle = MINI_GROUP_RIM;
+  g.fillRect(x - 1, y - 1, s + 2, s + 2);
+  g.fillStyle = colorForPlayer(army.ownerId);
+  g.fillRect(x, y, s, s);
 }
 
 function drawMinimap() {
@@ -2631,16 +3137,28 @@ function drawMinimap() {
   g.drawImage(miniBase, 0, 0);
 
   // Groups every frame, because they are the thing you are watching for.
-  for (const army of latestState.armies) {
-    g.fillStyle = colorForPlayer(army.ownerId);
-    g.fillRect(Math.round(army.x) - 1, Math.round(army.y) - 1, 2, 2);
-  }
+  //
+  // Which groups these are is not decided here. The server sends each player
+  // their own, their allies', and any other empire's only while something of
+  // theirs is watching that ground — see visibleArmiesFor. So this draws the
+  // list it is handed and nothing wider, and must never fall back on anything
+  // the client happens to still remember: a group that has walked back into the
+  // dark is gone from the list, and gone is what it has to look like.
+  //
+  // Enemies first, so that where two armies are standing on each other it is
+  // yours that ends up on top and yours you can still count.
+  const groups = latestState.armies.slice()
+    .sort((p, q) => (isAlly(p.ownerId) ? 1 : 0) - (isAlly(q.ownerId) ? 1 : 0));
+  for (const army of groups) drawMiniGroup(g, army);
+
   // The selected group gets a ring, so "where did I leave them" has an answer
-  // that does not involve hunting across the map.
+  // that does not involve hunting across the map. Sized to the marker it is
+  // ringing, or a big group wears its ring like a belt.
   g.strokeStyle = '#ffffff';
   g.lineWidth = 1;
   for (const sel of selectedList()) {
-    g.strokeRect(Math.round(sel.x) - 2.5, Math.round(sel.y) - 2.5, 5, 5);
+    const half = miniGroupSize(sel) / 2 + 1.5;
+    g.strokeRect(Math.round(sel.x) - half, Math.round(sel.y) - half, half * 2, half * 2);
   }
 
   // Where the camera is looking, drawn last and left open so it frames the map
@@ -2730,6 +3248,7 @@ function buildPalette() {
   buildIcons.length = 0;
   for (const type in buildingTypes) {
     if (buildingTypes[type].isWall) continue;      // walls have their own tool
+    if (buildingTypes[type].builtin) continue;     // the compound's own pieces are not for sale
     const item = document.createElement('div');
     item.className = 'build-item';
     item.dataset.build = type;
@@ -2944,23 +3463,76 @@ function renderPanel() {
   // its next level would take it from 16 buildings down to 15.
   const limitBonus = me.buildLimit - castleCfg.buildLimit[castle.level - 1];
   const nextLimit = maxed ? null : castleCfg.buildLimit[castle.level] + limitBonus;
+  const keepGarrison = garrisonRoster(me);
   const castleSig = [castle.level, castle.maxHp, borderRadius(me), nextRadius, outpostCount,
-    castle.upgrading, maxed, upgradeCost, me.buildLimit, nextLimit].join('|');
+    castle.upgrading, maxed, upgradeCost, me.buildLimit, nextLimit,
+    garrisonOpen, keepGarrison.total, keepGarrison.hp,
+    keepGarrison.rows.map(r => r.type + r.count).join(',')].join('|');
   if (syncSection(castleCard, castleSig, `
     <div class="row"><span class="label">Level ${castle.level}</span><span class="sub">HP <span data-live="hp">${castle.hp}</span>/${castle.maxHp}</span></div>
     <div class="sub">Border ${borderRadius(me)} tiles${nextRadius ? ` → ${nextRadius} next level` : ''}</div>
     <div class="sub">Buildings <span data-live="used">${me.buildingsUsed}</span>/${me.buildLimit}${nextLimit ? ` → ${nextLimit} next level` : ''}</div>
     ${outpostCount ? `<div class="sub">${outpostCount} outpost${outpostCount === 1 ? '' : 's'} held \u2014 ${outpostRadius()} tiles and ${outpostSlots()} building slots each</div>` : ''}
+    ${garrisonHtml(keepGarrison)}
     ${castle.upgrading ? `<div class="sub">Upgrading… <span data-live="upgradeLeft">${castle.remainingSec}</span>s</div>` :
       maxed ? `<div class="sub">Max level</div>` :
       `<div class="btn-row"><button class="btn btn-sm" id="upgrade-btn" data-cost="${upgradeCost}">Upgrade (${upgradeCost}g)</button></div>`}
-  `) && !castle.upgrading && !maxed) {
-    document.getElementById('upgrade-btn').addEventListener('click', () => send({ type: 'upgradeCastle' }));
+  `)) {
+    if (!castle.upgrading && !maxed) {
+      document.getElementById('upgrade-btn').addEventListener('click', () => send({ type: 'upgradeCastle' }));
+    }
+    const toggle = document.getElementById('garrison-toggle');
+    if (toggle) toggle.addEventListener('click', () => { garrisonOpen = !garrisonOpen; renderPanel(); });
   }
   syncLive(castleCard, { hp: castle.hp, upgradeLeft: castle.remainingSec, used: me.buildingsUsed });
   syncAffordability(castleCard, me.gold);
 
-  // The palette is static; only its prices, what you can afford, and whether
+  // The troops standing at home, by kind.
+//
+// This is `idleUnits` — the soldiers who have not marched anywhere — and it is
+// not a spare roster. It is what an assault on your keep has to get through
+// first: the server takes the blow out of the garrison's pooled health and only
+// what it cannot absorb reaches the walls. That made it the most important
+// number in the game with nowhere to read it, which is why it is here.
+//
+// The pooled figure is totalHp: every standing soldier's health, times the
+// race's hpMult, the same sum the server does. The server also subtracts a
+// carried wound it does not send us, but that remainder is by construction less
+// than one soldier — it is the change left over after the last whole soldier
+// fell — so the figure is right to within one man and is not worth a field on
+// the wire to be exact about.
+function garrisonRoster(me) {
+  const hpMult = modOf('hpMult');
+  const rows = [];
+  let total = 0, hp = 0;
+  for (const type in unitTypes) {
+    const count = (me.idleUnits && me.idleUnits[type]) || 0;
+    if (!count) continue;
+    rows.push({ type, count });
+    total += count;
+    hp += count * unitTypes[type].hp * hpMult;
+  }
+  return { rows, total, hp: Math.round(hp) };
+}
+
+function garrisonHtml(g) {
+  if (!g.total) {
+    return '<div class="sub garrison-none">No garrison — your keep is taking the next blow itself.</div>';
+  }
+  const head = `<div class="row garrison-head" id="garrison-toggle" role="button" tabindex="0">` +
+    `<span class="label">Garrison ${g.total}</span>` +
+    `<span class="sub">${g.hp} hp ${garrisonOpen ? '\u25b4' : '\u25be'}</span></div>`;
+  if (!garrisonOpen) return head;
+  const kinds = g.rows.map(r => {
+    const def = unitTypes[r.type];
+    const name = r.count === 1 ? def.name : (def.plural || def.name + 's');
+    return `<div class="sub garrison-row"><span>${r.count} ${name}</span><span>${r.count * def.attack} atk</span></div>`;
+  }).join('');
+  return head + kinds +
+    '<div class="sub">They take an assault before your walls do.</div>';
+}
+
+// The palette is static; only its prices, what you can afford, and whether
   // there is any room left for it move. The server owns the rule either way —
   // this only saves the player a click that was never going to be accepted.
   const wallCost = priceFor(buildingTypes.wall.cost);
@@ -3001,36 +3573,65 @@ function renderPanel() {
         : atLimit ? '<div class="sub">No room for another building — upgrade the town center. Walls do not count against the limit.</div>'
           : '<div class="sub">Drag a building onto your ground, or use the Wall Tool to drag a wall.</div>');
 
-  // Constructed buildings (castle handled separately above; walls aggregated).
-  // Built as one string keyed on its own shape, so the Train buttons survive
-  // between state messages instead of being replaced under the cursor.
+  // Constructed buildings, one row per KIND rather than one per building.
+  //
+  // It used to be one card each, headed by its coordinates. An empire of any
+  // size turned that into a scrolling column of near-identical cards — three
+  // Banks reading "Bank (111,72)", "Bank (112,73)", "Bank (111,74)" — and the
+  // coordinates were the only thing that told them apart, which is the one
+  // thing you cannot do anything with: you find a building by looking at the
+  // map, not by reading a grid reference. What the list is actually for is
+  // "what do I own and is any of it hurt", and that is a question about kinds.
+  //
+  // So each kind gets a line: how many, their pooled health, and what they do
+  // once rather than once per copy. Anything mid-build or damaged is called out
+  // by count, because those are the two facts a total would hide — five Banks
+  // at "740/750" says nothing about the one that is nearly down.
   const plotsList = document.getElementById('plots-list');
   const walls = me.buildings.filter(b => b.type === 'wall');
   const rows = [];
   const sig = [];
-  me.buildings.filter(b => b.type && b.type !== 'castle' && b.type !== 'wall').forEach((b) => {
-    const def = buildingTypes[b.type];
-    let extra = '';
-    if (b.underConstruction) {
-      extra = `<div class="sub">Building… <span data-live="b${b.x}_${b.y}">${b.remainingSec}</span>s</div>`;
-    } else if (def.trains) {
-      // Orders are placed from the roster at the bottom of the map now, so this
-      // only has to say what the building does and how busy it is.
-      const unitDef = unitTypes[def.trains];
-      extra = `<div class="sub">Trains ${unitDef.name} · queue <span data-live="q${b.x}_${b.y}">${b.trainQueueLen}</span>/5</div>`;
-    } else if (def.defensePower) {
-      extra = `<div class="sub">Defense +${def.defensePower}</div>`;
+  // What the empire runs: not the keep, not walls, and not the compound's own
+  // bastions and gatehouse, which are the castle rather than things in it.
+  const byType = new Map();
+  for (const b of me.buildings) {
+    if (!b.type || b.type === 'castle' || b.type === 'wall' || b.builtin) continue;
+    if (!byType.has(b.type)) byType.set(b.type, []);
+    byType.get(b.type).push(b);
+  }
+  for (const [type, group] of byType) {
+    const def = buildingTypes[type];
+    const done = group.filter(b => !b.underConstruction);
+    const building = group.length - done.length;
+    const hp = done.reduce((n, b) => n + b.hp, 0);
+    const maxHp = done.reduce((n, b) => n + b.maxHp, 0);
+    const hurt = done.filter(b => b.hp < b.maxHp).length;
+
+    const notes = [];
+    if (building) notes.push(`${building} still going up`);
+    if (hurt) notes.push(`${hurt} damaged`);
+    if (def.trains) {
+      // Orders are placed from the roster at the bottom of the map, so this
+      // only has to say what the building does and how busy it all is.
+      const queued = done.reduce((n, b) => n + b.trainQueueLen, 0);
+      notes.push(`Trains ${unitTypes[def.trains].name}${queued ? ` · ${queued} queued` : ''}`);
+    } else if (def.shotDamage) {
+      // What a tower actually does, which is shoot things near it.
+      notes.push(`Shoots ${def.shotDamage} every ${def.shotSec}s within ${def.range} tiles`);
     } else if (def.incomePerSec) {
-      extra = `<div class="sub">+${trim(def.incomePerSec * modOf('incomeMult'))} gold/sec</div>`;
+      notes.push(`+${trim(def.incomePerSec * done.length * modOf('incomeMult'))} gold/sec`);
     }
-    // What you would get back for pulling it down: a third of what it cost at
-    // this empire's own prices, which is what the server will actually pay.
-    const refund = Math.floor(priceFor(def.cost) / 3);
-    rows.push(`<div class="card"><div class="row"><span class="label">${def.name} <span class="sub">(${b.x},${b.y})</span></span>` +
-      `<span class="sub">HP <span data-live="h${b.x}_${b.y}">${b.hp}</span>/${b.maxHp}</span></div>${extra}` +
-      `<div class="btn-row"><button class="btn btn-sm raze-btn" data-raze="${b.x},${b.y}">Pull down (+${refund}g)</button></div></div>`);
-    sig.push(`${b.type}${b.x},${b.y}:${b.underConstruction ? 'c' : 'd'}:${b.maxHp}:${me.cards.length}:${refund}`);
-  });
+
+    // No Pull down button here. Selling is a map gesture — click the building,
+    // click the cross over it — which puts the decision next to the thing it is
+    // about, reaches walls, and is the only way that still works now that a row
+    // stands for several buildings at once.
+    const count = group.length > 1 ? ` <span class="sub">×${group.length}</span>` : '';
+    rows.push(`<div class="card"><div class="row"><span class="label">${def.name}${count}</span>` +
+      `<span class="sub">${done.length ? `HP ${Math.round(hp)}/${maxHp}` : '—'}</span></div>` +
+      `<div class="sub">${notes.join(' · ')}</div></div>`);
+    sig.push(`${type}:${group.length}:${done.length}:${hurt}:${maxHp}:${me.cards.length}`);
+  }
   if (walls.length) {
     // Not a defence number any more: a wall is ground an enemy has to go round
     // or break through, so what matters is how many are still whole.
@@ -3040,88 +3641,27 @@ function renderPanel() {
     sig.push(`walls:${walls.length}:${hurt}`);
   }
   if (!rows.length) rows.push('<div class="card"><div class="sub">No buildings yet — click inside your border to build.</div></div>');
-  if (syncSection(plotsList, sig.join('|'), rows.join(''))) {
-    // Re-attached whenever the list is rebuilt, which is the same contract the
-    // train buttons had before orders moved to the roster.
-    plotsList.querySelectorAll('[data-raze]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const [x, y] = btn.dataset.raze.split(',').map(Number);
-        send({ type: 'demolish', x, y });
-      });
-    });
-  }
-  {
-    const live = {};
-    for (const b of me.buildings) {
-      if (!b.type || b.type === 'castle' || b.type === 'wall') continue;
-      live[`h${b.x}_${b.y}`] = b.hp;
-      live[`q${b.x}_${b.y}`] = b.trainQueueLen;
-      live[`b${b.x}_${b.y}`] = b.remainingSec;
-    }
-    syncLive(plotsList, live);
-  }
+  // The signature now carries every number on a row — counts, damage, the
+  // total — so a change redraws the row it belongs to. There is nothing left
+  // for syncLive to patch in place: the per-building ids it keyed on were the
+  // coordinates, and rows do not have coordinates any more.
+  syncSection(plotsList, sig.join('|'), rows.join(''));
   syncAffordability(plotsList, me.gold);
 
-  // Who else is in this game.
-  const playerList = document.getElementById('player-list');
-  const playerHtml = latestState.players.map(pl => {
-    const marching = latestState.armies
-      .filter(a => a.ownerId === pl.id)
-      .reduce((sum, a) => sum + a.count, 0);
-    const keep = pl.buildings.find(b => b.type === 'castle');
-    const state = !pl.alive ? 'eliminated' : `keep L${keep ? keep.level : 1} · ${marching} in the field`;
-    // Another player's name, going into innerHTML: escaped, like every other
-    // piece of text somebody else chose. cleanText on the server strips control
-    // characters but has no reason to care about angle brackets.
-    const side = pl.team != null
-      ? `<span class="empire-team" style="color:${teamColour(pl.team)}">${escapeText(teamName(pl.team))}</span>`
-      : '';
-    const tag = pl.id === myId ? ' (you)' : (isAlly(pl.id) ? ' (ally)' : '');
-    return `<div class="row"><span class="label" style="color:${colorForPlayer(pl.id)}">${escapeText(pl.name)}${tag}</span>` +
-      side + `<span class="sub">${state}</span></div>`;
-  }).join('');
-  syncSection(playerList, playerHtml, playerHtml);
-
-  // Selected army command panel.
-  const armyCmd = document.getElementById('army-cmd');
-  const chosen = selectedList();
-  if (chosen.length > 1) {
-    // More than one group: a summary and the orders that make sense for all of
-    // them. The per-group detail below only means anything for a single group.
-    const troops = chosen.reduce((n, a) => n + a.count, 0);
-    const kinds = [...new Set(chosen.map(a => a.type))]
-      .map(t => (unitTypes[t] && unitTypes[t].plural) || t).join(', ');
-    if (syncSection(armyCmd, 'multi|' + chosen.map(a => a.id + ':' + a.count).join(','),
-      `<div class="row"><span class="label">${chosen.length} groups</span><span class="sub">${troops} troops</span></div>
-      <div class="sub">${escapeText(kinds)}</div>
-      <div class="sub">Right-click: ground to march them all there, an enemy or camp to send them all at it.</div>
-      <div class="btn-row"><button class="btn btn-sm" id="recall-btn">Recall all (R)</button></div>`)) {
-      document.getElementById('recall-btn').addEventListener('click',
-        () => { for (const a of selectedList()) send({ type: 'recallArmy', armyId: a.id }); });
-    }
-  } else if (chosen.length === 1) {
-    const a = chosen[0];
-    // One kind of soldier per group, so the roster line is a count and a name —
-    // plus how many of them are carrying a wound, which is the whole reason
-    // soldiers have their own health.
-    const count = a.count;
-    const def = unitTypes[a.type];
-    const name = !def ? a.type : (count === 1 ? def.name : (def.plural || def.name + 's'));
-    const parts = [];
-    if (a.wounded) parts.push(`${a.wounded} wounded`);
-    if (a.count < a.mustered) parts.push(`${a.mustered - a.count} of ${a.mustered} lost`);
-    if (!parts.length) parts.push('At full strength.');
-    const orderLabel = { move: 'Moving', attack: 'Marching to attack', fight: 'In battle',
-      return: 'Marching home', hold: 'Holding position', merge: 'Joining another group' }[a.order] || a.order;
-    if (syncSection(armyCmd, `${a.id}|${count}|${a.order}|${parts.join(',')}`, `<div class="row"><span class="label">${count} ${name}</span><span class="sub">${orderLabel}</span></div>
-      <div class="sub">${parts.join(', ')}</div>
-      <div class="sub">Right-click: ground to march and hold, one of your groups it is not in to join it, an enemy, camp or one of their buildings to attack.</div>
-      <div class="btn-row"><button class="btn btn-sm" id="recall-btn">Recall (R)</button></div>`)) {
-      document.getElementById('recall-btn').addEventListener('click', () => send({ type: 'recallArmy', armyId: a.id }));
-    }
-  } else {
-    syncSection(armyCmd, 'none', `<div class="sub">Left-click one of your groups to select it, or drag a box across several. Shift-click adds one. Then right-click: ground to march there and hold, one of your groups that is not selected to join it, or an enemy, a camp or anything they have built to attack. R marches them home.</div>`);
-  }
+  // The Empires standings and the Selected Army card used to sit here, and both
+  // are gone.
+  //
+  // A group already says what it is on the map — its banner, its count, its
+  // health bar — and R recalls it wherever the cursor is. The card restated all
+  // of that in a column on the far side of the screen, so reading it meant
+  // looking away from the fight it was describing. Empires was a table of
+  // everyone's keep level that nobody consults while a keep is being hit.
+  //
+  // What went with them was the garrison, which had never had a home: the
+  // troops standing at your keep are the whole of what an assault has to chew
+  // through before your walls are touched, and the only figure for them was a
+  // tally in the stat row. It is in the Town Center card now — see
+  // renderGarrison, and the click on your own keep that opens it.
 
   for (const icon of troopIcons) {
     const type = icon.type;
@@ -3235,7 +3775,7 @@ const buildingKey = (ownerId, x, y) => ownerId + ':' + x + ',' + y;
 // arrives as dozens at once, so they are staggered outward from the town centre
 // — the run then appears to lay itself rather than blinking into place.
 function trackBuildings(msg) {
-  const ts = mapCfg ? mapCfg.tileSize : 32;
+  const ts = mapCfg ? mapCfg.tileSize : MAP_TILE_FALLBACK;
   const live = new Set();
   const arrived = [];
   for (const p of msg.players) {
@@ -3308,7 +3848,7 @@ function smoothArmies() {
 }
 
 function trackArmies(msg) {
-  const ts = mapCfg ? mapCfg.tileSize : 32;
+  const ts = mapCfg ? mapCfg.tileSize : MAP_TILE_FALLBACK;
   const live = new Set();
   for (const a of msg.armies) {
     live.add(a.id);
@@ -3379,6 +3919,7 @@ function onState(msg) {
   trackSmoothing(msg);
   trackArmies(msg);
   trackBuildings(msg);
+  watchForCombat(msg);
   if (msg.events) {
     for (const e of msg.events) {
       if (e.playerId !== myId) continue;
@@ -3401,12 +3942,35 @@ function onState(msg) {
   }
   if (msg.effects) for (const fx of msg.effects) {
     if (fx.kind === 'arrow') addArrow(fx);
+    else if (fx.kind === 'gate') gateOpened.set(fx.x + ',' + fx.y, clock);
     else spellFlash.push({ ...fx, start: clock });
   }
   latestState = msg;
   rebuildTileSets(msg);
+  // Scenery is cleared from under whatever gets built, so a new wall or a
+  // razed one means the ground layer is out of date.
+  if (assetsReady && occupancyChanged()) buildTerrainLayer();
   render();
   renderPanel();
+}
+
+// How far a keep's portcullis is up: 0 down, 1 raised.
+//
+// Up fast and down slow, because that is the way the thing works — a windlass
+// pays a portcullis out under its own weight and hauls it back. The hold is
+// long enough for the gate to still be open when the group that caused it walks
+// out of it, which is the only reason any of this is on screen.
+const GATE_UP = 0.35, GATE_HOLD = 1.2, GATE_DOWN = 0.7;
+function gateOpenAt(x, y) {
+  const t0 = gateOpened.get(x + ',' + y);
+  if (t0 == null) return 0;
+  const t = clock - t0;
+  if (t < 0) return 0;
+  if (t < GATE_UP) return t / GATE_UP;
+  if (t < GATE_UP + GATE_HOLD) return 1;
+  const fall = (t - GATE_UP - GATE_HOLD) / GATE_DOWN;
+  if (fall >= 1) { gateOpened.delete(x + ',' + y); return 0; }
+  return 1 - fall;
 }
 
 // One tower shot: an arrow to fly and a note to the tower that fired it, so
@@ -3514,6 +4078,7 @@ let attackAlertTimer = null, attackAlertFade = null;
 function raiseAttackAlert(who) {
   const el = document.getElementById('attack-alert');
   if (!el || inLobby) return;
+  noteCombat();
   clearTimeout(attackAlertTimer);
   clearTimeout(attackAlertFade);
   el.classList.remove('hidden', 'leaving');

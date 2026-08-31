@@ -1,10 +1,35 @@
 # Empire
 
-A real-time multiplayer empire-builder: pick a race, grow a castle, train
-armies, and march them across a shared map to raid AI camps or conquer other
-players. Built on the same always-on WebSocket foundation proven out in the
-`game-server-poc` project — the server is fully authoritative, the client
-only renders what it's told and sends command requests.
+A real-time strategy game: pick a race, grow a keep, build an economy inside a
+border you push outward, train armies, and march them across a shared map to
+take the ground and the camps other players want. A simpler take on the
+build-army-and-fight strategy game — fewer things to manage, more weight on
+where you put what you have.
+
+The server is fully authoritative and the client only renders what it's told
+and sends command requests.
+
+## What it is aiming at
+
+Written down because it decides arguments about everything else:
+
+- **Matches run 15 to 40 minutes**, and vary. A game that always takes the same
+  time is a game whose shape you already know.
+- **Winning should feel hard-fought.** A match ends because somebody took a
+  keep, and taking one should read as an achievement rather than a formality
+  once the result stops being in doubt.
+- **Races are a playstyle, not a decision.** Each one leans somewhere — harder
+  hitting, quicker across the map, cheaper to build — so you can pick the one
+  you enjoy playing. None of them is the right answer. A lucky draft that stacks
+  boons onto what a race is already good at is allowed to be strong; the race on
+  its own is not.
+- **Ground is the prize.** What a captured camp is worth is building slots,
+  space and sight — territory, not income.
+- **It is meant to ship**, as in a Steam release, and to be finished enough to
+  charge for. Friends-with-a-room-code is where it is now, not what it is for.
+
+Age of Empires is a reference and an inspiration, not a blueprint. Where the two
+disagree, this game gets to be its own thing.
 
 ## Run locally
 
@@ -79,20 +104,41 @@ a router reboots. When that happens the empire is **not** lost:
 A game listed in the lobby shows how many of its players are currently away,
 so "3 players" and "3 players, 2 away" read differently.
 
-## Menu media
+## Media and the mix
 
-`public/media/` holds the two hand-supplied files the menu uses — the painted
-background and the looping theme. Unlike `public/assets/`, nothing generates
-these, so they are safe to swap out by replacing the files:
+`public/media/` holds the hand-supplied files — the painted menu background and
+four audio loops. Unlike `public/assets/`, nothing generates these, so they are
+safe to swap out by replacing the files:
 
 ```
-public/media/menu-bg.png     — main menu background
-public/media/menu-theme.mp3  — looping menu music
+public/media/menu-bg.png          — main menu background
+public/media/menu-theme.mp3       — the menu and lobby
+public/media/music-regular.wav    — the match, at peace
+public/media/music-battle.wav     — the match, at war
+public/media/ambience-forest.wav  — under all of it, always
 ```
+
+The three loops are mixed rather than switched: each has a volume it is meant to
+be at, and a ticker in `client.js` walks it there over a second or two, so the
+score never cuts. Ambience runs at a tenth of full and never stops. The menu
+theme belongs to the menu and the lobby. The other two split the match between
+them, on one question — is anybody fighting?
+
+Fighting means a group of yours standing in `fight`, a group of yours losing
+health while under some other order (which is what being shot at by a tower
+looks like), or the UNDER ATTACK banner. Any of the three holds the battle bed
+up for twelve seconds past the last blow, so a skirmish does not leave the
+score sliding between two moods and settling in neither.
 
 Browsers refuse to autoplay audio until the page has been interacted with, so
-the theme starts on the first click or keypress and stops when a match begins.
-The MUSIC toggle in the corner is remembered between visits.
+all of it starts on the first click or keypress. Only the theme is preloaded —
+the other three are thirty megabytes between them and are not wanted until a
+match begins, so they are left to fetch then rather than racing the art for the
+connection. That is also the argument for encoding them: they are 16-bit PCM
+because there was no encoder on the machine that added them, and `ffmpeg -i
+music-regular.wav -q:a 4 music-regular.mp3` would take about nine tenths off
+each one. The MUSIC toggle — in the menu's corner, and in the match's, beside
+Exit — is remembered between visits and governs all four.
 
 ## Tests
 
@@ -120,6 +166,436 @@ node tools/build-assets.js [path-to-packs]     # defaults to ../assets
 
 Re-run it whenever the source packs change; nothing else in the project
 reads them.
+
+### Tile size, and the two places it lives
+
+A world tile is **48 pixels**, which is what the Winlu exterior set the terrain
+comes from is drawn at. Terrain is the one layer that cannot be rescaled without
+showing it — resampling an autotile fringes every seam — so the game follows the
+tileset rather than the other way round. Every sprite pack here is drawn on a
+16px grid and reaches 48 by a whole-pixel x3 (`MINI_SCALE`), so nothing else is
+resampled either.
+
+The number lives in two places and they **must agree**: `TILE` in
+`tools/build-assets.js`, which writes it into `manifest.json` and is what sprite
+scale is measured against, and `MAP.tileSize` in `config.js`, which is what the
+client uses for world geometry. A mismatch draws correctly-sized art in the
+wrong places, which looks like a camera bug and is not one. Change `TILE`,
+rebuild, and copy the number across.
+
+### Mountains are placed, not grown
+
+A mountain used to be a cellular field: seed every tile at random, smooth it a
+few times so neighbours reinforce each other. That makes ragged one- and
+two-tile scraps, and once the terrain layer started drawing mountains as
+plateaus — a surface with a ring of rock round it — those had nowhere to put a
+surface. A scrap three tiles across is all ring.
+
+It also could not be steered, and that turned out to matter more. The old
+threshold sat on a knife edge:
+
+| `mountainFill` | map | coverage it actually produced |
+| --- | --- | --- |
+| 0.18 | Open Field | **0.0%** |
+| 0.34 | Lakelands | **0.8%** |
+| 0.40 | The Divide | 5.0% |
+| 0.42 | The Wilds | 8.1% |
+| 0.44 | Four Corners | 11.4% |
+| 0.52 | Highlands | **33.6%** |
+
+Two of the six maps were getting essentially no mountains and nobody had
+noticed, because the number in the map definition looked reasonable.
+
+`Match.growRanges` places masses instead of growing them. Each is a short chain
+of overlapping discs — a run of round lobes leaning into each other, which is
+what a plateau looks like from above — laid until the map has the coverage it
+asked for. Lobes are three to five tiles, which is the size that leaves a
+surface inside the ring without the surface becoming a field with a kerb round
+it. One majority pass afterwards rounds the joins and drops single-tile nubs,
+and costs about a twelfth of what was laid, which is why the target is asked
+for at `coverage / 0.92`.
+
+`mountainCover` in `config.js` is now the fraction of the map that is
+impassable, set directly. The figures are what each map measured at before, so
+nothing about how they play changes — with two deliberate exceptions:
+
+- **Lakelands** goes from 0.8% to 2%, because a blurb promising ridges should
+  have some.
+- **Open Field stays at exactly zero, and must.** Its blurb is literal, and the
+  mirrored-fight invariants are run on it: two identical sides have to reach a
+  draw, which they cannot do with unmirrored rock between them. Setting it to
+  1% broke those tests, which is how this was found — the old 0% was an
+  accident of the threshold, and it is now zero on purpose.
+
+**The Divide's spine** goes from five tiles thick to nine. At five, the terrain
+layer had nothing to draw but ring — rock on both faces and a single tile
+between them — so the map's one landmark came out as a wall rather than as the
+range the blurb promises. At nine it has a plateau along the top with a rock
+face down each side. The passes are unchanged: three of them, seven tiles tall,
+and the spine is solid on 139 of 160 rows, so they are still the only way
+through.
+
+### The tileset comes in three foliage colours, and we had the wrong one
+
+The pack ships base, green and red editions. The stone is identical in all
+three; only the green changes:
+
+| edition | grass | hue |
+| --- | --- | --- |
+| base | `rgb(67,146,109)` | 0.422, a teal sea-green |
+| **green** | `rgb(67,146,89)` | 0.380, a warmer natural green |
+| red | `rgb(174,80,74)` | autumn |
+
+Every sample map is tileset 1, which is the **green** edition, so every
+reference image is green — and everything we built was teal. Measured against
+the reference screenshot's own grass, `rgb(67,143,89)` at hue 0.382, green
+matches to within three points on one channel and base does not. That is a
+colour cast over the whole map, and it was there underneath every argument about
+the shapes drawn on top of it.
+
+`winluSheet()` in `tools/build-assets.js` prefers a `_green` sheet and falls
+back to the base pack, which keeps the character sheets working — the edition
+upgrades ship only tilesets and their own big trees. It is also the single place
+that would need to change to put a map in autumn, since the red edition is a
+complete reskin.
+
+### A slope is not a flight of stairs
+
+Column 3 of the cliff block is a diagonal run — lip, body and base cut at
+forty-five degrees — and Map001 lays them going down: (3,11) (3,12) (3,13) for
+an edge falling to the left, (3,14) (3,12) (3,15) for one falling right.
+
+Their orientation was measured off the sheet rather than guessed, by classifying
+each tile's sixteenths as rock or grass:
+
+| cell | rock corner |
+| --- | --- |
+| (3,11) | south-east |
+| (3,13) | north-west |
+| (3,14) | south-west |
+| (3,15) | north-east |
+
+So a lip with open ground to its west wants rock to the south-east — (3,11) —
+and a base course wants the mirror. The substitution only happens where the mass
+actually **continues** diagonally (`isRock(x-1, y-1)` for a westward step). A
+tile with open ground beside it and nothing above that is a genuine end of a
+run, and the block's rounded corner is the right piece there; swapping in a
+diagonal would cut the corner off a formation that has one.
+
+`client.test.js` classifies the four cells and asserts which corner the rock
+sits in. The orientation is not visible anywhere in the code — it lives in the
+artwork — so a mis-cropped kit or an edition with a different A5 layout would
+point every diagonal the wrong way while every other check still passed.
+
+### The sample maps are the reference
+
+The pack ships the artist's own RPG Maker maps, and `tools/sample-map.js`
+renders them:
+
+    node tools/sample-map.js Map008 out.png
+
+Map001 is a cliff demo, **Map008** a walled town, **Map012** a village among
+terraces, Map016 forest. Reach for these before inferring anything from a
+screenshot — several long detours came from reverse-engineering a rescaled promo
+image, and each one was settled in a single read once the maps were rendered.
+
+Two things they corrected outright:
+
+- **A curtain wall is an A4 wall autotile with the battlement kit dropped on
+  top.** Map008 lays the body as kind 105 — the light ashlar at A4 (2-3, 8-9) —
+  and puts the B merlons over it. We had `facePale` pointing at A4 (7,4), a dark
+  rubble wall of small broken stones, which is most of why our walls did not
+  look like the picture.
+- **Row 1 of the battlement kit is not an inward-facing merlon.** Map008 puts
+  B(9,0) directly above B(9,1) in one wall, so row 1 is the course BELOW the
+  crenellations. `merlonBack` was cut from it, which put a piece of wall face up
+  where a merlon belongs — the reason northern runs never looked like the back
+  of anything. A curtain carries ONE set of crenellations, seen from both sides;
+  what changes is what lies under them, the face from outside and the wall-walk
+  from inside.
+
+Worth knowing and not yet used: the wall never turns a corner in Map008. Straight
+east-west runs terminate into round **towers** two tiles wide and seven tall
+(sheet B columns 13-14, rows 0-6), and the tower turns the corner. Tileset 1 also
+uses the **green edition** sheets, which are not the ones the build reads.
+
+### A corner is a tower
+
+A curtain wall does not bend. Map008 runs straight east-west sections into round
+towers and lets the **tower** make the turn, which is how real curtain walls are
+built and why ours looked like a wall folded over on itself.
+
+So `wallPiece` returns `tower` for all four turns. That is a loss of precision
+on purpose: there is no north-west corner piece to get backwards any more, and a
+tower looks the same whichever way the wall arrives at it. The property still
+worth guarding is that a turn is RECOGNISED as one — a `mid` or a `capE` there
+would put a straight section where the wall changes direction — so the four
+cases stay spelled out in `client.test.js`.
+
+The tower is sheet B columns 13-14, rows 0-6: two tiles wide and seven tall.
+Four rows is the crenellated top plus enough shaft to stand twice the height of
+the wall it interrupts, which is the proportion the reference has. Being two
+tiles wide it laps over its neighbours, which is right — buildings paint north
+to south, so a run further down the map draws over the tower's foot and the
+tower covers the run behind it.
+
+It is the one wall piece exempt from "every piece is two tiles tall on one
+anchor". That invariant is about the pieces carrying the wall-WALK, which have
+to agree so a turn keeps its walk on one line; a tower does not carry a walk, it
+interrupts one, and pinning it to the wall's height would defeat the point of
+it. Two narrower checks take its place: it must be taller than the wall, and
+centred on its own width so it sits astride the corner.
+
+### A wall that turns keeps its walk on one line
+
+A wall was drawn at two different heights depending on which way it ran. An
+east-west run is a face-on elevation two tiles tall — merlon course over a wall
+face — because the camera is south of it and sees the near side. A north-south
+run is the same wall going away from you, so what you see is its walkway from
+above, and that was built one tile tall.
+
+Both are defensible on their own. Together they mean a wall that turns south
+drops its walk a full two tiles at the corner and carries on at the wrong level:
+the same wall, drawn at two heights, meeting at a step. That is the "glitchy"
+part, and it is invisible in any single piece — it only shows where two of them
+meet.
+
+The fix is to give the strip the same frame rather than to shorten the run. The
+walk goes in the UPPER tile, where the east-west run keeps its merlons, so the
+two walks meet on one line; the wall's face goes underneath. Along a run that
+face is never seen, because the next tile south draws its own walk over it and
+buildings paint north to south — so it shows at exactly one place, the southern
+end of the run, which is the one spot where a wall going away from you does
+present a face. That falls out of the geometry instead of needing a special
+piece.
+
+`client.test.js` checks that every piece in every set is two tiles tall on one
+anchor. A single piece cannot show this bug, so it needs a check that looks
+across the set.
+
+The pack's own maps back the two-tile elevation up. In `Map008` a horizontal
+battlement is laid as two stacked tiles — merlon course from sheet B column 9 or
+10 row 0, over a face row 1, with column 8 as the west end and 12 as the east.
+Worth knowing for later: the author never turns a corner with a wall at all.
+Straight east-west runs terminate into four-tile-tall round **towers**
+(column 13, rows 0-3), and the tower is what turns the corner.
+
+### Mountains are a raised plateau
+
+Mountain is the one terrain an army cannot cross, so it has to look like it.
+It has been three things: an A2 ground block tinted down, which was a
+differently-coloured floor; then a plateau top ringed in rock, which was a
+puddle with a pebble border. A ring says there is an edge. It does not say
+which side of that edge is higher.
+
+What says so is a **face** — rock seen side-on, standing up off the ground —
+and `Fantasy_Outside_A5` has the whole set. Its bottom half is a cliff kit: a
+three-by-three plateau top in a grass and a dirt finish, and seamless wall
+texture to hang under the front of it.
+
+A mountain is drawn in `buildTerrainCanvas` (`public/sprites.js`) as a cliff
+and nothing else. There is no second surface: the top of a plateau is the same
+grass as the field around it.
+
+That is not a guess. The pack ships sample maps
+(`Winlu Master Sample_maps`), and Map001 is a cliff demo. Reading the tile ids
+out of it shows a plateau built from exactly three pieces, all from
+`Fantasy_Outside_A5` columns 0-3:
+
+| piece | rows | what it is |
+| --- | --- | --- |
+| **lip** | 13 | grass with a rock fringe hanging under it |
+| **body** | 14 | solid wall, repeated for however tall the drop stands |
+| **base** | 15 | the course where the wall meets the ground |
+
+and for the plateau top, no tile whatsoever. The whole sheet is exported as
+`terrain/cliffkit.png`, a 4x5 grid indexed by `[col, row - 11]`.
+
+So each mountain tile asks how far it is from open ground to the south. The
+bottom row takes the base, the row or two above it take the body, the row above
+those takes the lip, and everything further back is left as grass. Column 0 or 2
+is used instead of 1 where a run of face ends, so the ends are finished rather
+than cut off square.
+
+Two things were tried first and both were wrong, in the same way:
+
+- A **ring** of rock round the whole outline. A closed shape is a wall. At the
+  coverage these maps actually run almost every mountain tile is an edge tile,
+  so a ring came out as a winding one-tile band with a little grass caught
+  inside it — the "maze" look. Masking the stone out of the author's own art and
+  flood-filling from the border says only about **1%** of it is grass enclosed
+  by rock: tops are not surrounded, they run out of the back of a formation into
+  the field.
+- A **second grass** for the plateau top, cut with `rockify` — surface keyed out
+  by hue, wall put behind. It gave every formation a rim the pack never draws.
+  A dirt top was tried too, on the theory that a strategy map must show where
+  the impassable ground is; it reads as a courtyard, because a floor in a
+  different material with a stone border round it is a room, not a hill.
+
+What separates the two levels is the height of the face and the dark it throws.
+The shadow falls south and east, since every rock on these sheets is lit from
+the upper left, and it is built from banded `fillRect`s rather than a gradient:
+the headless canvas the map preview renders through has no
+`createLinearGradient`, and a shadow that only exists in the browser is a
+shadow nobody can check.
+
+The generator has to cooperate, because the drawing decides what shapes can be
+drawn. Lobes are five to eight tiles and masses under eight tiles are swept up
+altogether — a mass smaller than that is face the whole way through, with no
+room left for a top, and reads as a piece of wall lying in a field.
+
+
+- The `crag` prop group has to belong to the SAME ROCK as the cliff, and that
+  is the whole brief for it. The A5 cliff is angular — flat stones stacked in
+  courses, crisp edges, moss in the joints. Sheet D's big outcrops at (8,0) are
+  rounded, bulbous and smoothly shaded, and standing on the plateau beside a
+  stacked-stone cliff they read as boulders from a different game dropped onto
+  the map. They are gone. What is left is small and angular: three grass-topped
+  rock ledges, which are the same courses of flat stone with growth on top, and
+  one bare stone, none over a tile and a half. `propForTile` in
+  `public/artdefs.js` puts one on 20% of mountain tiles, down from 82% when the
+  crags were the whole of the mountain.
+
+Every crag is free-standing art, which is not a given on these sheets and is
+the whole reason the picks are what they are. The obvious candidates — the
+pieces on `!$Cliff_decoration.png`, and the grass-topped mesas lower down
+`Fantasy_Outside_D.png` — are all EDGE pieces, cut with straight verticals and
+notches taken out of them so they butt against an A4 wall. That is invisible
+against a wall and unmistakable standing in open country.
+
+### A wall going away from you is a different drawing, not a turned one
+
+An east-west wall and a north-south wall are two pictures, and the pack ships
+both. An east-west run is what you would expect: merlons over a row of face,
+two tiles tall on its one tile of ground. A north-south run is the wall seen
+from above — its walkway, with a parapet down each edge.
+
+It used to be the east-west piece given a quarter turn: the face laid down as a
+floor with a merlon rotated onto it. A merlon is drawn to be seen from the
+front, and rotating it does not produce a parapet seen from above — it produces
+a light rectangle lying on a brick square. A run of them read as a stone path.
+No adjustment to the rotation was going to help, because it was the wrong
+drawing to start with.
+
+The right pieces are on `Fantasy_Outside_B`, in the same battlement kit the
+merlons come from: `(11,4)` is the walkway stonework and `(11,1)` / `(12,1)` are
+the west and east parapets, each drawn in the outer eleven pixels of an
+otherwise empty cell so they lay straight over it. See `COMPOUND_PART` and
+`buildWallPieces` in `tools/build-assets.js`.
+
+A wall is only ever drawn from the south, because that is where the camera is.
+So a run on the **north** side of a castle is being looked at from inside it:
+what faces you is the wall's inner face, and it should be wearing the
+crenellations you look over from the walkway, not the ones you meet coming at
+it. Drawn with the outward merlons everywhere — which is how it started — a
+castle's northern wall read as though its battlements were pointed at its own
+courtyard.
+
+And what sits UNDER the merlons changes with them, which is the point a tone
+swap alone misses. A curtain wall carries its crenellations on its outer edge
+only; the inner side is the wall-walk, open to the courtyard. So from inside you
+do not see a wall's face at all — you see the walk, with the parapet standing
+along its far edge, which is what the aerial photographs of Pembroke and Windsor
+show. A back wall drawn with a face underneath reads as a second outward-facing
+rampart that has turned its back on the keep. Putting the walk under it also
+joins the run to the north-south pieces either side, which are that same walk
+seen from above: the walkway turns the corner and carries on, as it does on a
+real curtain.
+
+The pack draws both sides, and they are a matched pair. Row 0 is the outer
+side, its merlon blocks in shadow at a mean brightness of 119; row 1 is the
+inner side at 148. The corners pair off the same way: `(11,0)`/`(12,0)` are the
+outer pair at 132 and `(11,2)`/`(12,2)` the inner at 151, identical in shape
+and different only in which side is lit. Every piece that carries a merlon gets
+a `back_` twin; the north-south walkway does not, because it is seen from
+straight above with a parapet down both edges and has no side to be on the
+wrong one of.
+
+`wallDef` in `public/sprites.js` picks between them on `insideY`, the owner's
+town center row: a run north of the keep gets the twin. That is not the old
+`insideX` mirroring coming back — that flipped a piece because the art had a
+battlement down one side only. This picks a *different piece*, because the pack
+drew the same wall twice and only one of them is right for a given run. A wall
+with no owner passed in falls back to the outward set, which is what a lone
+segment should look like.
+
+Where a run turns, it draws a corner, and that is a third picture again — a
+tile reaching east and south is not a horizontal wall and not a vertical one.
+The battlement kit draws all four: `(11,0)` and `(12,0)` are the northern pair,
+`(11,2)` and `(12,2)` the southern. Each is built like the horizontal run so it
+keeps that height — the turn happens on the merlon course and the face below it
+is the same face the runs either side stand on, so the three butt together with
+no step. Before this the corner drew as a plain horizontal cap: the run stopped
+dead and the walkway started, with nothing carrying the parapet round the bend.
+
+`wallPiece` in `public/artdefs.js` takes the turn first, because it is the only
+case where neither run is right. A corner is exactly one horizontal neighbour
+and one vertical one and nothing else; a T-junction has more and keeps the
+horizontal art. The names are the corner **of the enclosure**, not the
+directions reached — a wall running east and south is the north-west corner of
+whatever it goes round — and the test spells out every shape so a future edit
+cannot quietly rotate the set.
+
+A parapet down **both** edges is what let a chunk of code go. The old piece had
+its battlement on one side only, so it had an outside, so `drawWall` had to
+mirror the western half of every run about its own centre line to keep the
+crenellations pointing away from the keep — and every call site had to pass the
+keep in for that. A walkway with two parapets is the same wall on either flank.
+The mirror, the `insideX` plumbing and the test that guarded it are all gone,
+replaced by one that checks the property that made removing them safe: both
+edges of `wall_vertMid` read brighter than the middle, in every faction set,
+because a parapet is a lit top and the walkway between them is not.
+
+### The interface is one pack, and its corners are the contract
+
+Every frame the UI is built from — the side panel, the cards, the buttons, the
+section headings, the health bar, the attack banner — is cut from a single
+sheet, `DarkAgesUi_v1.0/32x32-Tilesheet.png`. It used to be two packs: Kenney's
+9-slices for the panels and buttons, this sheet for the health bar and the
+banner. They never sat together, and no amount of recolouring fixed it — half
+the interface was cheerful mid-brown with soft bevels and the other half was
+charcoal, gold leaf and knotwork.
+
+`UI_FRAMES` in `tools/build-assets.js` is the whole map: a rectangle on the
+sheet, the corner size in **source** pixels, and the scale to draw it at. The
+build multiplies those together and prints the result:
+
+```
+ui: 19 pieces
+     borders: panel 28, plate 14, inset 28, card 20, ornate 22, header 8/28, button 12, ...
+```
+
+Those numbers are the contract with the stylesheet. A frame is used as
+
+```css
+.frame-panel { border: 28px solid transparent; border-image: url("...panel.png") 28 fill repeat; }
+```
+
+and the two 28s **must** be the same number. Different, and the browser scales
+the corner art into a space it does not fit — blurred pixels that read as a bad
+asset rather than as a bad rule. `npm test` checks every one of them, resolves
+`var(--frame-*)` to do it, and also checks that no slice is bigger than half its
+own image. If you change a scale in the build, read the new numbers off its
+output and put them in the stylesheet.
+
+The same rule is why there are two weights of the same charcoal box. `panel`
+is it at x2 for the side panel, which is tall enough to carry a 28px frame;
+`plate` is it at x1 for the things floating on the map — the log, the minimap,
+the roster, the ability dock — which are not. Squeezing `panel` into a 14px
+border would have been the same bug.
+
+### Terrain comes from an RPG Maker tileset
+
+`tools/rmautotile.js` exists because the two formats disagree. An RPG Maker
+autotile is a 2x3-tile block of 24x24 quadrants that its renderer composes at
+draw time; this game does no compositing, because `sprites.js` draws one
+finished image per tile. So the composing happens once at build time, and what
+comes out is the flat 47-shape blob sheet plus the 256-entry neighbour lookup
+the client already knew how to read.
+
+Which block becomes which terrain is a table at the top of the Terrain section
+of `tools/build-assets.js`, read off a contact sheet of the pack rather than
+guessed.
 
 Draft card faces come out of the same pipeline. `CARD_ART` near the top of
 the build script maps each card id in `config.js` to its picture — a tarot
@@ -197,6 +673,19 @@ sprite anchors and layering can be eyeballed as a PNG.
   health they were carrying, so reinforcing a battered group does not heal it.
   Only groups of the same kind can join: militia, knights and ballistae always
   march separately.
+- **Press X to split a group in half**, and joining stops being a one-way door.
+  The half that walks off holds where it stood; the half you keep is still the
+  one you had selected, so your next order reaches it. Splitting moves soldiers
+  rather than making them — the detachment carries whatever wounds the group was
+  already nursing, and half of a rooted group is still rooted — so it is a way
+  to peel off a scout or leave a garrison behind, never a way out of a fight.
+  Halving composes: half, and half again, is a quarter.
+- **Control groups on the number keys.** Shift+1 to 9 puts whatever you have
+  selected in that slot, and a bare 1 to 9 selects it again; pressing the same
+  number twice quickly also takes the camera to them, so one press stays safe
+  for giving orders. Shift rather than Ctrl because this runs in a browser tab,
+  and Ctrl+1 belongs to the tab bar. A slot only ever holds your own groups, and
+  quietly drops the ones that have died rather than clearing what you had.
 - **Every soldier has their own health, and each kind marches as its own
   group.** Send militia, knights and ballistae together and you get three
   groups, not one column — so the knights are no longer held to the ballista's
@@ -252,7 +741,12 @@ sprite anchors and layering can be eyeballed as a PNG.
   spared by each other's spells and towers, may walk through each other's
   walls, and win together.
 - **A minimap**, in the corner of the map. It shows only what you have actually
-  seen, and clicking or dragging it moves the camera.
+  seen, and clicking or dragging it moves the camera. **Every group on it is a
+  rimmed dot in its empire's colour** — yours and your teammates' wherever they
+  are, an enemy's only while something of yours or your side's is watching that
+  patch of ground, which is the same vision the rest of the map runs on. A group
+  of eight or more is drawn a pixel bigger, so an army reads differently from a
+  scout at a glance, and the group you have selected wears a white ring.
 - **Two more zoom steps out**, to a half and a quarter, so you can look at most
   of the map at once rather than a fifth of it.
 - **Ballistae outrange what cannot reach them.** Left alone they shell troops,
@@ -264,7 +758,10 @@ sprite anchors and layering can be eyeballed as a PNG.
   than swimming. Sealing a keep in still only buys you the time it takes to
   batter the wall down. The way round is a taut line and not a staircase — a
   column skirting a ridge takes the diagonal a person would take, and keeps a
-  body's width off anything built.
+  body's width off anything built. **A detour is a slide past the obstacle, not
+  a right angle round it**: troops sent diagonally past a crag cut the corner of
+  it rather than marching out to one side and then turning down, which is both
+  what it looks like it ought to do and about a tenth shorter.
 - **Every map is drawn in the lobby**, with the starting positions marked. The
   picture is a sample of what that map makes rather than the one you are about
   to play — those are generated fresh for every match — but it is built by the
@@ -284,23 +781,30 @@ sprite anchors and layering can be eyeballed as a PNG.
 - You spawn with a town center (the Keep) and may build anywhere inside your
   border. **Your opening circle is always clear** — the level-1 disc around
   every starting position is levelled when the map is generated, so nothing
-  inside it can block a building or a wall drag.
-- **Upgrading the Keep pushes that border out** (7 → 11 → 15 tiles), which is
+  inside it can block a building or a wall drag. The keep is a whole castle
+  drawn in Godot (`assets/CastleEvil/`), six tiles across, and the ground under
+  its art is reserved — a bank cannot be dropped into the corner of it.
+- **Upgrading the Keep pushes that border out** (9 → 13 → 17 tiles), which is
   the main reason to do it: more ground means more buildings, though the new
-  ground is whatever terrain happens to be there. The keep's sprite gets
-  grander at every level, so you can see it on the map.
-- Keep + Banks generate gold over time. Spend gold to build Barracks,
-  Stables, Siege Factories, Archer Towers, or more Banks.
+  ground is whatever terrain happens to be there. Levelling changes nothing
+  drawn.
 - **Your border never has water in it.** The opening ground is levelled when
   the map is built, and any lake the border later grows over is drained as it
   reaches it — including when a boon widens it. Mountains stay: build around
   them, or Reshape the Land.
+- Keep + Banks generate gold over time. Spend gold to build Barracks,
+  Stables, Siege Factories, Archer Towers, or more Banks.
 - **Archer Towers shoot on their own.** A finished tower looses an arrow at
   the nearest enemy army within 5 tiles, once every 3 seconds, for 12 damage —
   whether or not that army is coming for your keep. It fires the moment
   something walks into range and cannot bank up shots while it waits. That is
-  on top of the +15 it adds to your defence when the empire itself is stormed.
-  Towers ignore bandit camps, which never move. There is an archer standing in
+  **A tower fights in its own square and nowhere else.** It does not defend your
+  keep from across the map — it used to add +15 to your garrison's punch and take
+  a slice off every blow that landed on the empire, wherever it happened to
+  stand, and it no longer does either. What it does is thin out whatever walks
+  past it, and hit back at whoever comes to knock it down. Three towers behind
+  twenty men still turn a fight you were losing; six towers behind nobody still
+  lose. Towers ignore bandit camps, which never move. There is an archer standing in
   the gallery who does the shooting: he turns to face what the tower is
   aiming at, draws, and holds his loose until the arrow lands.
 - **Buildings are dragged from the panel onto the map.** Pick one of the
@@ -308,6 +812,14 @@ sprite anchors and layering can be eyeballed as a PNG.
   turns green where it will go and red where it won't. A plain click arms it
   instead, so you can click the icon and then click the map. Escape puts it
   back.
+- **Click one of your buildings to pull it down.** It rings in gold and a red
+  ✕ rises over it with what you would get back; click the ✕ and it goes, click
+  it again or click anywhere else and the ✕ goes instead. This works on **wall
+  segments** too, which is the only way to unpick a wall you regret — the side
+  panel could never list three hundred of them one at a time. Your town center
+  is the one thing you cannot pull down, and a group standing on a building
+  still takes the click ahead of it, so you can never lose a selected army by
+  reaching for the ground it is on.
 - **Troops are trained by clicking their portrait** in the bar. Grey covers
   the unit while it is being made and recedes as it finishes, with a `+N`
   for anything else queued behind it — up to 5 per building. Every unit has
@@ -324,6 +836,12 @@ sprite anchors and layering can be eyeballed as a PNG.
   without one buys you the walk *and* the breach, both of them spent under
   your towers. Your own walls never block your own troops.
 
+  **Drag back along a run to take it back.** Overshoot by four tiles and you
+  pull the mouse back four tiles; the price in the corner of the drag counts
+  down with it, and nothing is bought until you let go. Drawing a closed
+  compound still works — coming back round onto the tile you started on closes
+  the loop rather than unwinding it.
+
   A run turns to suit its direction, and the two sides of an enclosure face
   outward, so a walled compound reads as one thing rather than as four
   separate fences. Anything below full health wears a red bar, which is how
@@ -338,8 +856,8 @@ sprite anchors and layering can be eyeballed as a PNG.
   see the squad thin out as its health bar drops, and pull them back out
   mid-fight (press R) with whatever they've looted so far. Break through
   the defences and the survivors start on the town center itself.
-- Raiding an AI camp pays gold for every point of damage put into it, plus
-  the loot and a clear bonus for razing it outright. **Raze one and you keep
+- **An AI camp pays no gold at all** — not for the damage, not for razing it.
+  What you take a camp for is where it stands. **Raze one and you keep
   it**: the ruins become an outpost, a second disc of buildable ground half
   the size of your starting border, anchored wherever the camp stood, and worth
   three more building slots for as long as you hold it. When an
@@ -353,21 +871,26 @@ sprite anchors and layering can be eyeballed as a PNG.
 ## What's deliberately not built yet
 
 Races are stat multipliers, one active ability and their own troop sprites,
-not unique units with unique rules. There's no capturing enemy bases outright
-(raids damage/loot, they don't take ownership), no alliances beyond the teams
-the host sets in the lobby, and no resource types beyond gold. A tower's
-arrows are positional — it shoots what comes within five tiles of it — but its
-+15 to the garrison's punch is not: every tower you own counts in the last
-stand no matter which side of the map it is on. Groups never split once
-merged. A group that is marching and being squared up in the same tick can
-briefly move faster than it walks, because the two movements do not share a
+not unique units with unique rules — and that is the intent, not a stub. There's
+no capturing enemy bases outright (raids damage the keep, they don't take
+ownership), no alliances beyond the teams the host sets in the lobby, and no
+resource types beyond gold — and with camps no longer paying, gold now comes from
+the keep and its banks alone, which is one income with one decision attached
+rather than two with a grind attached.
+Nothing here is matchmade: a game is a four-letter code you share,
+which is enough for now and is not what a Steam release looks like. A group can
+be halved but not divided to a number you name, and the halves are always the
+same kind of soldier, because a group is one kind by construction.
+A group that is marching and being squared up in the same tick
+can briefly move faster than it walks, because the two movements do not share a
 budget. None of the sprite sheets carry a death animation, so units simply
 disappear from a squad as it takes losses, and the elves' one attack
 animation faces the camera whichever way they are swinging.
 
 ## Deploy to Render
 
-Same as the proof-of-concept: push to GitHub, Render → New → Blueprint →
+Not the shipping plan — a Steam release is — but the way to get a build in front
+of people on other networks today. Push to GitHub, Render → New → Blueprint →
 connect the repo (reads `render.yaml` automatically), or New → Web Service
 with Build Command `npm install` and Start Command `npm start`. Uses the
 Starter plan (~$7/mo, always-on) rather than the free tier, which sleeps
@@ -397,8 +920,9 @@ public/client.js     — game state, UI panel, input, camera
 public/sprites.js    — asset manifest + every draw call that puts art on screen
 public/artdefs.js    — tile-selection rules shared by the client and the preview
 public/assets/       — generated sprite sheets, UI frames + manifest.json
-public/media/        — hand-supplied menu background and music
+public/media/        — hand-supplied menu background, music and ambience
 tools/build-assets.js— slices the raw art packs into public/assets/
+tools/rmautotile.js  — RPG Maker autotile blocks -> this game's blob sheet
 tools/preview.js     — renders a real match to a PNG, no browser needed
 tools/shoot-ui.js    — screenshots the real page in headless Chrome at several states
 tools/shoot-spell-fx.js — the same for the spell animations

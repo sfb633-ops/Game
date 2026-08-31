@@ -69,7 +69,8 @@ const check = (label, ok, detail) => {
   check('both empires are in the match', state.players.length === 2);
 
   // Build something so there is an empire worth losing.
-  guest.send(JSON.stringify({ type: 'build', x: guestBase.baseX + 2, y: guestBase.baseY, buildingType: 'barracks' }));
+  // Beside the keep, clear of the ground its art reserves.
+  guest.send(JSON.stringify({ type: 'build', x: guestBase.baseX - 4, y: guestBase.baseY - 1, buildingType: 'barracks' }));
   await new Promise(r => setTimeout(r, 500));
 
   // The wifi dies.
@@ -95,7 +96,8 @@ const check = (label, ok, detail) => {
   const backState = await next(back, 'state');
   const mine = backState.players.find(p => p.id === initBack.playerId);
   check('and the buildings are still standing', mine.buildings.some(b => b.type === 'barracks'));
-  back.send(JSON.stringify({ type: 'buildWall', tiles: [{x: mine.baseX - 2, y: mine.baseY}], x: mine.baseX - 2, y: mine.baseY, buildingType: 'wall' }));
+  // Five out, clear of the ground the keep's art reserves.
+  back.send(JSON.stringify({ type: 'buildWall', tiles: [{x: mine.baseX - 5, y: mine.baseY}], x: mine.baseX - 5, y: mine.baseY, buildingType: 'wall' }));
   await new Promise(r => setTimeout(r, 500));
   const after = await next(back, 'state');
   check('a resumed socket can still act',

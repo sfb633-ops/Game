@@ -7,12 +7,61 @@ Read this, then `README.md` for how to run it.
 
 ## What this is
 
-A real-time multiplayer empire-builder, heavily inspired by openfront.io but
-not that game: pick a race, grow a Castle, build an economy, train armies,
-send them to conquer AI camps or other players on a shared map. Server is
-fully authoritative over a WebSocket connection; the client only renders
-state and sends command requests. This split is intentional and should be
-preserved — never let the client decide outcomes, only request them.
+A real-time strategy game: pick a race, grow a Keep, build an economy inside a
+border you push outward, train armies, and send them to take ground, camps and
+other players' keeps on a shared map. A simpler take on the build-army-and-fight
+strategy game — fewer things to manage than the genre usually asks for, and more
+weight on where you put what you have.
+
+Server is fully authoritative over a WebSocket connection; the client only
+renders state and sends command requests. This split is intentional and should
+be preserved — never let the client decide outcomes, only request them.
+
+**Age of Empires is a reference and an inspiration, not a blueprint.** It is
+worth looking at for how marching, fighting and map control *feel* — the pathing
+work in this file cites it for exactly that. It is not the spec, and "AoE does
+it this way" is not an argument. Where the two disagree, this game gets to be
+its own thing.
+
+An earlier version of this file called the game openfront-inspired. It is not,
+and never was; if you find that framing anywhere else, it is wrong and should go.
+
+## What it is aiming at
+
+Written down because it settles arguments that otherwise get relitigated every
+session. These are the owner's calls, not inferences from the code.
+
+- **Matches run 15 to 40 minutes, and vary.** Not a fixed arc. A game that takes
+  the same time every match is one whose shape the player already knows before
+  it starts. Nearly every number in `config.js` descends from this figure —
+  income rates, train times, keep health, how far across the map is — so a
+  balance change that quietly moves typical match length is a bigger change than
+  it looks.
+- **Winning should feel hard-fought, and land as satisfying.** A match ends
+  because somebody's keep fell, so that is the moment the whole game is building
+  towards and it has to be worth arriving at — an assault should be an event,
+  not a drive-by, and not ten minutes of formality after the result stopped
+  being in doubt either. This is the thing to weigh when changing keep health in
+  either direction. (Whether there is ever a resign button is open and not
+  currently being designed around.)
+- **Races are a playstyle, not a decision.** Each leans somewhere — hits harder,
+  crosses the map quicker, builds cheaper — so a player can pick the one they
+  like the feel of. None of them is the correct pick, and nobody should be
+  choosing a race to win. Deliberately: a lucky draft that stacks boons onto
+  what a race is already good at *is* allowed to be strong, because that is the
+  draft doing something, and the draft is where the variance is meant to live.
+  The race on its own is not. Races are stat multipliers, one ability and their
+  own sprites, and that is the finished shape — not a stub waiting for unique
+  units.
+- **Ground is the prize.** What a captured camp is worth is building slots,
+  space to build and sight that far forward. Territory, not income. See the
+  pending change below.
+- **It is meant to ship.** A Steam release, finished enough to charge for.
+  Friends-with-a-room-code is where it is today, not what it is for — so
+  matchmaking, onboarding, and the polish floor that implies are real work that
+  has not started. This is also what promotes the reconnect and spectate paths
+  from courtesies to table stakes: they are plumbing rather than pillars, but a
+  stranger who drops out of a public match and cannot get back in is a refund.
 
 ## Architecture (as built)
 
@@ -143,7 +192,7 @@ orders from where it stands: march (`move`), attack a keep, camp, building or
 enemy group (`attack` → `fight`), join another group of the same kind
 (`merge`), or go home (`return`, the only way to heal short of Reincarnation).
 Marching is a straight line unless water, rock or somebody else's building is
-in the way, in which case `findRoute` plans a four-connected detour; ground
+in the way, in which case `findRoute` plans an eight-connected detour; ground
 with no way round stops the march (`strand`), a wall with no way round gets
 battered (`breach`).
 
@@ -158,12 +207,14 @@ front-first (`damageArmy`); the garrison at home is still a tally
 (`idleUnits`), cut down cheapest-first with the remainder carried on
 `woundCarry`.
 
-On the defending side `homeDefense` is the garrison's punch plus every
-tower's `defensePower`, and its hp is the garrison's alone: towers cut
-incoming damage (capped by `TOWER_REDUCTION_CAP`) and shoot on their own
-account, but they are not hitpoints the keep hides behind. Walls are fought
-where they stand. Building health is kept fractional (rounded only in
-`serialize`) for the same reason the wound carry exists.
+On the defending side `homeDefense` is the garrison and nothing else — its
+punch and its health, with no contribution from anything that has been built.
+Walls are fought where they stand, one segment at a time; towers shoot what
+comes near them and hit back at whoever is demolishing them, and neither of
+those reaches the town center. Nothing an empire builds is hitpoints the keep
+hides behind, and nothing it builds defends the keep from across the map.
+Building health is kept fractional (rounded only in `serialize`) for the same
+reason the wound carry exists.
 
 Everything a player is — race, drafted boons, a running ability — is folded
 into `player.mods` by `computeMods`, and nothing downstream reads the tables
@@ -189,11 +240,14 @@ deal with *where it is*.
   once a wall has already forced a detour, and then the detour is planned over
   ground an army could stand on, because `validMoveTile` already refuses to
   send one anywhere else.
-- **`findRoute` is breadth-first and four-connected.** Four, not eight, so a
-  diagonal line of wall seals instead of leaving a corner to slip through. It
-  returns the corners of the route, or **null when there is no way round at
-  all** — and that null is the case that matters, because it is the moment an
-  army stops going round a wall and starts going through it.
+- **`findRoute` is A\* and eight-connected**, costing a diagonal at root two, so
+  a detour is a slide past the obstacle rather than a right angle round it. A
+  diagonal step is refused when both of the tiles it squeezes between are
+  blocked, which is what keeps a diagonal line of wall sealing — that was the
+  stated reason the search used to be four-connected, and it is now paid for
+  explicitly instead. It returns the corners of the route, or **null when there
+  is no way round at all** — and that null is the case that matters, because it
+  is the moment an army stops going round a wall and starts going through it.
 - **`wallVersion`** is how a marching army finds out the map changed. Every
   wall raised, every wall breached, and every empire that falls bumps it;
   `routeStale` compares it against the version the route was planned under.
@@ -1575,6 +1629,38 @@ minimap has to be checked against `explored` itself or it quietly becomes a
 maphack. Groups are the one exception — `visibleArmiesFor` already filtered
 those server-side.
 
+**Groups were drawn there from the start and still could not be seen.** They
+were in the right place, in the right colour, filtered correctly — and a flat
+2x2 square of your colour is indistinguishable from the flat squares of your
+colour that the buildings are, sitting on a border that is already a wash of
+your colour. Reading the canvas back a pixel at a time is what settled it: the
+keep is a 3x3 of `#1abc9c`, the barracks a 1x1 of `#1abc9c`, and the army a 2x2
+of `#1abc9c`, all on a 50/50 blend of `#1abc9c` and grass. Nothing was broken.
+Nothing was legible either.
+
+So a group is a core in its owner's colour with a **near-black rim** around it
+(`drawMiniGroup`), and the rim is the whole of the fix — it is what separates a
+unit from the ground it stands on and from anything built there, in every
+empire's colours at once, without inventing a second colour scheme. Buildings
+stay unrimmed, which is now the difference between the two. A group of eight or
+more gets a 4px core instead of 2px: one step and not a scale, because a marker
+that grows smoothly with the count turns the corner of the screen into a bar
+chart when what you want off a glance is "that is the army".
+
+Two smaller things fall out of it. The selection ring is sized from the marker
+it rings (`half = size / 2 + 1.5`, which reproduces the old 5x5 exactly for a
+small group) rather than pinned at 5x5, or a big group wears its ring like a
+belt. And groups are drawn enemies-first, so where two armies are standing on
+each other it is yours on top and yours you can still count.
+
+The vision half of this needed no change and got none — `visibleArmiesFor`
+already sends a player their own groups, their allies' wherever they are, and
+anyone else's only while `canSee` says something of their side is watching that
+ground. What was missing was a test for the case the whole team feature exists
+for: an enemy group that only your *ally* can see. `rules.test.js` now pins it —
+invisible to both allies while it is off on its own, visible to both the moment
+one of them is looking at it.
+
 Zoom gained 1/2 and 1/4. The existing note said whole-number steps only, because
 a fraction like 0.6 gives pixel art uneven pixel sizes — but an exact half or
 quarter does not: every 2x2 or 4x4 block of source pixels becomes one,
@@ -2111,6 +2197,11 @@ and you had one group and no way back.
 
 A group you have selected is somewhere to go. A group you have not selected is
 something to join.
+
+**Superseded in part (27 Aug 2026):** groups split now, so merging is no longer
+a door that only opens one way. The rule above still stands and still matters —
+an accidental merge is still an annoyance worth preventing — it is just no
+longer unrecoverable. See "Splitting, and control groups" below.
 
 ### Losing means losing
 
@@ -2974,6 +3065,696 @@ working — smoothing is easy to defeat by accident with an over-strict blocking
 test, and it is why `pullTaut` sweeps to convergence instead of stopping at two
 passes. 150 long marches over maze ground all arrived, none stranded.
 
+### The detour that went round the houses (27 Aug 2026)
+
+Follow-up to the pass above: the marching was smooth now but still did not look
+like it was thinking. Reported with a screenshot and the exact words for it —
+the group "drifted until at a right angle then routed down to the location".
+
+**It was the search, not the smoothing.** `pullTaut` can *delete* a corner from
+the list it is handed; it cannot *move* one. So the shape of a detour was
+whatever shape the search produced, and the search was breadth-first over a
+four-connected grid — it cannot represent a diagonal at all, so every route it
+returned was made of right angles, and a queue that expands east before south
+returns the most extreme of them. Reproduced on a block of rock straddling the
+straight line, which is the screenshot in miniature:
+
+```
+from (30,30) to (70,70), rock over (40..55, 40..55)
+  before:  (30,30) -> (70,30) -> (70,70)     80.0 tiles, 1.41x the crow
+  after:   (30,30) -> (56,39) -> (70,70)     61.5 tiles, 1.09x the crow
+```
+
+Forty tiles due east and then forty due south, for a crow's flight of 56.6.
+`pullTaut` was working perfectly and had nothing to work with: it checked
+whether it could see past (70,30), the rock said no, and the corner stayed.
+
+**The fix is to cost the diagonal.** `findRoute` is now A\* over an
+eight-connected grid with octile cost and an octile heuristic. The L is 80 and
+the slide past the corner is 56.6, so the search prefers the slide on its own
+account, and the pull then has a route worth pulling. Ties go to the deeper
+node, which changes *which* of several equally short routes comes back and not
+how long it is.
+
+Measured over 600 blocked marches, five maps, same terrain and same requests
+put to both:
+
+| map | route length | corners | ms to plan |
+|---|---|---|---|
+| Highlands | 156.0 → 143.9 | 9.9 → 9.7 | 1.18 → 1.46 |
+| Lakelands | 134.2 → 121.2 | 2.7 → 2.3 | 1.08 → 0.62 |
+| Crossroads | 133.1 → 119.4 | 3.1 → 2.8 | 1.06 → 0.62 |
+| Wilds | 137.3 → 123.9 | 3.8 → 3.2 | 1.19 → 0.76 |
+| The Divide | 144.3 → 127.2 | 3.4 → 3.3 | 1.23 → 0.76 |
+
+Routes are **9.8% shorter** overall, and planning is *cheaper* on four maps out
+of five because the heuristic prunes what the flood fill used to visit whole.
+Highlands is the exception — mazy enough that the heuristic earns less than the
+heap costs — and 1.5ms for something that only runs when a destination or the
+wall version changes is not worth optimising for. Against a proper any-angle
+optimum the average detour went from 1.05x to 0.97x (under 1.0 because the
+ground truth is grid-constrained and a taut route is not), and the **worst case
+from 1.56x to 1.00x**: it is the outliers that were being noticed.
+
+**A diagonal line still seals**, and this is the thing to be careful of if you
+touch the search. It was the whole stated reason for four-connectedness, so it
+is now an explicit rule: a diagonal step is refused unless both tiles it
+squeezes between are walkable. The goal gets no exemption from that one — a tile
+you could only reach by squeezing between two rocks is a tile the walk would
+refuse anyway, and a keep behind its own wall is still reachable because
+`planRoute`'s retry makes stonework passable and the rule then has nothing to
+catch on. `rules.test.js` pins both halves: a 45-degree line of rock anchored to
+two map edges cannot be crossed, and a single tile knocked out of it can.
+
+Verified in the real game as well as on paper — a group ordered across a ridge
+on Highlands walked 24.3 tiles for a crow's flight of 23.1 (1.05x), in two
+gentle diagonal legs round the end of the ridge, with zero ticks spent standing
+on rock.
+
+**The same fault on a second shape, and a warning about testing it.** Reported
+again an hour later with another screenshot: a crag with a gap through it, and
+the knight "would always run around in a weird arc before continuing down"
+instead of going through the gap. Same cause, different shape — a four-connected
+search cannot aim diagonally at a neck any more than it can at a corner, so the
+group ran along the face of the crag until the gap was beside it and only then
+turned in. Lifted the terrain out of the live match and put both engines to it:
+
+```
+from (108,18) to (118,33), neck at x 119..122
+  before:  (108,18) -> (119,18) -> (118,33)   26.0 tiles, first leg dead level
+  after:   (108,18) -> (115,19) -> (119,21) -> (118,33)   23.6 tiles
+```
+
+**The screenshot was of a server that had never loaded the fix.** It had been up
+since 10:54, `game.js` changed at 13:12, the screenshot was 13:38. `game.js` is
+`require`d once at boot, so a running server keeps whatever rules it started
+with — there is no reload. Worth knowing before spending an afternoon chasing a
+bug that is already fixed on disk: **restart the server after touching `game.js`
+or `config.js`**, and if in doubt check the process start time against the file's
+mtime.
+
+**A blind spot in the first measurement, since fixed.** The optimality figures
+above graded routes against a Dijkstra ground truth that used *the same*
+no-corner-cutting rule as the search — so a gap the rule wrongly sealed would
+have been missing from both and the detour round it would have scored as
+optimal. Re-graded against a ground truth that does allow a diagonal squeeze:
+the rule does close real shortcuts (on Highlands 54 routes in 60 have one
+available) but going round them costs almost nothing — 0.998x average on
+Highlands, worst 1.152x. Refusing them is also the right call, since a group is
+wider than the tile its middle stands on. No change needed, but grade a
+pathfinder against a truth that does not share its assumptions.
+
+**What is pinned.** The length pin (`< 1.15x` the crow on the hand-built block)
+and the shape pin (the first leg has to head for the target rather than along an
+axis) both fail against the old search and pass against the new — checked, not
+assumed, because a regression pin that never went red is not pinning anything.
+The seal checks are guards rather than regression pins: they passed before too,
+and they are there because eight-connectedness is what puts them at risk. The
+neck is pinned separately from the block, because a search could plausibly
+handle an open corner well and a gap badly.
+
+One thing measured and found already fine: the walk follows the plan exactly.
+Over 300 knight marches on five maps, walked distance against planned distance
+was 1.000 with no blocked ticks and no mid-march replans — so when a march looks
+wrong, the route is where to look, not the stepping.
+
+### Two numbers that were pretending to be places (27 Aug 2026)
+
+Both changes are the same move, and it is the one the rest of this design keeps
+making: if a mechanic could be a stat or a thing that exists somewhere on the
+map, it should be the second one.
+
+**Towers are out of the keep's last stand entirely.** A tower used to do three
+things — shoot what came within five tiles of it, add `defensePower` to the
+garrison's punch when the empire was stormed, and take a slice off every blow
+that landed (summed and capped by `TOWER_REDUCTION_CAP`). Only the first of
+those happened anywhere in particular. The other two applied from wherever on
+the map the tower happened to stand, which meant a tower in the far corner of an
+empire defended its front door, and three towers with *no garrison at all* beat
+twenty swordsmen. The handoff already claimed this had been fixed — it had been
+fixed for tower *health*, which used to go into the same pool, and the punch and
+the reduction were left behind.
+
+`homeDefense` is now the garrison and nothing else: no walls (they are fought
+where they stand, one segment at a time), no towers. `TOWER_REDUCTION_CAP` is
+gone from `config.js`, and the `(1 - pool.reduction)` term is gone from
+`stepPlayerBattle`.
+
+`defensePower` **stays on the tower and on the wall**, and this is the trap to
+know about before editing that table: it has two other jobs. `hitBuilding` uses
+it for what a structure hits back with while it is being demolished — which is
+positional and correct, you are standing at its foot — and `cmdBuild` uses its
+presence as the flag for "apply `structureHpMult` to this building's health",
+which is what the Defensive Savant boon rides on. Deleting the field would have
+silently unhooked that boon from towers and walls.
+
+**`CASTLE.hp` 900/1500/2400 → 1000/1650/2650.** Measured, not guessed. Over 36
+assaults — two keep levels x three garrison sizes x three tower counts x two army
+sizes — the mean time to take a keep was 40.6s before. Pulling towers out dropped
+it to 37.0s (-8.9%); +10% keep health puts it at 41.0s (+1.0%). 1.15x and 1.2x
+overshot to +5.7% and pushed the slowest case past a hundred seconds.
+
+The redistribution is the point rather than a side effect. An empire that stacked
+towers is now easier to storm; one that did not is slightly harder. What a tower
+is worth is now entirely what it does from its own square, and that is still
+plenty — measured at 30 attackers against 10 defenders:
+
+| towers | outcome | attackers left |
+|---|---|---|
+| 0 | fell in 28.0s | 29 of 30 |
+| 3 | fell in 34.6s | 19 of 30 |
+| 6 | fell in 42.2s | 11 of 30 |
+
+and the relationship that replaced "three towers win a losing fight" is a better
+one: **towers multiply a garrison, they do not stand in for one.** Twenty men
+alone lose to thirty; twenty men behind three towers hold. Six towers behind
+nobody still lose, and cost the attacker eight men doing it. `invariants.test.js`
+pins that shape now instead of the old claim.
+
+**Camps pay no gold at all.** Not per point of damage, not loot, not a bonus for
+razing — it used to be all three, about 550 gold for a camp taken cleanly. The
+problem with paying for it is what it lets a player do: farm camps in a quiet
+corner, never meet anybody, and come out ahead, which is the opposite of what a
+handful of contested places on a map are for. What razing a camp is worth is the
+outpost: a second disc of buildable ground, three more building slots, and a pair
+of eyes that far forward on a map that is mostly dark. All three are worth having
+*where the camp is*, and none can be banked and carried home.
+
+The economy was deliberately not rebuilt to make up the loss. Gold comes from the
+keep and its banks — one income with one decision attached, rather than two with
+a grind attached.
+
+Two things fell out of it worth knowing. `finishRaid` announced `Camp taken —
++${gold} gold, and a new outpost to build around`, which with no payout would
+have read "+0 gold" — and it was *already* saying that for shrines, which get no
+gold and no outpost either, on top of the message `awakenGolems` had just
+emitted. It now takes a `shrine` flag and says nothing at all for one. And the
+invariants check that used to watch `army.plunder` now watches the player's
+actual gold with income pinned at zero, because plunder being zero is the
+mechanism and the gold not moving is the rule — an assertion on the mechanism
+would go on passing if a payout were added somewhere else.
+
+### Dragging a wall back off (27 Aug 2026)
+
+`wallDrag` was a Set that only ever grew. Every tile the cursor swept was added
+and nothing was ever removed, so overshooting a run meant releasing, paying for
+the overshoot, and then discovering there is no way to pull a wall down at all —
+the panel's building list filters walls out (`b.type !== 'wall'`), so an
+overshoot was permanent. That is the whole complaint, and it is a real one.
+
+The fix is `stepWallDrag`, and the interesting part is what it tests against.
+A Set keeps insertion order, so the run is already an ordered path; reversing
+means the cursor has stepped back onto the **second-to-last** tile, and the
+answer is to drop the last one. The obvious rule — "this tile is already in the
+run, so the player must be reversing" — is wrong, and wrong in a way that would
+have destroyed the feature it was protecting: **an enclosure drawn in one drag
+finishes on the tile it started on**, so that rule fires on the closing tile and
+deletes the entire loop back to the anchor. Crossing your own run has the same
+problem. Reversing is step-by-step: the only tile you can take back is the one
+you just laid.
+
+`stepWallDrag` takes its Set, its tiles and its placement predicate as arguments
+and touches no globals, specifically so it can be lifted out of the source and
+run in `client.test.js` — which is what the existing territory-outline block
+already does. Nine cases are pinned there, including the enclosure, crossing the
+run, a refused tile not being mistaken for a backtrack, and a fast drag that
+sweeps several tiles backwards in one mousemove.
+
+Verified in a real match by dispatching real mouse events at real tile centres:
+six tiles laid, two dragged back, four sent and four built; and a 4x4 ring
+closing on its own anchor laid all twelve.
+
+**Two traps if you drive the client this way yourself.** `tileFromEvent` rounds
+world position over tile size, so a tile centre is `tx * ts` exactly — adding
+half a tile puts you one tile down and right. And `onCanvasMouseDown` returns
+early in wall mode *before* touching `selectStart`, so an aborted synthetic drag
+can leave `selectStart` set, after which every mousemove takes the selection-box
+branch and returns before the wall code. Both cost me a confusing round of
+"the feature is broken" when the feature was fine.
+
+**The adjacent gap, now closed:** there was no way to demolish a wall once it was
+built. `cmdDemolish` on the server handled walls perfectly well — it refuses only
+the town center — but the client never offered one, because the buildings panel
+excludes walls and a three-hundred-segment list would be unusable. Selling moved
+to the map instead; see below.
+
+### Selling moved onto the map (27 Aug 2026)
+
+Click one of your buildings and it rings in gold with a red ✕ over it and the
+refund beside it; click the ✕ and it goes. The **Pull down** buttons are gone
+from the side panel, and so is the now-dead `.raze-btn` rule in `style.css`. The
+panel still lists what you own and what it is doing — it just no longer carries
+the verb.
+
+Two reasons this is better than the row it replaced, beyond being where your eyes
+already are. It puts the decision next to the thing it is about, so you cannot
+sell the wrong barracks by misreading a coordinate in a list. And it reaches
+**walls**, which is what actually closed the gap above: the panel could never
+sensibly enumerate wall segments, but the map has always known where each one is.
+
+Three details worth keeping:
+
+- **`demolishHit` is written by the draw, not recomputed by the click.**
+  `drawDemolishBadge` stores the box it just drew, in tiles, and `onCanvasClick`
+  tests against that. The box you can click and the box you can see are then the
+  same box by construction — two copies of that arithmetic drifting apart is the
+  obvious bug here and this shape makes it unrepresentable.
+- **Everything goes through `selectedBuildingLive()`**, which resolves the stored
+  `{x, y}` against current state and returns null if it has gone. A building can
+  be destroyed by somebody else between the click that selected it and the click
+  that sells it, and a stale selection would otherwise draw a cross over open
+  ground.
+- **Click priority: armed tool, then the ✕, then armies, then buildings.** The ✕
+  beats an army standing on top of it because it is a small target that only
+  exists because you put it there. Buildings sit *below* armies for the opposite
+  reason — a group parked on your own barracks is far more often what you are
+  reaching for — and that ordering is verified rather than assumed.
+
+Verified in a real match by dispatching real clicks: a bank selected, sold, +50g
+and gone from the panel; a wall segment pulled out of the middle of a run; the
+same click twice putting the cross away; open ground and the town center
+selecting nothing; and an army parked on a wall tile still winning the click.
+
+**A third trap for driving the client yourself**, on top of the two above:
+`tileFromEvent` scales by `canvas.width / rect.width` before unzooming, so the
+inverse needs that factor too. Without it a synthetic click lands on the right
+tile at zoom 1 and the wrong one at any other zoom, which looks exactly like a
+broken hit test.
+
+### Splitting, and control groups (27 Aug 2026)
+
+Both halves of one complaint from a playtest: a player had ended up with a
+sprawl of small groups of ten to twenty and no good way to handle them. The
+tempting read is that groups are the wrong model and every soldier should be its
+own entity. That was measured before any of this was written, and it is not the
+answer — see the numbers at the end of this section, because they are the reason
+this pass is two verbs rather than a rewrite.
+
+**`cmdSplitArmy(playerId, armyId, count)`** peels `count` soldiers off a group
+into a new one standing where it stood. It is the exact inverse of
+`mergeArmies`, and the test that says so is the round trip: split a group and
+merge it straight back, and you have the group you started with, down to which
+soldier was carrying the wound.
+
+Every rule in it is a conservation law, and each one is a hole somebody would
+otherwise have found:
+
+- **`mustered` is divided, not copied.** This is the one to be careful with. It
+  is the ceiling Undead Reincarnation raises a group back to, so it counts the
+  fallen as well as the living — copy it onto the detachment and an empire can
+  split a group in two and raise twice its dead. It is shared out in proportion
+  to the living, floored at what each side actually has standing, and the parent
+  takes the remainder so the two always add back to what they were.
+- **The roster is spliced off the front**, which is the end `damageArmy` lands
+  on. So the detachment carries whatever wound the group was already nursing.
+  The alternative sorts the healthy into one group and the hurt into another,
+  which is a free bit of triage nobody should get.
+- **Roots come along.** `speedSpell` is copied onto the detachment, or half of an
+  Entangled group simply walks out of the spell. `mergeArmies` already guards
+  this on the way in; splitting is the same hole facing the other way.
+- **Refused mid-breach.** A group taking a wall apart has a `breach` naming one
+  segment and a route planned to it, and there is no honest answer to which half
+  keeps it. It says so rather than dropping the order in silence.
+- **Plunder stays with the parent.** It belongs to the assault in progress and
+  the detachment is walking out of it — and a group on `hold` has nowhere to
+  bank it, since `bankPlunder` only fires on a group that is fighting.
+
+The client sends half (`X`), and the server takes a count, so a precise split is
+one message away the day the UI wants to offer one. Halving is what needs no
+second input, and it composes.
+
+**Control groups are on Shift+1..9, not Ctrl+1..9, and that is not a style
+choice.** This runs in a browser tab: Ctrl+1..9 switches tabs and Chrome does
+not let a page cancel it, so a Ctrl binding would assign a group to a window the
+player is no longer looking at. It is also dead code twice over, because
+`onKeyDown` returns early on `e.ctrlKey`. The digit is read off `e.code`, not
+`e.key`, because Shift+1 arrives as `'!'` — using `e.key` compiles, runs, and
+silently never matches, which is exactly the kind of thing the static checks in
+`client.test.js` now pin.
+
+Two details worth keeping:
+
+- **A slot holds ids, and prunes lazily.** `liveControlGroup` resolves against
+  current state and drops the dead; a slot whose groups are all gone goes quiet
+  rather than selecting nothing and clearing what you had. Slots are also
+  cleared at both ends of a match, because army ids restart from scratch and a
+  slot carried over points at whatever group is dealt the same id.
+- **One press selects, two presses travel.** Selecting a group to give it an
+  order is far more common than wanting to be taken to it, and a camera that
+  jumps on every selection is a camera you fight.
+
+**Verified in a real browser**, by dispatching real keyboard events at the real
+`onKeyDown` with a stubbed socket: X on a group of nine sends `count: 4`, X on
+two groups sends two messages, X on a group of one sends nothing, Shift+1 then 1
+round-trips the selection, an enemy group cannot enter a slot (`selectedList`
+filters by owner before the slot ever sees it), and a slot whose group has died
+leaves the current selection alone. Note `onKeyDown` is only bound inside
+`onInit`, so a probe that does not run the handshake has to bind it itself —
+otherwise every key does nothing and no error is raised, which looks exactly
+like a broken feature.
+
+Also verified end to end over a real socket against a running server: deploy,
+split, refuse four malformed splits without killing the server, merge back.
+
+**Why not one entity per soldier.** Measured first, because it is the change
+this pass is standing in for. Same 720 soldiers throughout, six players, walled
+keeps, timed at peak contact:
+
+| soldiers per group | groups | tick | of the 200 ms budget |
+|---|---|---|---|
+| 20 | 36 | 25 ms | 12% |
+| 10 | 72 | 109 ms | 55% |
+| 5 | 144 | 109 ms | 55% |
+| 2 | 360 | 187 ms | 94% |
+| 1 | 720 | 608 ms | 304% |
+
+Marching is cheap — 720 solo groups cost 1.6 ms if none of them are fighting.
+It is contact that explodes, because `buildEngagements` and `buildFocus` work
+pairwise over everything in reach. Bandwidth is the milder half: measured
+through the real path (`serialize` → `thinState` → `visibleArmiesFor`), one
+record per soldier is **2 to 2.6x** the wire, taking a twelve-player match from
+about 4 GB/hour to 8–12. The harness put today's twelve-player figure at 91
+KB/s per player against the README's independently measured 78, so it is honest.
+
+And the design cost is larger than either. Every measured number in `config.js`
+rests on a side's output being proportional to how many of it are still
+standing — that is why the colossus is 155/1230 rather than 1.5x a golem, and
+why concentrating fire beats spreading it. Individual units replace that with
+positional combat, which is a better model and a different game, and every
+figure in that file would need re-deriving.
+
+The playtest complaint was that there were too many things to manage. One entity
+per soldier multiplies the things to manage by fifteen. Splitting and control
+groups were the cheap answer to it; if the sprawl persists after them, the next
+move is auto-merging same-type groups deployed to the same place, which kills it
+at the source.
+
+### The art overhaul: a new tileset, and a 48px tile (27 Aug 2026)
+
+Two packs arrived — **Winlu Fantasy Exterior** (an RPG Maker MV/MZ tileset) and
+**8D Characters** (four characters, unused so far). This pass took the terrain,
+the map dressing and the keeps from the first of them.
+
+**The tile is 48px now, and that was the right way round.** The pack is drawn at
+48 and the game was at 32. Rescaling terrain is the one thing that cannot be
+hidden — an autotile whose transitions have been resampled fringes at every seam
+— so the game moved to the tileset rather than the tileset to the game. It cost
+less than it sounds: every sprite pack here is on a 16px grid, so `MINI_SCALE`
+went 2 to 3 and everything else is still whole-pixel, still crisp. The world is
+now 11520x7680.
+
+The number lives in two places and they must agree: `TILE` in
+`tools/build-assets.js` (written into the manifest, and what sprite scale is
+measured against) and `MAP.tileSize` in `config.js` (world geometry). A mismatch
+draws correctly-sized art in the wrong places, which reads as a camera bug.
+
+**`tools/rmautotile.js` is the interesting part.** RPG Maker autotiles are 2x3
+blocks of 24x24 quadrants composed at draw time; this engine draws one finished
+image per tile. The converter composes them here instead and emits the flat blob
+sheet plus the 256-entry lookup that already existed. The quadrant map in that
+file was **measured, not recalled** — a coverage dump over every quadrant of a
+dirt-on-grass block — and the thing that would have been got wrong from memory
+is that the top-right tile holds the *inner* corners (mostly material with one
+corner notched) while the bottom 2x2 holds fill, edges and the *outer* corners.
+It produces exactly 47 distinct shapes, which is the number a blob set should
+have and the best single signal that the canonicalisation is right.
+
+Sub-position matters and is the easy thing to get wrong: a north-edge quadrant
+drawn for the left half of a tile is a different image from the one for the
+right half, so every role is listed per corner slot rather than once.
+
+**Three things were tuned by looking, after being wrong first:**
+
+- **Props were far too loud.** Ground cover ran at 34% of open tiles, which was
+  right when a tuft was a few pixels of grass; the Winlu clumps and flowers are
+  three or four times the area and the map read as a meadow in bloom. Now 13%.
+  The pack's yellow mushroom cluster came out too saturated to be scenery — it
+  read as a dropped item — and is not in the set.
+- **Tree stumps were standing on mountains.** `boulder` is the group that
+  dresses rock tiles, and stumps and dead trunks had been put in it. They are in
+  `bush` now, which lands on grass.
+- **Five props shipped with grey boxes round them**, and this is the trap on
+  these object sheets: several objects are drawn sitting on a HARD-EDGED GREY
+  SHADOW TILE. That is opaque art, connected to the object, so `largestIsland`
+  keeps it — trees stood in grey rectangles and a "pebble" was a plain grey
+  square. Two more picks were simply the wrong rectangle: the boulder at (9,4)
+  is the bottom half of the boulder above it, and the tall pine starts at row
+  **10**, not row 9, because rows 8-9 hold a smaller conifer whose foliage
+  touches its tip — a case `largestIsland` cannot help with, since the two are
+  genuinely one blob.
+
+  **Render every prop on magenta before trusting it.** Nothing else catches
+  this: on grass a grey shadow box is easy to miss, and in a preview crop it
+  reads as terrain.
+- **The keeps were sized on width alone**, which is fine for a squat tower and
+  wrong for these: asking for three tiles across gave a bell tower five tiles
+  tall and a gothic facade over six. They fit inside a box now, and whichever
+  cap binds first wins.
+
+**The keeps are composed, not cut, and it took three attempts.** Both failures
+are worth knowing because they fail differently:
+
+1. **A single decoration sprite** — a bell tower, a round tower top. Read as a
+   garden folly, not a capital.
+2. **A tiled rectangle of wall with merlons on top.** Read as a *slab*: a piece
+   of curtain wall standing on its own in a field. Reported from a playtest as
+   "very bad renditions", and correctly.
+
+What makes the pack's own castles read as castles is that they are several
+masses of different heights **with roofs on them**. A wall with crenellations is
+a wall; a wall with a spire on it is a tower. So a keep is a list of masses,
+each a rectangle of wall face that either carries a roof or is capped with
+merlons, plus the openings punched into them — level 1 a bare crenellated
+tower, level 2 a roofed tower with a hall beside it, level 3 the twin-towered
+facade with the hall between.
+
+**And they have to be BIG.** The third attempt still read as small, and the
+reason was that every size had been inherited from the old 96x96
+MiniWorldSprites keep — three tiles square, which was right for a sprite cut out
+of a 32px sheet and wrong for the thing a whole match is built around. A level-3
+keep is now six tiles across and eight tall: two roofed towers, a crenellated
+hall between them, lights in all three, the gate at the foot of the hall, and a
+pair of statues either side of it — an armoured figure for the pale sets, a
+gargoyle for the dark ones, which is what the pack's own black castle puts
+there.
+
+That size is only affordable because `CASTLE.footprint` in `config.js` became
+**one entry per level**. It reserves the ground the art stands on, and a single
+value left at the old three tiles would have blocked three tiles of a building
+covering fifty — banks would have been placed inside the castle walls.
+`inCastleFootprint` reads the keep's current level, so an upgrade widens the
+reserved ground the moment it lands, and `rules.test.js` pins that it grows and
+never shrinks. The build radii did not need touching: a level-1 keep is 3.1
+tiles across inside a radius-7 disc, which leaves the ring it always had.
+
+**The towers have to be TALL, and that is the whole proportion problem.** The
+pale spire measures 2.6 x 4.8 tiles once trimmed — about twice as high as it is
+wide — so on a five-tile tower it is most of the building and the keep wears it
+like a hat. On an eight-tile tower it is about a third of the height, which is
+what the reference looks like, and the stonework below it is what carries the
+windows and the gate. Level 1 has no roof at all for the same reason: a spire on
+a three-tile keep makes a composition seven tiles tall, and fitting that into a
+level-1 box squeezed the whole thing to under a tile across.
+
+Two smaller things in `composeKeep` that are easy to lose:
+
+- **The canvas is padded horizontally by the roof overhang.** Without it the
+  roof on the mass at x = 0 is clipped by the canvas edge and that tower wears
+  half a spire, off to one side.
+- **Roofs are sunk a third of a tile into the stonework.** Sitting a roof's
+  bottom edge exactly on the wall's top edge leaves a hairline of background
+  showing between them.
+
+Three parts choices in there are load-bearing and each was wrong first:
+
+- **The wall face was picked by measurement.** An RPG Maker wall sheet is full
+  of tiles that are really the *top edge* of a wall, and one of those repeats as
+  a stripe every 48px instead of as stonework — the first keeps had a seam
+  across the middle. Every candidate was tiled three high and scored on how far
+  its bottom row of pixels sits from its top row; `A4 (7,4)` scores 5 of 255 and
+  `A4 (7,7)` — dark, with the arcading the black castle has — scores 10.
+- **The window is one tile wide, drawn twice.** The sheet pairs a lit window
+  with an unlit one side by side, so taking the 2-wide block gives a facade with
+  one light on and one off, which reads as a mistake rather than as a detail.
+- **The gate is the timber door, not the stone arch.** The obvious pick was a
+  2x2 of wall with an arch already cut into it; it is pale ashlar, so on a dark
+  wall it pasted a lighter rectangle onto the facade instead of an opening into
+  it. Timber has no stone in it to mismatch, and after the cast it is simply the
+  darkest thing on the building.
+
+Human and elf take the pale stonework and the shingle spire; orc and undead take
+the dark wall and the horned gothic top, which is the same piece the pack's own
+black castle puts on its towers. The plan is shared, so the silhouette is the
+same twin-towered facade for everyone and the material and the cast are what
+tell them apart.
+
+The cast is applied to all four sets and not just the dark two, because human
+and elf would otherwise have *the same keep*, and the keep is the one thing you
+look at to know whose ground you are on. `light` stays at 1 for the stone sets:
+lightness is what says "stone" or "iron", hue and saturation are what say whose
+it is.
+
+Both dark casts were wrong on the first try, in opposite directions, and the
+failures are worth knowing because the obvious knob is not the one that matters:
+**orc at saturation 0.30 read as wood, not iron** — a warm hue at a third
+saturation turns dark stone into a brown barn — and **undead at lightness x0.46
+went nearly solid black**, crushing the art's own modelling flat. Saturation is
+what makes it a material; the multiplier has to be per-cast.
+
+**What the tests caught that nothing else would have.** The frame-size pin in
+`rules.test.js` found the elves left at two thirds of everybody else's size —
+`ELF_CELL` and `ELF_CHAR_H` had been written out as finished pixel numbers when
+the tile was 32, and every other check still passed. They are multiples of
+`MINI_SCALE` now, so they track. The shrine-prize pin found the colossus at half
+the golem's height: it had been used at 1:1 while the golem was doubled, and the
+*rule* is "the two prizes are the same size on the map", not any particular
+factor. It is `MINI_SCALE / 2` now.
+
+**Not done, and known.** The terrain is smooth and painterly while the buildings
+and units are hard-edged outlined pixel art, and up close they read as two
+different games. The call was to leave it and judge it in motion at the zoom
+people actually play at. If it does need addressing, the 8D Characters pack is
+one possible source for troops — four characters at 400x400 across eight
+directions and about forty-five animations each, including a **death animation**,
+which is the thing the README currently lists as missing. Only four of them, and
+all human archetypes, so it cannot cover orc/elf/undead on its own.
+
+Barracks, stables, siege workshops, banks, towers and walls are still the
+MiniWorldSprites art, upscaled. The Winlu set has no finished sprites for any of
+them — `A3` is roof texture and `A4` is wall texture, both materials rather than
+buildings — so each one has to be composed, and that was deliberately left out
+of this pass.
+
+### The compound: every empire starts inside a castle (28 Aug 2026)
+
+The owner's call, made after three tries at drawing the keep as one sprite (see
+the art-overhaul section above): "instead of a buildable circle, we're going to
+build an entire castle using these tiles. The stable, bank etc. will be put
+inside of it. We can change any mechanic needed." Reference: the Winlu pack's
+own castle screenshots, which are compounds — a front face with a gatehouse and
+towers, walkways running back, and buildings on cobbles inside.
+
+**Decisions taken with the owner, in order:** courtyard 12x7 (the size shown in
+`art-review/5-castle-compound.png`); *stone outside, trade inside* — walls and
+towers may stand in a ring round the castle, everything else goes in the
+courtyard or at an outpost; keep levels stay but are mechanical only (HP,
+income, build limit — no radius, no art change); outposts unchanged for now.
+
+**The model that fit everything already here.** The keep stays ONE building on
+ONE tile, and that tile is the ground in front of the gate — which is where an
+attacker already stood to assault it, so every combat, vision, spawn, targeting
+and win rule kept working. The compound round it is real buildings of the
+player's: the curtain is one `wall` per tile (`builtin: true`, and a `piece`
+name the client draws by), and each bastion and the gatehouse is one building
+standing on all of its tiles (`tiles`, `w`, `h`), with one pool of health. So a
+breach is the existing breach, a bastion falls as a bastion, and nothing new had
+to be taught to the pathfinder, the fog or the spells.
+
+Everything is geometry off the keep tile. `CASTLE.compound` in config.js is the
+layout — width, height, courtyard rect, gatehouse rect, bastion rects, curtain
+rows, muster point, and `keep`, the keep tile's offset from the compound's
+top-left. `Match.compoundOf(player)` and the client's `compoundOf` derive the
+rest, and `curtainPiece(C, x, row)` in game.js names each curtain tile's sprite.
+The piece vocabulary there and in `buildCompound` (tools/build-assets.js) have
+to agree; a name missing on either side is a wall that blocks but is not drawn.
+
+**Territory is three questions now, not one.** `inCourtyard` (trade, and where
+troops muster), `inDemesne` (a disc of `CASTLE.demesne` = 13 tiles round the
+compound's *centre*, not the keep tile — for walls and towers; a border boon
+widens it), `inOutpost` (anything). `canBuildAt(player, x, y, type)` takes the
+type and picks the zone; asked without one it gives the strict answer.
+`inTerritory` survives as demesne ∪ outposts for clearing terrain and for the
+invariants. `buildRadius` survives as an alias for `demesneRadius`, because it
+is the figure the state message carries.
+
+**The courtyard is a terrain type.** `TILE_COBBLE = 3`, passable and buildable
+exactly like land, laid by `placeCompound` and shipped through the existing
+`terrainEdits`. The client draws a plain cobble fill after the blob layers and
+grows nothing on it. Every test that read `terrain === 0` as "open ground" had
+to learn about 3.
+
+**Things that would have gone wrong and did not, because they were looked for:**
+
+- `prepareSpawns` cleared a disc round the *keep tile*; the compound stands
+  twelve rows above it. The clearing is round the compound's centre now, big
+  enough for the walls and a tile outside them, and the margin a seat may be
+  squeezed to never drops below `COMPOUND_CLEAR`, or a back wall ends up off the
+  top of the map. The compound's centre is also pushed into `usedSpawns`, so a
+  camp keeps its distance from the whole castle and not just from the gate.
+- `reseat` (a lobby map change) now clears the old compound and raises a new
+  one — `clearCompound` — or the walls of the old seat stayed in the building
+  index and blocked ground nobody could see a reason for.
+- `wouldThickenWall` and the client's `wouldThicken` skip builtin walls: the
+  back wall is two tiles thick by design, and a run laid along the outside of
+  it was refused for closing squares the castle had already closed.
+- `buildingsUsed`, the demolish command, the build palette and the sell click
+  all skip `builtin`. Selling curtain segments at a third of a cost of 15 each
+  would have been free gold.
+- The gatehouse has no eye of its own (it stands in the keep's); bastions see
+  as far as a tower. A test pins the compound at exactly three pairs of eyes.
+
+**Tests.** Almost every fixture in `rules.test.js` deployed troops or built a
+bank at `p.baseX + k, p.baseY` — beside the keep, which is outside the walls
+now. `sendAt` musters at `musterPoint`; `yard(p, i)` hands out courtyard tiles
+by index (a fixed offset table, so two groups a test wants apart can be given
+distant indices); the deployments were rewritten by a script and the rest by
+hand. `walledMatch` used to delete the defender's buildings without unindexing
+them, which was harmless when there was one and blocked half the ring when
+there were sixty. Tests that teleported armies to absolute coordinates like
+(60,60) now scan for an open row first, because a fourteen-tile compound can
+now be standing there. `spawns.test.js` was rewritten around the compound.
+
+**Tried and undone the same day: the layout as an ASCII template.** A
+`castle.txt` grid with a legend, parsed into the same `CASTLE.compound` shape,
+with a two-second standalone previewer. It worked, and the owner's verdict was
+that placing letters against a key is harder than placing tiles visually —
+which is what Godot's TileMap editor is for. Reverted in full; the layout is
+the rectangle table in config.js again. The lesson stands regardless of tool:
+the castle wants to be *drawn*, not described, and the next client should give
+the owner a tile editor. See "Would Godot make this easier" in the session
+notes: keep game.js authoritative and put a Godot client on the same messages.
+
+Two fixes from that afternoon that did stay:
+
+- Paving runs under every inside tile of the compound, not just the courtyard,
+  so the front merlons show cobbles between them and not a strip of grass.
+- The keep's vision eye is the compound's centre, not the keep tile, or a
+  compound this tall leaves its own back wall in the dark. Bastions see as far
+  as a tower; the gatehouse has no eye of its own.
+- The side walls were invisible: the pack's vertical battlement pieces are the
+  thin inner lip of a walkway. A side is now the face tile as walkway floor
+  with the merlon row turned a quarter up the outside, mirrored for the east.
+
+**Then undone entirely (28 Aug, midday).** The owner built the castle they
+wanted in Godot — `assets/CastleEvil/evil castle castle.png`, twin horned
+towers over a hall and a gate, 1008x1056 with alpha — and decided: that is the
+keep, as a placeholder until their tile skills catch up; the courtyard-for-
+buildings idea is shelved; back to the buildable circle with the keep at its
+centre. So the compound is gone from the rules — no builtin walls, bastions or
+gatehouse, no cobbles, no demesne, no courtyard zone — and `game.js` is the
+circle again: `buildRadius` per level plus a boon, `inTerritory` as disc ∪
+outposts, `inCastleFootprint` reserving the ground under the art, troops
+mustering at the keep. What stayed from that work: multi-tile building support
+in the index (`tiles`/`w`/`h`, unused now but harmless), `builtin` being
+respected everywhere (nothing sets it), `TILE_COBBLE` (defined, never laid),
+the player-dragged walls cut from the Winlu battlements, and the tests' `yard`
+helper — its offsets now sit inside the level-1 disc and outside the footprint.
+
+The keep sprite: `buildKeep` in build-assets.js takes the first PNG in
+`assets/CastleEvil/` for every set, trimmed and fitted to `KEEP_TILES_WIDE` = 6
+tiles (288x302). No cast, no tint — it is the owner's art as drawn. A PNG in
+`assets/CastleStone/` will be taken for human and elf instead, automatically.
+Because the keep is six tiles across, `CASTLE.buildRadius` went 7/11/15 →
+9/13/17 and `CASTLE.footprint` is one rectangle for every level
+(`left 2, right 3, up 6, down 0`); re-measure both if the width changes.
+
+**Not done.** The buildings around the keep are still the old MiniWorldSprites art at x3
+and clash with the compound; that is the next art job, and the Winlu village
+sheets (timber-framed houses on cobbles, `art-review/`, screenshot 225631) are
+the obvious source. Outposts are still discs. The keep tile draws nothing —
+its health bar hangs over the gate, which reads fine, but a banner or a pair of
+guards on the gate would say "this is the thing to hit" more clearly.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no
@@ -3026,3 +3807,14 @@ depend on anything it fakes without checking in a browser too.
   unit control all need server-side validation of whatever the client
   requests — the client should never be trusted to decide if a placement
   or move is legal.
+- Check a balance change against typical match length before shipping it. The
+  target is 15 to 40 minutes and varying (see "What it is aiming at"); a change
+  that moves the middle of that range is a bigger change than its diff looks,
+  and one that lengthens the *endgame* specifically is working against the thing
+  the no-resign rule is there to protect.
+- Prefer making a number into a place. The rule that walls are ground rather
+  than `+defense`, that a ballista has reach rather than strength, that vision
+  is eyes with radii rather than a veil — that is the spine of this design, and
+  the two pending changes at the top are both more of it. When a mechanic could
+  be either a stat or a thing that exists somewhere on the map, it should be the
+  second one.

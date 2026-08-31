@@ -8,7 +8,7 @@ for (let trial = 0; trial < 8; trial++) {
   const r = cfg.CASTLE.buildRadius[0];
 
   // Terrain composition, for a sense of how much of the map is water.
-  let counts = [0, 0, 0];
+  const counts = [0, 0, 0, 0];
   for (let y = 0; y < cfg.MAP.height; y++) for (let x = 0; x < cfg.MAP.width; x++) counts[m.terrain[y][x]]++;
   const total = cfg.MAP.width * cfg.MAP.height;
 
@@ -27,11 +27,9 @@ for (let trial = 0; trial < 8; trial++) {
         const d = Math.hypot(x - p.baseX, y - p.baseY);
         if (d > r) continue;
         if (m.terrain[y][x] !== 0) blocked++;
-        // The real test: would the server let a wall go here?
-        // The ground under the keep's own art is deliberately reserved, not
-        // obstructed — this check is about terrain the map generator should
-        // have cleared, so skip the footprint the way it always skipped the
-        // base tile itself.
+        // The real test: would the server let a wall go here? The ground under
+        // the keep's own art is deliberately reserved, not obstructed — this
+        // check is about terrain the map generator should have cleared.
         if (!m.inCastleFootprint(p, x, y) && !m.canBuildAt(p, x, y) && !m.tileOccupied(x, y)) unbuildable++;
       }
     }
@@ -46,3 +44,4 @@ for (let trial = 0; trial < 8; trial++) {
   console.log(`  trial ${trial}: obstructed tiles in opening circles ${blocked}, unbuildable ${unbuildable}, camps inside ${campsInside}`);
 }
 console.log(fails ? `FAILED in ${fails} trials` : 'all opening circles clear');
+process.exit(fails ? 1 : 0);

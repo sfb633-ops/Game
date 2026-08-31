@@ -60,7 +60,11 @@ if (seedArg) {
 const config = require('../config');
 const { Match } = require('../game');
 
-const match = new Match();
+// --map=<id> renders a particular one; without it, the default. The Divide is
+// the map worth looking at deliberately, because its spine is the only piece of
+// terrain in the game that is placed rather than grown.
+const mapArg = process.argv.find(a => a.startsWith('--map='));
+const match = new Match(mapArg ? { map: mapArg.slice(5) } : {});
 const races = ['human', 'orc', 'elf', 'undead'];
 races.forEach((race, i) => match.addPlayer(`p${i + 1}`, race));
 
@@ -70,13 +74,14 @@ const TYPES = ['bank', 'barracks', 'stable', 'siege', 'tower'];
 let castleLevel = 0;
 for (const player of match.players.values()) {
   player.gold = 100000;
-  // Step every player to a different town-center level so the preview shows
-  // all three keep sprites and all three border radii at once.
+  // Step every player to a different town-center level; the level is
+  // mechanical now and changes nothing drawn, so this only exercises the code.
   const castle = match.getCastle(player);
   castle.level = (castleLevel++ % config.CASTLE.maxLevel) + 1;
   castle.maxHp = config.CASTLE.hp[castle.level - 1];
   castle.hp = castle.maxHp;
-  const ring = [[3, 0], [-3, 1], [0, 3], [2, -3], [-3, -2]];
+  // Round the keep, outside the ground its art reserves.
+  const ring = [[-4, -1], [5, -1], [-4, 2], [5, 2], [0, 3]];
   TYPES.forEach((type, i) => {
     match.cmdBuild(player.id, player.baseX + ring[i][0], player.baseY + ring[i][1], type);
   });
@@ -88,8 +93,8 @@ for (const player of match.players.values()) {
   player.idleUnits.knight = 3;
   player.idleUnits.catapult = 2;
   match.cmdDeployUnits(player.id, { swordsman: 4, knight: 2, catapult: 1 },
-    Math.min(config.MAP.width - 3, player.baseX + 3),
-    Math.max(2, player.baseY - 5));
+    Math.min(config.MAP.width - 3, player.baseX + 6),
+    Math.min(config.MAP.height - 3, player.baseY + 5));
 }
 // Let the armies march clear of their castles so they're actually visible.
 for (let i = 0; i < 12; i++) match.tick(0.2);
@@ -106,8 +111,44 @@ function render(latestState) {
   ctx.fillStyle = '#0e0b08';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+  // The same scenery clearing the client does, or a preview shows pines growing
+  // through keeps that the real game would have taken out — which is exactly
+  // how that bug got past several rounds of looking at previews.
+  const blocked = new Set();
+  const apron = new Set();
+  const apronFor = (x, y, type, opts) => {
+    const def = Sprites.buildingDef(type, opts || {});
+    const halfW = (def && def.w) ? Math.round(def.w / 2 / TILE) : 1;
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -halfW; dx <= halfW; dx++) apron.add((x + dx) + ',' + (y + dy));
+  };
+  const blockSprite = (x, y, type, opts) => {
+    const def = Sprites.buildingDef(type, opts || {});
+    if (!def || !def.w) { blocked.add(x + ',' + y); return; }
+    const x0 = x * TILE - def.anchorX, y0 = y * TILE + TILE * 0.35 - def.anchorY;
+    for (let ty = Math.floor(y0 / TILE); ty <= Math.floor((y0 + def.h - 1) / TILE); ty++)
+      for (let tx = Math.floor(x0 / TILE); tx <= Math.floor((x0 + def.w - 1) / TILE); tx++)
+        blocked.add(tx + ',' + ty);
+  };
+  for (const pl of latestState.players)
+    for (const b of pl.buildings) {
+      if (b.type === 'wall') { blocked.add(b.x + ',' + b.y); blocked.add(b.x + ',' + (b.y - 1)); }
+      else {
+        blockSprite(b.x, b.y, b.type, { race: pl.race, level: b.level });
+        apronFor(b.x, b.y, b.type, { race: pl.race, level: b.level });
+      }
+    }
+  for (const c of latestState.aiCamps || [])
+    if (!c.defeated) {
+      blockSprite(c.x, c.y, c.shrine ? 'shrine' : 'camp', {});
+      apronFor(c.x, c.y, c.shrine ? 'shrine' : 'camp', {});
+    }
+
   const terrain = Sprites.buildTerrainCanvas(W, H,
-    (x, y) => match.terrain[y][x] === 1, (x, y) => match.terrain[y][x] === 2);
+    (x, y) => match.terrain[y][x] === 1, (x, y) => match.terrain[y][x] === 2,
+    (x, y) => match.terrain[y][x] === 3,
+    (x, y) => blocked.has(x + ',' + y),
+    (x, y) => apron.has(x + ',' + y));
   const t0 = Sprites.terrainOrigin();   // see the note in sprites.js: tile grid, not canvas grid
   ctx.drawImage(terrain, t0, t0);
 
@@ -139,7 +180,8 @@ function render(latestState) {
       else {
         const art = { race: item.p.race, level: item.b.level };
         Sprites.drawBuilding(ctx, item.b.type, px, py, art);
-        Sprites.drawBanner(ctx, item.b.type, px, py, colorOf(item.p.id), art);
+        // No pennant on buildings — see the note in client.js. The preview has to
+        // match, or it shows flags the game does not.
       }
     } else {
       const a = item.a;

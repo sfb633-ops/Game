@@ -216,7 +216,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const before = later.length;
   a.msgs.length = 0;
   const p = first.players.find(x => x.id === ai.playerId);
-  a.send({ type: 'build', x: p.baseX + 2, y: p.baseY, buildingType: 'barracks' });
+  a.send({ type: 'build', x: p.baseX - 4, y: p.baseY - 1, buildingType: 'barracks' });   // beside the keep, clear of its art
   const withNew = await a.wait(m => m.type === 'state' &&
     m.players.some(pl => pl.buildings && pl.buildings.some(b => b.type === 'barracks')), 4000)
     .catch(() => null);

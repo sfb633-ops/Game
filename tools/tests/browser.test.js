@@ -134,10 +134,18 @@ document.getElementById('probe-result').textContent = JSON.stringify(out);
       rendering: css('keep-trough', 'image-rendering'),
       alertRepeat: css('attack-alert', 'border-image-repeat'),
     };`);
-  // keepbar.png is 8 source rows at x3.
-  check('the health bar is exactly as tall as its own art', r.trough.h === 24, `${r.trough.h}px, art is 24`);
-  // keepbar-fill-*.png is 4 source rows at x3.
-  check('  and its fill track likewise', r.track.h === 12, `${r.track.h}px, art is 12`);
+  // Measured off the PNGs rather than written down here. The bar is drawn at
+  // whatever scale build-assets.js is set to and that has already moved once —
+  // a height typed into a test fails the next time somebody changes the scale,
+  // and fails claiming the CSS is wrong when the CSS is the thing that was
+  // updated. What has to hold is that the element is exactly as tall as the
+  // art in it, whatever that turns out to be.
+  const troughArt = decodePNG(path.join(SRC, 'assets', 'ui', 'keepbar.png')).height;
+  const fillArt = decodePNG(path.join(SRC, 'assets', 'ui', 'keepbar-fill-green.png')).height;
+  check('the health bar is exactly as tall as its own art',
+    r.trough.h === troughArt, `${r.trough.h}px, art is ${troughArt}`);
+  check('  and its fill track likewise',
+    r.track.h === fillArt, `${r.track.h}px, art is ${fillArt}`);
   check('  and nothing smooths the pixels', r.rendering === 'pixelated', r.rendering);
   // The banner's rails carry a repeating ornament: stretching a 44px run of it
   // across 370 smears it. Round across, stretch down.

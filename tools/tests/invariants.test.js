@@ -45,7 +45,10 @@ function field(m, pid, type, n, x, y) {
   const p = m.players.get(pid);
   p.idleUnits[type] = (p.idleUnits[type] || 0) + n;
   const before = new Set(m.armies.keys());
-  m.cmdDeployUnits(pid, { [type]: n }, p.baseX, p.baseY);
+  // Put down on the courtyard floor — the keep tile is outside the gate now —
+  // and then teleported to where the case wants them, as before.
+  const mp = m.musterPoint(p);
+  m.cmdDeployUnits(pid, { [type]: n }, mp.x, mp.y);
   const a = [...m.armies.values()].find(v => !before.has(v.id));
   a.x = x; a.y = y; a.destX = x; a.destY = y; a.order = 'hold';
   return a;
@@ -478,26 +481,61 @@ function garrisonless(build) {
   check('  but not most of them', real.lost <= 8, `lost ${real.lost} of 20`);
 }
 
-// The shrine's prize is what walks out of it. Not gold — the code used to say
-// so in a comment while paying about four hundred a capture.
-{
+// Nothing on the map pays gold for being razed. The shrine's prize is what
+// walks out of it; a camp's is the ground it stood on. Both used to be checked
+// only for the shrine, and the camp paid about 550 a capture — per point of
+// damage, plus loot, plus a bonus — which made a quiet corner of the map a farm
+// you could work without ever meeting anybody.
+//
+// Measured on the player's gold rather than on `army.plunder`, because plunder
+// being zero is the mechanism and the gold not moving is the rule. An assertion
+// on the mechanism would go on passing if a payout were added somewhere else.
+for (const shrineWanted of [true, false]) {
   const m = fixedMatch(() => {
     const mm = new Match({ started: false, map: 'openfield' });
     const a = mm.addPlayer('a', 'human', 'A'); mm.addPlayer('b', 'human', 'B');
     mm.start(); a.draft = null;
     return mm;
   });
-  const shrine = m.aiCamps.find(c => c.shrine);
-  const A = field(m, 'a', 'swordsman', 40, shrine.x - 4, shrine.y);
-  let paid = 0;
-  const orig = m.finishRaid.bind(m);
-  m.finishRaid = (army, razed) => { paid += Math.round(army.plunder); return orig(army, razed); };
-  m.cmdAttackArmy('a', A.id, 'camp', shrine.id);
-  for (let t = 0; t < 9000 && !shrine.defeated && m.armies.has(A.id); t++) m.tick(0.2);
-  check('taking the shrine pays no gold at all', shrine.defeated && paid === 0, `${paid}g`);
+  const target = m.aiCamps.find(c => !!c.shrine === shrineWanted && !c.defeated);
+  const a = m.players.get('a');
+  const A = field(m, 'a', 'swordsman', 40, target.x - 4, target.y);
+  // Income would otherwise mask a payout, so gold is held at zero through the
+  // raid. The tick that razes the target is the last one, and its income is
+  // still on the books when the loop exits — so what is left has to be under one
+  // tick of income, not exactly zero. Anything the camp paid would be hundreds.
+  a.gold = 0;
+  m.cmdAttackArmy('a', A.id, 'camp', target.id);
+  for (let t = 0; t < 9000 && !target.defeated && m.armies.has(A.id); t++) {
+    a.gold = 0;                        // hold income at zero for the whole raid
+    m.tick(0.2);
+  }
+  const oneTick = m.incomePerSec(a) * 0.2;
+  const label = shrineWanted ? 'the shrine' : 'a camp';
+  check(`razing ${label} pays no gold at all`,
+    target.defeated && a.gold <= oneTick + 1e-6,
+    `${a.gold.toFixed(2)}g left against ${oneTick.toFixed(2)}g of income, razed=${target.defeated}`);
+  if (!shrineWanted) {
+    check('  and what it pays instead is the ground: an outpost where it stood',
+      a.outposts.some(o => o.x === target.x && o.y === target.y),
+      JSON.stringify(a.outposts));
+  }
 }
 
-// Towers are worth building and are not a substitute for troops.
+// Towers are worth building, are not a substitute for troops, and do all of it
+// from where they stand.
+//
+// This block used to read "three towers turn a losing defence into a winning
+// one" at a garrison of ten, and that stopped being true when towers came out of
+// homeDefense — they no longer add their `defensePower` to the garrison's punch
+// or take a slice off every blow landing on the empire. What is left is what a
+// tower does in its own square: shoot what comes within five tiles, and hit back
+// at whoever is knocking it down.
+//
+// The relationship that replaced it is the better one, and is what is pinned
+// now: towers MULTIPLY a garrison rather than standing in for one. Three towers
+// behind twenty men flip a fight that twenty men alone lose; six towers behind
+// nobody still lose, and cost the attacker only a handful.
 {
   const siege = (towers, garrison, attackers) => {
     const m = garrisonless((mm, a, d) => {
@@ -511,12 +549,19 @@ function garrisonless(build) {
     for (let t = 0; t < 9000 && d.alive && m.armies.has(A.id); t++) m.tick(0.2);
     return { held: d.alive, left: m.armies.has(A.id) ? armyCount(A) : 0 };
   };
-  const bare = siege(0, 10, 30), few = siege(3, 10, 30);
-  check('three towers turn a losing defence into a winning one',
+  const bare = siege(0, 20, 30), few = siege(3, 20, 30);
+  check('towers behind a real garrison turn a losing defence into a winning one',
     !bare.held && few.held, `no towers: ${bare.held ? 'held' : 'fell'}; three: ${few.held ? 'held' : 'fell'}`);
   const alone = siege(6, 0, 40);
   check('  but towers with nobody behind them do not hold',
     !alone.held, `six towers, no garrison: ${alone.held ? 'held' : 'fell'}`);
+  // And the reason they are worth building at all: they shoot, so an assault
+  // that walks past them arrives smaller. This is the whole of a tower's
+  // contribution now, and it is entirely positional.
+  const openField = siege(0, 10, 30), shot = siege(3, 10, 30);
+  check('  and a tower is worth building because it thins what walks past it',
+    shot.left < openField.left - 5,
+    `30 attackers, ${openField.left} left with no towers vs ${shot.left} with three`);
 }
 
 // Boons are worth about the same as each other. A boon that changes how many

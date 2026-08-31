@@ -88,7 +88,8 @@ function run(seed, teams, mapId) {
       if (a.roster.some(h => !Number.isFinite(h) || h <= 0)) { bad(`bad roster hp seed ${seed}`); return; }
       const tx = Math.round(a.x), ty = Math.round(a.y);
       if (tx < 0 || ty < 0 || tx >= cfg.MAP.width || ty >= cfg.MAP.height) { bad(`army off map seed ${seed}`); return; }
-      if (m.terrain[ty][tx] !== 0) { bad(`army standing on terrain ${m.terrain[ty][tx]} at ${tx},${ty} seed ${seed}`); return; }
+      // Open ground or a courtyard's cobbles; never rock or water.
+      if (m.terrain[ty][tx] !== 0 && m.terrain[ty][tx] !== 3) { bad(`army standing on terrain ${m.terrain[ty][tx]} at ${tx},${ty} seed ${seed}`); return; }
       // teams: an order must never be aimed at a friend
       if (a.targetType === 'player' && m.allied(a.ownerId, a.targetId)) { bad(`ordered at an ally seed ${seed}`); return; }
       // A merge points at one of your own groups on purpose — that is what a

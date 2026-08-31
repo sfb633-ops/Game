@@ -1,1840 +1,1902 @@
 {
- "tileSize": 32,
+ "tileSize": 48,
  "terrain": {
   "grass": "terrain/grass.png",
+  "cobble": "terrain/cobble.png",
+  "cliffKit": "terrain/cliffkit.png",
+  "cliffKitCols": 4,
   "dirt": "terrain/dirt.png",
-  "rock": "terrain/rock.png",
+  "brush": "terrain/brush.png",
+  "bloom": "terrain/bloom.png",
+  "pave": "terrain/pave.png",
   "water": "terrain/water.png",
   "sheetCols": 8,
   "blobLookup": [
    [
-    46
+    0
    ],
    [
-    43
+    1
    ],
    [
-    40
+    2
+   ],
+   [
+    3
+   ],
+   [
+    4
+   ],
+   [
+    5
+   ],
+   [
+    6
+   ],
+   [
+    7
+   ],
+   [
+    8
+   ],
+   [
+    9
+   ],
+   [
+    10
+   ],
+   [
+    11
+   ],
+   [
+    12
+   ],
+   [
+    13
+   ],
+   [
+    14
+   ],
+   [
+    15
+   ],
+   [
+    0
+   ],
+   [
+    1
+   ],
+   [
+    2
+   ],
+   [
+    16
+   ],
+   [
+    4
+   ],
+   [
+    5
+   ],
+   [
+    6
+   ],
+   [
+    17
+   ],
+   [
+    8
+   ],
+   [
+    9
+   ],
+   [
+    10
+   ],
+   [
+    18
+   ],
+   [
+    12
+   ],
+   [
+    13
+   ],
+   [
+    14
+   ],
+   [
+    19
+   ],
+   [
+    0
+   ],
+   [
+    1
+   ],
+   [
+    2
+   ],
+   [
+    3
+   ],
+   [
+    4
+   ],
+   [
+    5
+   ],
+   [
+    20
    ],
    [
     21
    ],
    [
-    42
+    8
    ],
    [
-    31,
-    39,
-    47
-   ],
-   [
-    5,
     9
    ],
    [
-    49,
-    53
+    10
    ],
    [
-    7,
     11
    ],
    [
-    23,
-    27
+    12
    ],
    [
-    30,
-    38
+    13
    ],
    [
-    1,
-    3
+    22
    ],
    [
-    41
+    23
    ],
    [
-    2,
-    62
+    0
    ],
    [
-    29
+    1
    ],
    [
-    51,
-    63
+    2
    ],
    [
-    46
+    16
    ],
    [
-    43
+    4
    ],
    [
-    40
+    5
+   ],
+   [
+    20
+   ],
+   [
+    24
+   ],
+   [
+    8
+   ],
+   [
+    9
+   ],
+   [
+    10
+   ],
+   [
+    18
+   ],
+   [
+    12
+   ],
+   [
+    13
+   ],
+   [
+    22
    ],
    [
     25
    ],
    [
-    42
+    0
    ],
    [
-    31,
-    39,
-    47
+    1
    ],
    [
-    5,
-    9
+    2
    ],
    [
-    12,
-    20,
-    28,
-    61
-   ],
-   [
-    7,
-    11
-   ],
-   [
-    23,
-    27
-   ],
-   [
-    30,
-    38
-   ],
-   [
-    1,
     3
    ],
    [
-    41
+    4
    ],
    [
-    2,
-    62
+    5
+   ],
+   [
+    6
+   ],
+   [
+    7
+   ],
+   [
+    8
+   ],
+   [
+    9
+   ],
+   [
+    10
+   ],
+   [
+    11
+   ],
+   [
+    26
+   ],
+   [
+    27
+   ],
+   [
+    28
    ],
    [
     29
    ],
    [
-    2,
-    62
+    0
    ],
    [
-    46
+    1
    ],
    [
-    43
+    2
    ],
    [
-    40
+    16
+   ],
+   [
+    4
+   ],
+   [
+    5
+   ],
+   [
+    6
+   ],
+   [
+    17
+   ],
+   [
+    8
+   ],
+   [
+    9
+   ],
+   [
+    10
+   ],
+   [
+    18
+   ],
+   [
+    26
+   ],
+   [
+    27
+   ],
+   [
+    28
+   ],
+   [
+    30
+   ],
+   [
+    0
+   ],
+   [
+    1
+   ],
+   [
+    2
+   ],
+   [
+    3
+   ],
+   [
+    4
+   ],
+   [
+    5
+   ],
+   [
+    20
    ],
    [
     21
    ],
    [
-    42
+    8
    ],
    [
-    31,
-    39,
-    47
-   ],
-   [
-    5,
     9
    ],
    [
-    49,
-    53
+    10
    ],
    [
-    7,
     11
    ],
    [
-    23,
+    26
+   ],
+   [
     27
    ],
    [
-    30,
-    38
+    31
    ],
    [
-    1,
-    3
+    32
    ],
    [
-    41
+    0
    ],
    [
-    2,
-    62
+    1
    ],
    [
-    29
+    2
    ],
    [
-    51,
-    63
+    16
    ],
    [
-    46
+    4
    ],
    [
-    43
+    5
    ],
    [
-    40
+    20
    ],
    [
-    25
+    24
    ],
    [
-    42
+    8
    ],
    [
-    31,
-    39,
-    47
-   ],
-   [
-    5,
     9
    ],
    [
-    12,
-    20,
-    28,
-    61
+    10
    ],
    [
-    7,
-    11
+    18
    ],
    [
-    23,
+    26
+   ],
+   [
     27
    ],
    [
-    30,
-    38
+    31
    ],
    [
-    1,
+    33
+   ],
+   [
+    0
+   ],
+   [
+    1
+   ],
+   [
+    2
+   ],
+   [
     3
    ],
    [
-    41
+    4
    ],
    [
-    2,
-    62
+    5
    ],
    [
-    29
+    6
    ],
    [
-    2,
-    62
+    7
    ],
    [
-    46
+    8
    ],
    [
-    43
+    34
    ],
    [
-    40
+    10
+   ],
+   [
+    35
+   ],
+   [
+    12
+   ],
+   [
+    36
+   ],
+   [
+    14
+   ],
+   [
+    37
+   ],
+   [
+    0
+   ],
+   [
+    1
+   ],
+   [
+    2
+   ],
+   [
+    16
+   ],
+   [
+    4
+   ],
+   [
+    5
+   ],
+   [
+    6
+   ],
+   [
+    17
+   ],
+   [
+    8
+   ],
+   [
+    34
+   ],
+   [
+    10
+   ],
+   [
+    38
+   ],
+   [
+    12
+   ],
+   [
+    36
+   ],
+   [
+    14
+   ],
+   [
+    39
+   ],
+   [
+    0
+   ],
+   [
+    1
+   ],
+   [
+    2
+   ],
+   [
+    3
+   ],
+   [
+    4
+   ],
+   [
+    5
+   ],
+   [
+    20
    ],
    [
     21
    ],
    [
-    42
+    8
    ],
    [
-    31,
-    39,
-    47
+    34
    ],
    [
-    5,
-    9
+    10
    ],
    [
-    49,
-    53
+    35
    ],
    [
-    7,
-    11
+    12
    ],
    [
-    23,
-    27
+    36
    ],
    [
-    30,
-    38
-   ],
-   [
-    1,
-    3
-   ],
-   [
-    7,
-    11
-   ],
-   [
-    8,
-    16,
-    24,
-    48,
-    52,
-    60
-   ],
-   [
-    33,
-    34,
-    35,
-    50,
-    54,
-    55
-   ],
-   [
-    6,
-    14,
-    15,
-    32,
-    44,
-    56,
-    58,
-    59
-   ],
-   [
-    46
-   ],
-   [
-    43
+    22
    ],
    [
     40
    ],
    [
-    25
+    0
    ],
    [
-    42
+    1
    ],
    [
-    31,
-    39,
-    47
+    2
    ],
    [
-    5,
-    9
+    16
    ],
    [
-    12,
-    20,
-    28,
-    61
+    4
    ],
    [
-    7,
-    11
+    5
    ],
    [
-    23,
-    27
+    20
    ],
    [
-    30,
+    24
+   ],
+   [
+    8
+   ],
+   [
+    34
+   ],
+   [
+    10
+   ],
+   [
     38
    ],
    [
-    1,
-    3
+    12
    ],
    [
-    7,
-    11
+    36
    ],
    [
-    8,
-    16,
-    24,
-    48,
-    52,
-    60
-   ],
-   [
-    33,
-    34,
-    35,
-    50,
-    54,
-    55
-   ],
-   [
-    0,
-    4,
-    10,
-    13,
-    17,
-    18,
-    19,
-    22,
-    26,
-    36,
-    45,
-    57
-   ],
-   [
-    46
-   ],
-   [
-    43
-   ],
-   [
-    40
-   ],
-   [
-    21
-   ],
-   [
-    42
-   ],
-   [
-    31,
-    39,
-    47
-   ],
-   [
-    5,
-    9
-   ],
-   [
-    49,
-    53
-   ],
-   [
-    7,
-    11
-   ],
-   [
-    23,
-    27
-   ],
-   [
-    30,
-    38
-   ],
-   [
-    1,
-    3
-   ],
-   [
-    7,
-    11
-   ],
-   [
-    8,
-    16,
-    24,
-    48,
-    52,
-    60
-   ],
-   [
-    33,
-    34,
-    35,
-    50,
-    54,
-    55
-   ],
-   [
-    6,
-    14,
-    15,
-    32,
-    44,
-    56,
-    58,
-    59
-   ],
-   [
-    46
-   ],
-   [
-    43
-   ],
-   [
-    40
-   ],
-   [
-    25
-   ],
-   [
-    42
-   ],
-   [
-    31,
-    39,
-    47
-   ],
-   [
-    5,
-    9
-   ],
-   [
-    12,
-    20,
-    28,
-    61
-   ],
-   [
-    7,
-    11
-   ],
-   [
-    23,
-    27
-   ],
-   [
-    30,
-    38
-   ],
-   [
-    1,
-    3
-   ],
-   [
-    7,
-    11
-   ],
-   [
-    8,
-    16,
-    24,
-    48,
-    52,
-    60
-   ],
-   [
-    33,
-    34,
-    35,
-    50,
-    54,
-    55
-   ],
-   [
-    0,
-    4,
-    10,
-    13,
-    17,
-    18,
-    19,
-    22,
-    26,
-    36,
-    45,
-    57
-   ],
-   [
-    46
-   ],
-   [
-    43
-   ],
-   [
-    40
-   ],
-   [
-    21
-   ],
-   [
-    42
-   ],
-   [
-    31,
-    39,
-    47
-   ],
-   [
-    5,
-    9
-   ],
-   [
-    49,
-    53
-   ],
-   [
-    7,
-    11
-   ],
-   [
-    23,
-    27
-   ],
-   [
-    30,
-    38
-   ],
-   [
-    1,
-    3
+    22
    ],
    [
     41
    ],
    [
-    2,
-    62
+    0
    ],
    [
-    29
+    1
    ],
    [
-    51,
-    63
+    2
    ],
    [
-    46
+    3
    ],
    [
-    43
+    4
    ],
    [
-    40
+    5
    ],
    [
-    25
+    6
+   ],
+   [
+    7
+   ],
+   [
+    8
+   ],
+   [
+    34
+   ],
+   [
+    10
+   ],
+   [
+    35
+   ],
+   [
+    26
    ],
    [
     42
    ],
    [
-    31,
-    39,
-    47
-   ],
-   [
-    5,
-    9
-   ],
-   [
-    12,
-    20,
-    28,
-    61
-   ],
-   [
-    7,
-    11
-   ],
-   [
-    23,
-    27
-   ],
-   [
-    30,
-    38
-   ],
-   [
-    1,
-    3
-   ],
-   [
-    41
-   ],
-   [
-    2,
-    62
-   ],
-   [
-    29
-   ],
-   [
-    2,
-    62
-   ],
-   [
-    46
+    28
    ],
    [
     43
    ],
    [
-    40
+    0
+   ],
+   [
+    1
+   ],
+   [
+    2
+   ],
+   [
+    16
+   ],
+   [
+    4
+   ],
+   [
+    5
+   ],
+   [
+    6
+   ],
+   [
+    17
+   ],
+   [
+    8
+   ],
+   [
+    34
+   ],
+   [
+    10
+   ],
+   [
+    38
+   ],
+   [
+    26
+   ],
+   [
+    42
+   ],
+   [
+    28
+   ],
+   [
+    44
+   ],
+   [
+    0
+   ],
+   [
+    1
+   ],
+   [
+    2
+   ],
+   [
+    3
+   ],
+   [
+    4
+   ],
+   [
+    5
+   ],
+   [
+    20
    ],
    [
     21
    ],
    [
+    8
+   ],
+   [
+    34
+   ],
+   [
+    10
+   ],
+   [
+    35
+   ],
+   [
+    26
+   ],
+   [
     42
    ],
    [
-    31,
-    39,
-    47
+    31
    ],
    [
-    5,
-    9
+    45
    ],
    [
-    49,
-    53
+    0
    ],
    [
-    7,
-    11
+    1
    ],
    [
-    23,
-    27
+    2
    ],
    [
-    30,
+    16
+   ],
+   [
+    4
+   ],
+   [
+    5
+   ],
+   [
+    20
+   ],
+   [
+    24
+   ],
+   [
+    8
+   ],
+   [
+    34
+   ],
+   [
+    10
+   ],
+   [
     38
    ],
    [
-    1,
-    3
+    26
    ],
    [
-    41
+    42
    ],
    [
-    2,
-    62
-   ],
-   [
-    29
-   ],
-   [
-    51,
-    63
+    31
    ],
    [
     46
-   ],
-   [
-    43
-   ],
-   [
-    40
-   ],
-   [
-    25
-   ],
-   [
-    42
-   ],
-   [
-    31,
-    39,
-    47
-   ],
-   [
-    5,
-    9
-   ],
-   [
-    12,
-    20,
-    28,
-    61
-   ],
-   [
-    7,
-    11
-   ],
-   [
-    23,
-    27
-   ],
-   [
-    30,
-    38
-   ],
-   [
-    1,
-    3
-   ],
-   [
-    41
-   ],
-   [
-    2,
-    62
-   ],
-   [
-    29
-   ],
-   [
-    2,
-    62
-   ],
-   [
-    46
-   ],
-   [
-    43
-   ],
-   [
-    40
-   ],
-   [
-    21
-   ],
-   [
-    42
-   ],
-   [
-    31,
-    39,
-    47
-   ],
-   [
-    5,
-    9
-   ],
-   [
-    49,
-    53
-   ],
-   [
-    7,
-    11
-   ],
-   [
-    23,
-    27
-   ],
-   [
-    30,
-    38
-   ],
-   [
-    1,
-    3
-   ],
-   [
-    7,
-    11
-   ],
-   [
-    8,
-    16,
-    24,
-    48,
-    52,
-    60
-   ],
-   [
-    33,
-    34,
-    35,
-    50,
-    54,
-    55
-   ],
-   [
-    6,
-    14,
-    15,
-    32,
-    44,
-    56,
-    58,
-    59
-   ],
-   [
-    46
-   ],
-   [
-    43
-   ],
-   [
-    40
-   ],
-   [
-    25
-   ],
-   [
-    42
-   ],
-   [
-    31,
-    39,
-    47
-   ],
-   [
-    5,
-    9
-   ],
-   [
-    12,
-    20,
-    28,
-    61
-   ],
-   [
-    7,
-    11
-   ],
-   [
-    23,
-    27
-   ],
-   [
-    30,
-    38
-   ],
-   [
-    1,
-    3
-   ],
-   [
-    7,
-    11
-   ],
-   [
-    8,
-    16,
-    24,
-    48,
-    52,
-    60
-   ],
-   [
-    33,
-    34,
-    35,
-    50,
-    54,
-    55
-   ],
-   [
-    0,
-    4,
-    10,
-    13,
-    17,
-    18,
-    19,
-    22,
-    26,
-    36,
-    45,
-    57
-   ],
-   [
-    46
-   ],
-   [
-    43
-   ],
-   [
-    40
-   ],
-   [
-    21
-   ],
-   [
-    42
-   ],
-   [
-    31,
-    39,
-    47
-   ],
-   [
-    5,
-    9
-   ],
-   [
-    49,
-    53
-   ],
-   [
-    7,
-    11
-   ],
-   [
-    23,
-    27
-   ],
-   [
-    30,
-    38
-   ],
-   [
-    1,
-    3
-   ],
-   [
-    7,
-    11
-   ],
-   [
-    8,
-    16,
-    24,
-    48,
-    52,
-    60
-   ],
-   [
-    33,
-    34,
-    35,
-    50,
-    54,
-    55
-   ],
-   [
-    6,
-    14,
-    15,
-    32,
-    44,
-    56,
-    58,
-    59
-   ],
-   [
-    46
-   ],
-   [
-    43
-   ],
-   [
-    40
-   ],
-   [
-    25
-   ],
-   [
-    42
-   ],
-   [
-    31,
-    39,
-    47
-   ],
-   [
-    5,
-    9
-   ],
-   [
-    12,
-    20,
-    28,
-    61
-   ],
-   [
-    7,
-    11
-   ],
-   [
-    23,
-    27
-   ],
-   [
-    30,
-    38
-   ],
-   [
-    1,
-    3
-   ],
-   [
-    7,
-    11
-   ],
-   [
-    8,
-    16,
-    24,
-    48,
-    52,
-    60
-   ],
-   [
-    33,
-    34,
-    35,
-    50,
-    54,
-    55
-   ],
-   [
-    0,
-    4,
-    10,
-    13,
-    17,
-    18,
-    19,
-    22,
-    26,
-    36,
-    45,
-    57
    ]
   ]
  },
  "buildings": {
   "sets": {
    "cyan": {
-    "castle": [
-     {
-      "file": "buildings/cyan/castle1.png",
-      "w": 96,
-      "h": 96,
-      "anchorX": 48,
-      "anchorY": 96,
-      "footW": 77
-     },
-     {
-      "file": "buildings/cyan/castle2.png",
-      "w": 96,
-      "h": 96,
-      "anchorX": 48,
-      "anchorY": 96,
-      "footW": 77
-     },
-     {
-      "file": "buildings/cyan/castle3.png",
-      "w": 96,
-      "h": 96,
-      "anchorX": 48,
-      "anchorY": 96,
-      "footW": 77
-     }
-    ],
     "barracks": {
      "file": "buildings/cyan/barracks.png",
-     "w": 32,
-     "h": 32,
-     "anchorX": 16,
-     "anchorY": 32,
-     "footW": 26
+     "w": 144,
+     "h": 144,
+     "anchorX": 72,
+     "anchorY": 144,
+     "footW": 115,
+     "shadow": {
+      "file": "buildings/cyan/barracks_shadow.png",
+      "w": 193,
+      "h": 29,
+      "anchorX": 72,
+      "anchorY": 0
+     }
     },
     "bank": {
      "file": "buildings/cyan/bank.png",
-     "w": 32,
-     "h": 32,
-     "anchorX": 16,
-     "anchorY": 32,
-     "footW": 26
+     "w": 144,
+     "h": 144,
+     "anchorX": 72,
+     "anchorY": 144,
+     "footW": 115,
+     "shadow": {
+      "file": "buildings/cyan/bank_shadow.png",
+      "w": 193,
+      "h": 29,
+      "anchorX": 72,
+      "anchorY": 0
+     }
     },
     "stable": {
      "file": "buildings/cyan/stable.png",
-     "w": 32,
-     "h": 32,
-     "anchorX": 16,
-     "anchorY": 32,
-     "footW": 26
+     "w": 144,
+     "h": 144,
+     "anchorX": 72,
+     "anchorY": 144,
+     "footW": 115,
+     "shadow": {
+      "file": "buildings/cyan/stable_shadow.png",
+      "w": 193,
+      "h": 29,
+      "anchorX": 72,
+      "anchorY": 0
+     }
     },
     "siege": {
      "file": "buildings/cyan/siege.png",
-     "w": 32,
-     "h": 32,
-     "anchorX": 16,
-     "anchorY": 32,
-     "footW": 26
+     "w": 144,
+     "h": 144,
+     "anchorX": 72,
+     "anchorY": 144,
+     "footW": 115,
+     "shadow": {
+      "file": "buildings/cyan/siege_shadow.png",
+      "w": 193,
+      "h": 29,
+      "anchorX": 72,
+      "anchorY": 0
+     }
+    },
+    "castle": {
+     "file": "buildings/cyan/castle.png",
+     "w": 288,
+     "h": 337,
+     "anchorX": 144,
+     "anchorY": 337,
+     "footW": 230,
+     "shadow": {
+      "file": "buildings/cyan/castle_shadow.png",
+      "w": 403,
+      "h": 67,
+      "anchorX": 144,
+      "anchorY": 0
+     },
+     "gate": {
+      "file": "buildings/cyan/castle_gate.png",
+      "frames": 12,
+      "w": 144,
+      "h": 192,
+      "x": 77,
+      "y": 145
+     }
     },
     "tower": {
      "file": "buildings/cyan/tower.png",
-     "w": 66,
-     "h": 96,
-     "frames": 6,
+     "w": 127,
+     "h": 346,
+     "frames": 1,
      "fps": 6,
-     "anchorX": 33,
-     "anchorY": 96,
-     "footW": 36,
-     "bannerAt": 0.45,
-     "archer": {
-      "w": 32,
-      "h": 32,
-      "anchorX": 20,
-      "anchorY": 32,
-      "fps": {
-       "idle": 6,
-       "attack": 14
-      },
-      "dirs": {
-       "down": {
-        "idle": {
-         "file": "buildings/cyan/archer_down_idle.png",
-         "frames": 4
-        },
-        "attack": {
-         "file": "buildings/cyan/archer_down_attack.png",
-         "frames": 6
-        }
-       },
-       "up": {
-        "idle": {
-         "file": "buildings/cyan/archer_up_idle.png",
-         "frames": 4
-        },
-        "attack": {
-         "file": "buildings/cyan/archer_up_attack.png",
-         "frames": 6
-        }
-       },
-       "side": {
-        "idle": {
-         "file": "buildings/cyan/archer_side_idle.png",
-         "frames": 4
-        },
-        "attack": {
-         "file": "buildings/cyan/archer_side_attack.png",
-         "frames": 6
-        }
-       }
-      }
+     "anchorX": 64,
+     "anchorY": 346,
+     "footW": 60,
+     "shadow": {
+      "file": "buildings/cyan/tower_shadow.png",
+      "w": 245,
+      "h": 69,
+      "anchorX": 64,
+      "anchorY": 0
      },
-     "mountX": 33,
-     "mountY": 40,
-     "front": {
-      "file": "buildings/cyan/tower_front.png",
-      "h": 16,
-      "top": 31
-     }
+     "bannerAt": 0.78,
+     "mountX": 64,
+     "mountY": 236
     },
     "wall": {
-     "capW": {
-      "file": "buildings/cyan/wall_capW.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+     "tower": {
+      "file": "buildings/cyan/wall_tower.png",
+      "w": 96,
+      "h": 192,
+      "anchorX": 48,
+      "anchorY": 185,
+      "footW": 77
      },
      "mid": {
       "file": "buildings/cyan/wall_mid.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_mid": {
+      "file": "buildings/cyan/wall_back_mid.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
      "capE": {
       "file": "buildings/cyan/wall_capE.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_capE": {
+      "file": "buildings/cyan/wall_back_capE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "capW": {
+      "file": "buildings/cyan/wall_capW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_capW": {
+      "file": "buildings/cyan/wall_back_capW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
      "post": {
       "file": "buildings/cyan/wall_post.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
-     "vertCapN": {
-      "file": "buildings/cyan/wall_vertCapN.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+     "back_post": {
+      "file": "buildings/cyan/wall_back_post.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
      "vertMid": {
       "file": "buildings/cyan/wall_vertMid.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "vertCapN": {
+      "file": "buildings/cyan/wall_vertCapN.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
      "vertCapS": {
       "file": "buildings/cyan/wall_vertCapS.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "cornerNW": {
+      "file": "buildings/cyan/wall_cornerNW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_cornerNW": {
+      "file": "buildings/cyan/wall_back_cornerNW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "cornerNE": {
+      "file": "buildings/cyan/wall_cornerNE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_cornerNE": {
+      "file": "buildings/cyan/wall_back_cornerNE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "cornerSW": {
+      "file": "buildings/cyan/wall_cornerSW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_cornerSW": {
+      "file": "buildings/cyan/wall_back_cornerSW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "cornerSE": {
+      "file": "buildings/cyan/wall_cornerSE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_cornerSE": {
+      "file": "buildings/cyan/wall_back_cornerSE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      }
     }
    },
    "red": {
-    "castle": [
-     {
-      "file": "buildings/red/castle1.png",
-      "w": 96,
-      "h": 96,
-      "anchorX": 48,
-      "anchorY": 96,
-      "footW": 77
-     },
-     {
-      "file": "buildings/red/castle2.png",
-      "w": 96,
-      "h": 96,
-      "anchorX": 48,
-      "anchorY": 96,
-      "footW": 77
-     },
-     {
-      "file": "buildings/red/castle3.png",
-      "w": 96,
-      "h": 96,
-      "anchorX": 48,
-      "anchorY": 96,
-      "footW": 77
-     }
-    ],
     "barracks": {
      "file": "buildings/red/barracks.png",
-     "w": 32,
-     "h": 32,
-     "anchorX": 16,
-     "anchorY": 32,
-     "footW": 26
+     "w": 144,
+     "h": 144,
+     "anchorX": 72,
+     "anchorY": 144,
+     "footW": 115,
+     "shadow": {
+      "file": "buildings/red/barracks_shadow.png",
+      "w": 193,
+      "h": 29,
+      "anchorX": 72,
+      "anchorY": 0
+     }
     },
     "bank": {
      "file": "buildings/red/bank.png",
-     "w": 32,
-     "h": 32,
-     "anchorX": 16,
-     "anchorY": 32,
-     "footW": 26
+     "w": 144,
+     "h": 144,
+     "anchorX": 72,
+     "anchorY": 144,
+     "footW": 115,
+     "shadow": {
+      "file": "buildings/red/bank_shadow.png",
+      "w": 193,
+      "h": 29,
+      "anchorX": 72,
+      "anchorY": 0
+     }
     },
     "stable": {
      "file": "buildings/red/stable.png",
-     "w": 32,
-     "h": 32,
-     "anchorX": 16,
-     "anchorY": 32,
-     "footW": 26
+     "w": 144,
+     "h": 144,
+     "anchorX": 72,
+     "anchorY": 144,
+     "footW": 115,
+     "shadow": {
+      "file": "buildings/red/stable_shadow.png",
+      "w": 193,
+      "h": 29,
+      "anchorX": 72,
+      "anchorY": 0
+     }
     },
     "siege": {
      "file": "buildings/red/siege.png",
-     "w": 32,
-     "h": 32,
-     "anchorX": 16,
-     "anchorY": 32,
-     "footW": 26
+     "w": 144,
+     "h": 144,
+     "anchorX": 72,
+     "anchorY": 144,
+     "footW": 115,
+     "shadow": {
+      "file": "buildings/red/siege_shadow.png",
+      "w": 193,
+      "h": 29,
+      "anchorX": 72,
+      "anchorY": 0
+     }
+    },
+    "castle": {
+     "file": "buildings/red/castle.png",
+     "w": 288,
+     "h": 364,
+     "anchorX": 144,
+     "anchorY": 364,
+     "footW": 230,
+     "shadow": {
+      "file": "buildings/red/castle_shadow.png",
+      "w": 412,
+      "h": 73,
+      "anchorX": 144,
+      "anchorY": 0
+     },
+     "gate": {
+      "file": "buildings/red/castle_gate.png",
+      "frames": 12,
+      "w": 144,
+      "h": 192,
+      "x": 77,
+      "y": 151
+     }
     },
     "tower": {
      "file": "buildings/red/tower.png",
-     "w": 66,
-     "h": 96,
-     "frames": 6,
+     "w": 127,
+     "h": 346,
+     "frames": 1,
      "fps": 6,
-     "anchorX": 33,
-     "anchorY": 96,
-     "footW": 36,
-     "bannerAt": 0.45,
-     "archer": {
-      "w": 32,
-      "h": 32,
-      "anchorX": 20,
-      "anchorY": 32,
-      "fps": {
-       "idle": 6,
-       "attack": 14
-      },
-      "dirs": {
-       "down": {
-        "idle": {
-         "file": "buildings/red/archer_down_idle.png",
-         "frames": 4
-        },
-        "attack": {
-         "file": "buildings/red/archer_down_attack.png",
-         "frames": 6
-        }
-       },
-       "up": {
-        "idle": {
-         "file": "buildings/red/archer_up_idle.png",
-         "frames": 4
-        },
-        "attack": {
-         "file": "buildings/red/archer_up_attack.png",
-         "frames": 6
-        }
-       },
-       "side": {
-        "idle": {
-         "file": "buildings/red/archer_side_idle.png",
-         "frames": 4
-        },
-        "attack": {
-         "file": "buildings/red/archer_side_attack.png",
-         "frames": 6
-        }
-       }
-      }
+     "anchorX": 64,
+     "anchorY": 346,
+     "footW": 60,
+     "shadow": {
+      "file": "buildings/red/tower_shadow.png",
+      "w": 245,
+      "h": 69,
+      "anchorX": 64,
+      "anchorY": 0
      },
-     "mountX": 33,
-     "mountY": 40,
-     "front": {
-      "file": "buildings/red/tower_front.png",
-      "h": 16,
-      "top": 31
-     }
+     "bannerAt": 0.78,
+     "mountX": 64,
+     "mountY": 236
     },
     "wall": {
-     "capW": {
-      "file": "buildings/red/wall_capW.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+     "tower": {
+      "file": "buildings/red/wall_tower.png",
+      "w": 96,
+      "h": 192,
+      "anchorX": 48,
+      "anchorY": 185,
+      "footW": 77
      },
      "mid": {
       "file": "buildings/red/wall_mid.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_mid": {
+      "file": "buildings/red/wall_back_mid.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
      "capE": {
       "file": "buildings/red/wall_capE.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_capE": {
+      "file": "buildings/red/wall_back_capE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "capW": {
+      "file": "buildings/red/wall_capW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_capW": {
+      "file": "buildings/red/wall_back_capW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
      "post": {
       "file": "buildings/red/wall_post.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
-     "vertCapN": {
-      "file": "buildings/red/wall_vertCapN.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+     "back_post": {
+      "file": "buildings/red/wall_back_post.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
      "vertMid": {
       "file": "buildings/red/wall_vertMid.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "vertCapN": {
+      "file": "buildings/red/wall_vertCapN.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
      "vertCapS": {
       "file": "buildings/red/wall_vertCapS.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "cornerNW": {
+      "file": "buildings/red/wall_cornerNW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_cornerNW": {
+      "file": "buildings/red/wall_back_cornerNW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "cornerNE": {
+      "file": "buildings/red/wall_cornerNE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_cornerNE": {
+      "file": "buildings/red/wall_back_cornerNE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "cornerSW": {
+      "file": "buildings/red/wall_cornerSW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_cornerSW": {
+      "file": "buildings/red/wall_back_cornerSW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "cornerSE": {
+      "file": "buildings/red/wall_cornerSE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_cornerSE": {
+      "file": "buildings/red/wall_back_cornerSE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      }
     }
    },
    "lime": {
-    "castle": [
-     {
-      "file": "buildings/lime/castle1.png",
-      "w": 96,
-      "h": 96,
-      "anchorX": 48,
-      "anchorY": 96,
-      "footW": 77
-     },
-     {
-      "file": "buildings/lime/castle2.png",
-      "w": 96,
-      "h": 96,
-      "anchorX": 48,
-      "anchorY": 96,
-      "footW": 77
-     },
-     {
-      "file": "buildings/lime/castle3.png",
-      "w": 96,
-      "h": 96,
-      "anchorX": 48,
-      "anchorY": 96,
-      "footW": 77
-     }
-    ],
     "barracks": {
      "file": "buildings/lime/barracks.png",
-     "w": 32,
-     "h": 32,
-     "anchorX": 16,
-     "anchorY": 32,
-     "footW": 26
+     "w": 144,
+     "h": 144,
+     "anchorX": 72,
+     "anchorY": 144,
+     "footW": 115,
+     "shadow": {
+      "file": "buildings/lime/barracks_shadow.png",
+      "w": 193,
+      "h": 29,
+      "anchorX": 72,
+      "anchorY": 0
+     }
     },
     "bank": {
      "file": "buildings/lime/bank.png",
-     "w": 32,
-     "h": 32,
-     "anchorX": 16,
-     "anchorY": 32,
-     "footW": 26
+     "w": 144,
+     "h": 144,
+     "anchorX": 72,
+     "anchorY": 144,
+     "footW": 115,
+     "shadow": {
+      "file": "buildings/lime/bank_shadow.png",
+      "w": 193,
+      "h": 29,
+      "anchorX": 72,
+      "anchorY": 0
+     }
     },
     "stable": {
      "file": "buildings/lime/stable.png",
-     "w": 32,
-     "h": 32,
-     "anchorX": 16,
-     "anchorY": 32,
-     "footW": 26
+     "w": 144,
+     "h": 144,
+     "anchorX": 72,
+     "anchorY": 144,
+     "footW": 115,
+     "shadow": {
+      "file": "buildings/lime/stable_shadow.png",
+      "w": 193,
+      "h": 29,
+      "anchorX": 72,
+      "anchorY": 0
+     }
     },
     "siege": {
      "file": "buildings/lime/siege.png",
-     "w": 32,
-     "h": 32,
-     "anchorX": 16,
-     "anchorY": 32,
-     "footW": 26
+     "w": 144,
+     "h": 144,
+     "anchorX": 72,
+     "anchorY": 144,
+     "footW": 115,
+     "shadow": {
+      "file": "buildings/lime/siege_shadow.png",
+      "w": 193,
+      "h": 29,
+      "anchorX": 72,
+      "anchorY": 0
+     }
+    },
+    "castle": {
+     "file": "buildings/lime/castle.png",
+     "w": 288,
+     "h": 337,
+     "anchorX": 144,
+     "anchorY": 337,
+     "footW": 230,
+     "shadow": {
+      "file": "buildings/lime/castle_shadow.png",
+      "w": 403,
+      "h": 67,
+      "anchorX": 144,
+      "anchorY": 0
+     },
+     "gate": {
+      "file": "buildings/lime/castle_gate.png",
+      "frames": 12,
+      "w": 144,
+      "h": 192,
+      "x": 77,
+      "y": 145
+     }
     },
     "tower": {
      "file": "buildings/lime/tower.png",
-     "w": 66,
-     "h": 96,
-     "frames": 6,
+     "w": 127,
+     "h": 346,
+     "frames": 1,
      "fps": 6,
-     "anchorX": 33,
-     "anchorY": 96,
-     "footW": 36,
-     "bannerAt": 0.45,
-     "archer": {
-      "w": 32,
-      "h": 32,
-      "anchorX": 20,
-      "anchorY": 32,
-      "fps": {
-       "idle": 6,
-       "attack": 14
-      },
-      "dirs": {
-       "down": {
-        "idle": {
-         "file": "buildings/lime/archer_down_idle.png",
-         "frames": 4
-        },
-        "attack": {
-         "file": "buildings/lime/archer_down_attack.png",
-         "frames": 6
-        }
-       },
-       "up": {
-        "idle": {
-         "file": "buildings/lime/archer_up_idle.png",
-         "frames": 4
-        },
-        "attack": {
-         "file": "buildings/lime/archer_up_attack.png",
-         "frames": 6
-        }
-       },
-       "side": {
-        "idle": {
-         "file": "buildings/lime/archer_side_idle.png",
-         "frames": 4
-        },
-        "attack": {
-         "file": "buildings/lime/archer_side_attack.png",
-         "frames": 6
-        }
-       }
-      }
+     "anchorX": 64,
+     "anchorY": 346,
+     "footW": 60,
+     "shadow": {
+      "file": "buildings/lime/tower_shadow.png",
+      "w": 245,
+      "h": 69,
+      "anchorX": 64,
+      "anchorY": 0
      },
-     "mountX": 33,
-     "mountY": 40,
-     "front": {
-      "file": "buildings/lime/tower_front.png",
-      "h": 16,
-      "top": 31
-     }
+     "bannerAt": 0.78,
+     "mountX": 64,
+     "mountY": 236
     },
     "wall": {
-     "capW": {
-      "file": "buildings/lime/wall_capW.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+     "tower": {
+      "file": "buildings/lime/wall_tower.png",
+      "w": 96,
+      "h": 192,
+      "anchorX": 48,
+      "anchorY": 185,
+      "footW": 77
      },
      "mid": {
       "file": "buildings/lime/wall_mid.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_mid": {
+      "file": "buildings/lime/wall_back_mid.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
      "capE": {
       "file": "buildings/lime/wall_capE.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_capE": {
+      "file": "buildings/lime/wall_back_capE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "capW": {
+      "file": "buildings/lime/wall_capW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_capW": {
+      "file": "buildings/lime/wall_back_capW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
      "post": {
       "file": "buildings/lime/wall_post.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
-     "vertCapN": {
-      "file": "buildings/lime/wall_vertCapN.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+     "back_post": {
+      "file": "buildings/lime/wall_back_post.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
      "vertMid": {
       "file": "buildings/lime/wall_vertMid.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "vertCapN": {
+      "file": "buildings/lime/wall_vertCapN.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
      "vertCapS": {
       "file": "buildings/lime/wall_vertCapS.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "cornerNW": {
+      "file": "buildings/lime/wall_cornerNW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_cornerNW": {
+      "file": "buildings/lime/wall_back_cornerNW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "cornerNE": {
+      "file": "buildings/lime/wall_cornerNE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_cornerNE": {
+      "file": "buildings/lime/wall_back_cornerNE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "cornerSW": {
+      "file": "buildings/lime/wall_cornerSW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_cornerSW": {
+      "file": "buildings/lime/wall_back_cornerSW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "cornerSE": {
+      "file": "buildings/lime/wall_cornerSE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_cornerSE": {
+      "file": "buildings/lime/wall_back_cornerSE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      }
     }
    },
    "purple": {
-    "castle": [
-     {
-      "file": "buildings/purple/castle1.png",
-      "w": 96,
-      "h": 96,
-      "anchorX": 48,
-      "anchorY": 96,
-      "footW": 77
-     },
-     {
-      "file": "buildings/purple/castle2.png",
-      "w": 96,
-      "h": 96,
-      "anchorX": 48,
-      "anchorY": 96,
-      "footW": 77
-     },
-     {
-      "file": "buildings/purple/castle3.png",
-      "w": 96,
-      "h": 96,
-      "anchorX": 48,
-      "anchorY": 96,
-      "footW": 77
-     }
-    ],
     "barracks": {
      "file": "buildings/purple/barracks.png",
-     "w": 32,
-     "h": 32,
-     "anchorX": 16,
-     "anchorY": 32,
-     "footW": 26
+     "w": 144,
+     "h": 144,
+     "anchorX": 72,
+     "anchorY": 144,
+     "footW": 115,
+     "shadow": {
+      "file": "buildings/purple/barracks_shadow.png",
+      "w": 193,
+      "h": 29,
+      "anchorX": 72,
+      "anchorY": 0
+     }
     },
     "bank": {
      "file": "buildings/purple/bank.png",
-     "w": 32,
-     "h": 32,
-     "anchorX": 16,
-     "anchorY": 32,
-     "footW": 26
+     "w": 144,
+     "h": 144,
+     "anchorX": 72,
+     "anchorY": 144,
+     "footW": 115,
+     "shadow": {
+      "file": "buildings/purple/bank_shadow.png",
+      "w": 193,
+      "h": 29,
+      "anchorX": 72,
+      "anchorY": 0
+     }
     },
     "stable": {
      "file": "buildings/purple/stable.png",
-     "w": 32,
-     "h": 32,
-     "anchorX": 16,
-     "anchorY": 32,
-     "footW": 26
+     "w": 144,
+     "h": 144,
+     "anchorX": 72,
+     "anchorY": 144,
+     "footW": 115,
+     "shadow": {
+      "file": "buildings/purple/stable_shadow.png",
+      "w": 193,
+      "h": 29,
+      "anchorX": 72,
+      "anchorY": 0
+     }
     },
     "siege": {
      "file": "buildings/purple/siege.png",
-     "w": 32,
-     "h": 32,
-     "anchorX": 16,
-     "anchorY": 32,
-     "footW": 26
+     "w": 144,
+     "h": 144,
+     "anchorX": 72,
+     "anchorY": 144,
+     "footW": 115,
+     "shadow": {
+      "file": "buildings/purple/siege_shadow.png",
+      "w": 193,
+      "h": 29,
+      "anchorX": 72,
+      "anchorY": 0
+     }
+    },
+    "castle": {
+     "file": "buildings/purple/castle.png",
+     "w": 288,
+     "h": 364,
+     "anchorX": 144,
+     "anchorY": 364,
+     "footW": 230,
+     "shadow": {
+      "file": "buildings/purple/castle_shadow.png",
+      "w": 412,
+      "h": 73,
+      "anchorX": 144,
+      "anchorY": 0
+     },
+     "gate": {
+      "file": "buildings/purple/castle_gate.png",
+      "frames": 12,
+      "w": 144,
+      "h": 192,
+      "x": 77,
+      "y": 151
+     }
     },
     "tower": {
      "file": "buildings/purple/tower.png",
-     "w": 66,
-     "h": 96,
-     "frames": 6,
+     "w": 127,
+     "h": 346,
+     "frames": 1,
      "fps": 6,
-     "anchorX": 33,
-     "anchorY": 96,
-     "footW": 36,
-     "bannerAt": 0.45,
-     "archer": {
-      "w": 32,
-      "h": 32,
-      "anchorX": 20,
-      "anchorY": 32,
-      "fps": {
-       "idle": 6,
-       "attack": 14
-      },
-      "dirs": {
-       "down": {
-        "idle": {
-         "file": "buildings/purple/archer_down_idle.png",
-         "frames": 4
-        },
-        "attack": {
-         "file": "buildings/purple/archer_down_attack.png",
-         "frames": 6
-        }
-       },
-       "up": {
-        "idle": {
-         "file": "buildings/purple/archer_up_idle.png",
-         "frames": 4
-        },
-        "attack": {
-         "file": "buildings/purple/archer_up_attack.png",
-         "frames": 6
-        }
-       },
-       "side": {
-        "idle": {
-         "file": "buildings/purple/archer_side_idle.png",
-         "frames": 4
-        },
-        "attack": {
-         "file": "buildings/purple/archer_side_attack.png",
-         "frames": 6
-        }
-       }
-      }
+     "anchorX": 64,
+     "anchorY": 346,
+     "footW": 60,
+     "shadow": {
+      "file": "buildings/purple/tower_shadow.png",
+      "w": 245,
+      "h": 69,
+      "anchorX": 64,
+      "anchorY": 0
      },
-     "mountX": 33,
-     "mountY": 40,
-     "front": {
-      "file": "buildings/purple/tower_front.png",
-      "h": 16,
-      "top": 31
-     }
+     "bannerAt": 0.78,
+     "mountX": 64,
+     "mountY": 236
     },
     "wall": {
-     "capW": {
-      "file": "buildings/purple/wall_capW.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+     "tower": {
+      "file": "buildings/purple/wall_tower.png",
+      "w": 96,
+      "h": 192,
+      "anchorX": 48,
+      "anchorY": 185,
+      "footW": 77
      },
      "mid": {
       "file": "buildings/purple/wall_mid.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_mid": {
+      "file": "buildings/purple/wall_back_mid.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
      "capE": {
       "file": "buildings/purple/wall_capE.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_capE": {
+      "file": "buildings/purple/wall_back_capE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "capW": {
+      "file": "buildings/purple/wall_capW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_capW": {
+      "file": "buildings/purple/wall_back_capW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
      "post": {
       "file": "buildings/purple/wall_post.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
-     "vertCapN": {
-      "file": "buildings/purple/wall_vertCapN.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+     "back_post": {
+      "file": "buildings/purple/wall_back_post.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
      "vertMid": {
       "file": "buildings/purple/wall_vertMid.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "vertCapN": {
+      "file": "buildings/purple/wall_vertCapN.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      },
      "vertCapS": {
       "file": "buildings/purple/wall_vertCapS.png",
-      "w": 32,
-      "h": 32,
-      "anchorX": 16,
-      "anchorY": 32,
-      "footW": 26
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "cornerNW": {
+      "file": "buildings/purple/wall_cornerNW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_cornerNW": {
+      "file": "buildings/purple/wall_back_cornerNW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "cornerNE": {
+      "file": "buildings/purple/wall_cornerNE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_cornerNE": {
+      "file": "buildings/purple/wall_back_cornerNE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "cornerSW": {
+      "file": "buildings/purple/wall_cornerSW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_cornerSW": {
+      "file": "buildings/purple/wall_back_cornerSW.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "cornerSE": {
+      "file": "buildings/purple/wall_cornerSE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
+     },
+     "back_cornerSE": {
+      "file": "buildings/purple/wall_back_cornerSE.png",
+      "w": 48,
+      "h": 96,
+      "anchorX": 24,
+      "anchorY": 89,
+      "footW": 38
      }
     }
    },
    "neutral": {
     "camp": {
      "file": "buildings/neutral/camp.png",
-     "w": 64,
-     "h": 64,
-     "anchorX": 32,
-     "anchorY": 64,
-     "footW": 51
+     "w": 96,
+     "h": 96,
+     "anchorX": 48,
+     "anchorY": 96,
+     "footW": 77,
+     "shadow": {
+      "file": "buildings/neutral/camp_shadow.png",
+      "w": 129,
+      "h": 19,
+      "anchorX": 48,
+      "anchorY": 0
+     }
     },
     "shrine": {
      "file": "buildings/neutral/shrine.png",
-     "w": 64,
-     "h": 64,
-     "anchorX": 32,
-     "anchorY": 64,
-     "footW": 51
+     "w": 96,
+     "h": 96,
+     "anchorX": 48,
+     "anchorY": 96,
+     "footW": 77,
+     "shadow": {
+      "file": "buildings/neutral/shrine_shadow.png",
+      "w": 129,
+      "h": 19,
+      "anchorX": 48,
+      "anchorY": 0
+     }
     },
     "shrineColossus": {
      "file": "buildings/neutral/shrine-colossus.png",
-     "w": 64,
-     "h": 64,
-     "anchorX": 32,
-     "anchorY": 64,
-     "footW": 51
+     "w": 96,
+     "h": 96,
+     "anchorX": 48,
+     "anchorY": 96,
+     "footW": 77,
+     "shadow": {
+      "file": "buildings/neutral/shrine-colossus_shadow.png",
+      "w": 129,
+      "h": 19,
+      "anchorX": 48,
+      "anchorY": 0
+     }
     }
    }
   },
@@ -1851,200 +1913,174 @@
   "tree": [
    {
     "file": "props/tree1.png",
-    "w": 62,
-    "h": 76,
-    "anchorX": 31,
-    "anchorY": 76
+    "w": 105,
+    "h": 115,
+    "anchorX": 53,
+    "anchorY": 115
    },
    {
     "file": "props/tree2.png",
-    "w": 52,
-    "h": 76,
-    "anchorX": 26,
-    "anchorY": 76
+    "w": 138,
+    "h": 115,
+    "anchorX": 69,
+    "anchorY": 115
    },
    {
     "file": "props/tree3.png",
-    "w": 46,
-    "h": 77,
-    "anchorX": 23,
-    "anchorY": 76
+    "w": 161,
+    "h": 125,
+    "anchorX": 81,
+    "anchorY": 125
+   },
+   {
+    "file": "props/tree4.png",
+    "w": 73,
+    "h": 134,
+    "anchorX": 37,
+    "anchorY": 134
+   },
+   {
+    "file": "props/tree5.png",
+    "w": 151,
+    "h": 115,
+    "anchorX": 76,
+    "anchorY": 115
+   }
+  ],
+  "bigtree": [
+   {
+    "file": "props/bigtree1.png",
+    "w": 96,
+    "h": 211,
+    "anchorX": 48,
+    "anchorY": 211
+   },
+   {
+    "file": "props/bigtree2.png",
+    "w": 124,
+    "h": 202,
+    "anchorX": 62,
+    "anchorY": 202
+   },
+   {
+    "file": "props/bigtree3.png",
+    "w": 160,
+    "h": 221,
+    "anchorX": 80,
+    "anchorY": 221
    }
   ],
   "bush": [
    {
     "file": "props/bush1.png",
-    "w": 16,
-    "h": 33,
-    "anchorX": 8,
-    "anchorY": 24
+    "w": 59,
+    "h": 43,
+    "anchorX": 30,
+    "anchorY": 43
    },
    {
     "file": "props/bush2.png",
-    "w": 20,
-    "h": 33,
-    "anchorX": 10,
-    "anchorY": 26
+    "w": 42,
+    "h": 43,
+    "anchorX": 21,
+    "anchorY": 43
    },
    {
     "file": "props/bush3.png",
-    "w": 29,
-    "h": 34,
-    "anchorX": 15,
-    "anchorY": 27
+    "w": 59,
+    "h": 43,
+    "anchorX": 30,
+    "anchorY": 43
    },
    {
     "file": "props/bush4.png",
-    "w": 35,
-    "h": 34,
-    "anchorX": 18,
-    "anchorY": 32
+    "w": 68,
+    "h": 53,
+    "anchorX": 34,
+    "anchorY": 53
    },
    {
     "file": "props/bush5.png",
-    "w": 29,
-    "h": 34,
-    "anchorX": 15,
-    "anchorY": 34
-   },
-   {
-    "file": "props/bush6.png",
-    "w": 30,
-    "h": 33,
-    "anchorX": 15,
-    "anchorY": 29
+    "w": 48,
+    "h": 48,
+    "anchorX": 24,
+    "anchorY": 48
    }
   ],
-  "boulder": [
+  "crag": [
    {
-    "file": "props/boulder1.png",
-    "w": 25,
-    "h": 27,
-    "anchorX": 13,
-    "anchorY": 24
+    "file": "props/crag1.png",
+    "w": 155,
+    "h": 53,
+    "anchorX": 78,
+    "anchorY": 53
    },
    {
-    "file": "props/boulder2.png",
-    "w": 29,
-    "h": 27,
+    "file": "props/crag2.png",
+    "w": 72,
+    "h": 72,
+    "anchorX": 36,
+    "anchorY": 72
+   },
+   {
+    "file": "props/crag3.png",
+    "w": 30,
+    "h": 62,
     "anchorX": 15,
-    "anchorY": 24
+    "anchorY": 62
    },
    {
-    "file": "props/boulder3.png",
-    "w": 29,
-    "h": 27,
-    "anchorX": 15,
-    "anchorY": 27
+    "file": "props/crag4.png",
+    "w": 81,
+    "h": 41,
+    "anchorX": 41,
+    "anchorY": 41
    },
    {
-    "file": "props/boulder4.png",
-    "w": 18,
-    "h": 27,
-    "anchorX": 9,
-    "anchorY": 23
-   },
-   {
-    "file": "props/boulder5.png",
-    "w": 19,
-    "h": 27,
-    "anchorX": 10,
-    "anchorY": 22
-   },
-   {
-    "file": "props/boulder6.png",
-    "w": 31,
-    "h": 27,
-    "anchorX": 16,
-    "anchorY": 23
+    "file": "props/crag5.png",
+    "w": 140,
+    "h": 48,
+    "anchorX": 70,
+    "anchorY": 48
    }
   ],
   "tuft": [
    {
     "file": "props/tuft1.png",
-    "w": 5,
-    "h": 6,
-    "anchorX": 3,
-    "anchorY": 6
+    "w": 61,
+    "h": 38,
+    "anchorX": 31,
+    "anchorY": 38
    },
    {
     "file": "props/tuft2.png",
-    "w": 9,
-    "h": 6,
-    "anchorX": 5,
-    "anchorY": 6
+    "w": 53,
+    "h": 38,
+    "anchorX": 27,
+    "anchorY": 38
    },
    {
     "file": "props/tuft3.png",
-    "w": 5,
-    "h": 7,
-    "anchorX": 3,
-    "anchorY": 7
-   },
-   {
-    "file": "props/tuft4.png",
-    "w": 8,
-    "h": 5,
-    "anchorX": 4,
-    "anchorY": 5
-   },
-   {
-    "file": "props/tuft5.png",
-    "w": 6,
-    "h": 10,
-    "anchorX": 3,
-    "anchorY": 10
-   },
-   {
-    "file": "props/tuft6.png",
-    "w": 5,
-    "h": 8,
-    "anchorX": 3,
-    "anchorY": 8
+    "w": 45,
+    "h": 34,
+    "anchorX": 23,
+    "anchorY": 34
    }
   ],
   "pebble": [
    {
     "file": "props/pebble1.png",
-    "w": 10,
-    "h": 9,
-    "anchorX": 5,
-    "anchorY": 9
+    "w": 35,
+    "h": 29,
+    "anchorX": 18,
+    "anchorY": 29
    },
    {
     "file": "props/pebble2.png",
-    "w": 9,
-    "h": 7,
-    "anchorX": 5,
-    "anchorY": 7
-   },
-   {
-    "file": "props/pebble3.png",
-    "w": 6,
-    "h": 5,
-    "anchorX": 3,
-    "anchorY": 5
-   },
-   {
-    "file": "props/pebble4.png",
-    "w": 4,
-    "h": 3,
-    "anchorX": 2,
-    "anchorY": 3
-   },
-   {
-    "file": "props/pebble5.png",
-    "w": 9,
-    "h": 8,
-    "anchorX": 5,
-    "anchorY": 8
-   },
-   {
-    "file": "props/pebble6.png",
-    "w": 11,
-    "h": 9,
-    "anchorX": 6,
-    "anchorY": 9
+    "w": 41,
+    "h": 29,
+    "anchorX": 21,
+    "anchorY": 29
    }
   ]
  },
@@ -2064,10 +2100,10 @@
    },
    "variants": {
     "golem": {
-     "frameW": 124,
-     "frameH": 90,
-     "anchorX": 45,
-     "anchorY": 90,
+     "frameW": 186,
+     "frameH": 135,
+     "anchorX": 68,
+     "anchorY": 135,
      "anims": {
       "idle": {
        "file": "units/golem/idle.png",
@@ -2084,10 +2120,10 @@
      }
     },
     "colossus": {
-     "frameW": 85,
-     "frameH": 62,
-     "anchorX": 42,
-     "anchorY": 62,
+     "frameW": 127,
+     "frameH": 93,
+     "anchorX": 63,
+     "anchorY": 93,
      "anims": {
       "idle": {
        "file": "units/colossus/idle.png",
@@ -2104,10 +2140,10 @@
      }
     },
     "swordsman": {
-     "frameW": 32,
-     "frameH": 32,
-     "anchorX": 16,
-     "anchorY": 28,
+     "frameW": 48,
+     "frameH": 48,
+     "anchorX": 24,
+     "anchorY": 42,
      "anims": {
       "idle": {
        "file": "units/human/swordsman/idle.png",
@@ -2124,10 +2160,10 @@
      }
     },
     "knight": {
-     "frameW": 64,
-     "frameH": 64,
-     "anchorX": 31,
-     "anchorY": 50,
+     "frameW": 96,
+     "frameH": 96,
+     "anchorX": 47,
+     "anchorY": 75,
      "anims": {
       "idle": {
        "file": "units/human/knight/idle.png",
@@ -2144,10 +2180,10 @@
      }
     },
     "catapult": {
-     "frameW": 32,
-     "frameH": 32,
-     "anchorX": 16,
-     "anchorY": 30,
+     "frameW": 48,
+     "frameH": 48,
+     "anchorX": 24,
+     "anchorY": 45,
      "anims": {
       "idle": {
        "file": "units/human/catapult/idle.png",
@@ -2180,10 +2216,10 @@
    },
    "variants": {
     "golem": {
-     "frameW": 124,
-     "frameH": 90,
-     "anchorX": 45,
-     "anchorY": 90,
+     "frameW": 186,
+     "frameH": 135,
+     "anchorX": 68,
+     "anchorY": 135,
      "anims": {
       "idle": {
        "file": "units/golem/idle.png",
@@ -2200,10 +2236,10 @@
      }
     },
     "colossus": {
-     "frameW": 85,
-     "frameH": 62,
-     "anchorX": 42,
-     "anchorY": 62,
+     "frameW": 127,
+     "frameH": 93,
+     "anchorX": 63,
+     "anchorY": 93,
      "anims": {
       "idle": {
        "file": "units/colossus/idle.png",
@@ -2220,10 +2256,10 @@
      }
     },
     "catapult": {
-     "frameW": 32,
-     "frameH": 32,
-     "anchorX": 16,
-     "anchorY": 30,
+     "frameW": 48,
+     "frameH": 48,
+     "anchorX": 24,
+     "anchorY": 45,
      "anims": {
       "idle": {
        "file": "units/elf/catapult/idle.png",
@@ -2240,10 +2276,10 @@
      }
     },
     "swordsman": {
-     "frameW": 32,
-     "frameH": 32,
-     "anchorX": 16,
-     "anchorY": 30,
+     "frameW": 48,
+     "frameH": 48,
+     "anchorX": 24,
+     "anchorY": 45,
      "anims": {
       "idle": {
        "file": "units/elf/swordsman/idle.png",
@@ -2260,10 +2296,10 @@
      }
     },
     "knight": {
-     "frameW": 64,
-     "frameH": 64,
-     "anchorX": 30,
-     "anchorY": 62,
+     "frameW": 96,
+     "frameH": 96,
+     "anchorX": 45,
+     "anchorY": 93,
      "anims": {
       "idle": {
        "file": "units/elf/knight/idle.png",
@@ -2296,10 +2332,10 @@
    },
    "variants": {
     "golem": {
-     "frameW": 124,
-     "frameH": 90,
-     "anchorX": 45,
-     "anchorY": 90,
+     "frameW": 186,
+     "frameH": 135,
+     "anchorX": 68,
+     "anchorY": 135,
      "anims": {
       "idle": {
        "file": "units/golem/idle.png",
@@ -2316,10 +2352,10 @@
      }
     },
     "colossus": {
-     "frameW": 85,
-     "frameH": 62,
-     "anchorX": 42,
-     "anchorY": 62,
+     "frameW": 127,
+     "frameH": 93,
+     "anchorX": 63,
+     "anchorY": 93,
      "anims": {
       "idle": {
        "file": "units/colossus/idle.png",
@@ -2336,10 +2372,10 @@
      }
     },
     "swordsman": {
-     "frameW": 32,
-     "frameH": 32,
-     "anchorX": 16,
-     "anchorY": 30,
+     "frameW": 48,
+     "frameH": 48,
+     "anchorX": 24,
+     "anchorY": 45,
      "anims": {
       "idle": {
        "file": "units/orc/swordsman/idle.png",
@@ -2356,10 +2392,10 @@
      }
     },
     "knight": {
-     "frameW": 64,
-     "frameH": 64,
-     "anchorX": 31,
-     "anchorY": 50,
+     "frameW": 96,
+     "frameH": 96,
+     "anchorX": 47,
+     "anchorY": 75,
      "anims": {
       "idle": {
        "file": "units/orc/knight/idle.png",
@@ -2376,10 +2412,10 @@
      }
     },
     "catapult": {
-     "frameW": 32,
-     "frameH": 32,
-     "anchorX": 16,
-     "anchorY": 30,
+     "frameW": 48,
+     "frameH": 48,
+     "anchorX": 24,
+     "anchorY": 45,
      "anims": {
       "idle": {
        "file": "units/orc/catapult/idle.png",
@@ -2412,10 +2448,10 @@
    },
    "variants": {
     "golem": {
-     "frameW": 124,
-     "frameH": 90,
-     "anchorX": 45,
-     "anchorY": 90,
+     "frameW": 186,
+     "frameH": 135,
+     "anchorX": 68,
+     "anchorY": 135,
      "anims": {
       "idle": {
        "file": "units/golem/idle.png",
@@ -2432,10 +2468,10 @@
      }
     },
     "colossus": {
-     "frameW": 85,
-     "frameH": 62,
-     "anchorX": 42,
-     "anchorY": 62,
+     "frameW": 127,
+     "frameH": 93,
+     "anchorX": 63,
+     "anchorY": 93,
      "anims": {
       "idle": {
        "file": "units/colossus/idle.png",
@@ -2452,10 +2488,10 @@
      }
     },
     "swordsman": {
-     "frameW": 32,
-     "frameH": 32,
-     "anchorX": 16,
-     "anchorY": 28,
+     "frameW": 48,
+     "frameH": 48,
+     "anchorX": 24,
+     "anchorY": 42,
      "anims": {
       "idle": {
        "file": "units/undead/swordsman/idle.png",
@@ -2472,10 +2508,10 @@
      }
     },
     "knight": {
-     "frameW": 64,
-     "frameH": 64,
-     "anchorX": 31,
-     "anchorY": 50,
+     "frameW": 96,
+     "frameH": 96,
+     "anchorX": 47,
+     "anchorY": 75,
      "anims": {
       "idle": {
        "file": "units/undead/knight/idle.png",
@@ -2492,10 +2528,10 @@
      }
     },
     "catapult": {
-     "frameW": 32,
-     "frameH": 32,
-     "anchorX": 16,
-     "anchorY": 30,
+     "frameW": 48,
+     "frameH": 48,
+     "anchorX": 24,
+     "anchorY": 45,
      "anims": {
       "idle": {
        "file": "units/undead/catapult/idle.png",
@@ -2528,10 +2564,10 @@
    },
    "variants": {
     "swordsman": {
-     "frameW": 32,
-     "frameH": 32,
-     "anchorX": 14,
-     "anchorY": 30,
+     "frameW": 48,
+     "frameH": 48,
+     "anchorX": 21,
+     "anchorY": 45,
      "anims": {
       "idle": {
        "file": "units/bandit/swordsman/idle.png",
@@ -2607,53 +2643,78 @@
  "ui": {
   "panel": {
    "file": "ui/panel.png",
-   "size": 96,
-   "slice": 16
+   "w": 120,
+   "h": 120,
+   "slice": 28
   },
-  "panelPressed": {
-   "file": "ui/panelPressed.png",
-   "size": 96,
-   "slice": 16
-  },
-  "button": {
-   "file": "ui/button.png",
-   "size": 96,
-   "slice": 16
-  },
-  "buttonPressed": {
-   "file": "ui/buttonPressed.png",
-   "size": 96,
-   "slice": 16
-  },
-  "card": {
-   "file": "ui/card.png",
-   "size": 96,
-   "slice": 16
+  "plate": {
+   "file": "ui/plate.png",
+   "w": 60,
+   "h": 60,
+   "slice": 14
   },
   "inset": {
    "file": "ui/inset.png",
-   "size": 96,
-   "slice": 16
+   "w": 120,
+   "h": 120,
+   "slice": 28
   },
-  "disabled": {
-   "file": "ui/disabled.png",
-   "size": 96,
-   "slice": 16
+  "card": {
+   "file": "ui/card.png",
+   "w": 192,
+   "h": 192,
+   "slice": 20
+  },
+  "ornate": {
+   "file": "ui/ornate.png",
+   "w": 96,
+   "h": 96,
+   "slice": 22
+  },
+  "header": {
+   "file": "ui/header.png",
+   "w": 128,
+   "h": 38,
+   "slice": [
+    8,
+    28
+   ]
+  },
+  "button": {
+   "file": "ui/button.png",
+   "w": 96,
+   "h": 45,
+   "slice": 12
+  },
+  "buttonPressed": {
+   "file": "ui/buttonPressed.png",
+   "w": 96,
+   "h": 45,
+   "slice": 12
   },
   "primary": {
    "file": "ui/primary.png",
-   "size": 96,
-   "slice": 16
+   "w": 96,
+   "h": 45,
+   "slice": 12
   },
   "primaryPressed": {
    "file": "ui/primaryPressed.png",
-   "size": 96,
-   "slice": 16
+   "w": 96,
+   "h": 45,
+   "slice": 12
   },
   "danger": {
    "file": "ui/danger.png",
-   "size": 96,
-   "slice": 16
+   "w": 96,
+   "h": 45,
+   "slice": 12
+  },
+  "disabled": {
+   "file": "ui/disabled.png",
+   "w": 96,
+   "h": 45,
+   "slice": 12
   },
   "keepbar": {
    "file": "ui/keepbar.png",

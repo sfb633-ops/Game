@@ -6,7 +6,7 @@ const {
   MAP, MAPS, DEFAULT_MAP, VISION, OUTPOST, RACES, RACE_ABILITIES, CASTLE, MAX_TEAMS,
   BUILDING_TYPES, UNIT_TYPES,
   AI_CAMP, SHRINE, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
-  TOWER_REDUCTION_CAP, TERRAIN_CLEAR_COST,
+  TERRAIN_CLEAR_COST,
   TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA,
 } = require('./config');
 
@@ -52,11 +52,16 @@ function finiteOr(v, fallback = null) {
 
 function tileKey(x, y) { return `${x},${y}`; }
 
+
 const TILE_LAND = 0;
 const TILE_MOUNTAIN = 1;
 const TILE_WATER = 2;
+// The paved floor of a compound's courtyard. Walkable and buildable exactly as
+// open ground is; it exists as its own tile so the client can draw cobbles and
+// keep the wild-flower dressing off them.
+const TILE_COBBLE = 3;
 // Neither mountains nor lakes can be built on, marched to, or garrisoned.
-const isPassable = (tile) => tile === TILE_LAND;
+const isPassable = (tile) => tile === TILE_LAND || tile === TILE_COBBLE;
 
 // One slot per unit type in the config, so adding a unit there is enough.
 function emptyUnits() {
@@ -245,15 +250,10 @@ function computeMods(player) {
   return mods;
 }
 
-// The least a laid-out map will put between two seats: enough that two opening
-// borders (radius CASTLE.buildRadius[0] each) cannot overlap, plus a little.
-// The floor a laid-out map may squeeze seats to. It used to be
-// buildRadius[0] * 2 + 8 = 22, which only promises that two *opening* borders
-// do not overlap — and a border does not stay at level 1. By level 2 it is 11
-// and two keeps 22 apart are touching; by level 3 it is 15 and they overlap by
-// eight tiles each. In a free-for-all on The Divide or Four Corners that meant
-// your nearest enemy was a third of the distance away that the same twelve
-// players get on The Wilds.
+// The floor a laid-out map may squeeze seats to. It used to be measured off a
+// border that grew with the keep's level, and was set from the level-1 figure —
+// so by level 3 two neighbours on The Divide overlapped by eight tiles each.
+// The compound does not grow, so this is simply two compounds and a gap.
 //
 // Level 2 is the honest floor: far enough that an empire can grow into its
 // second ring before it is sharing ground with a neighbour. It cannot be level
@@ -277,6 +277,98 @@ const SEAT_MARGIN_Y = 12;
 // bug report, cannot be replayed, and cannot be trusted to tell you whether a
 // balance change did anything. The counter belongs to the match — see
 // Match.nextArmyId — and ids only ever have to be unique inside one.
+
+// Take the scraps out of a field of mountains.
+//
+// Run twice, and the second time is the one that matters. growRanges lays clean
+// masses and sweeps them, but the spawn pass then punches a clear circle out of
+// whatever ground a seat lands on — and a circle taken out of the corner of a
+// range leaves the rest of that corner behind as a stray block, which no amount
+// of care during generation can prevent. Sweeping only at lay-down time left
+// one-tile mountains and seven-tile ribbons on finished maps.
+//
+// Three things come out. One-tile-wide columns first: a mountain a single tile
+// across has open ground on both flanks, so the terrain layer has to choose a
+// left end or a right end for a piece of cliff that is really both, and it
+// comes out as a sliver of masonry standing in a field. Run to a fixed point,
+// since taking a column off can leave its neighbour just as thin.
+//
+// Then masses that are too small, and masses that are too SHALLOW. Area alone
+// does not catch the second kind: a dozen tiles two rows deep is a length of
+// freestanding wall, because the terrain layer spends a mass's southern rows on
+// the cliff face and needs rows left over for a top. They are poor gameplay for
+// the same reason they look wrong — a two-tile rock is not an obstacle worth
+// routing round, only one worth catching a column on.
+// A mass needs enough rows for a face AND a top above it. At four it gets one
+// row of cliff and a two-row verge, which comes out as a flat shelf lying in
+// the grass — the thing that keeps getting circled. Six is the first depth that
+// reads as high ground rather than as a step.
+const MIN_MASS = 24, MIN_ROWS = 6;
+function sweepMountainScraps(isRock, clear, width, height, fill) {
+  // Round the outline before anything else.
+  //
+  // The artist's cliffs are ribbons that CURVE — look at his terraces at native
+  // scale and the edge is a contour line, never a staircase, and it tapers away
+  // at its ends rather than stopping on a square corner. Ours came off a
+  // majority-smoothed blob and kept every one-tile jog, and the terrain layer
+  // then had to draw a hard vertical cut at each of them. That is the sharp
+  // edge down the side of a plateau, and no amount of choosing better tiles
+  // fixes it: the SHAPE has the corner in it.
+  //
+  // Two rules, run to a fixed point. A rock tile with one orthogonal neighbour
+  // or none is a nub and goes; an open tile with three or more is a notch and
+  // fills. Between them they take the single-tile steps out of a boundary and
+  // leave the long curves, which is what a contour is.
+  if (fill) {
+    for (let pass = 0; pass < 6; pass++) {
+      const cut = [], add = [];
+      const n4 = (x, y) => (isRock(x - 1, y) ? 1 : 0) + (isRock(x + 1, y) ? 1 : 0) +
+                           (isRock(x, y - 1) ? 1 : 0) + (isRock(x, y + 1) ? 1 : 0);
+      for (let y = 1; y < height - 1; y++)
+        for (let x = 1; x < width - 1; x++) {
+          const n = n4(x, y);
+          if (isRock(x, y)) { if (n <= 1) cut.push([x, y]); }
+          else if (n >= 3) add.push([x, y]);
+        }
+      if (!cut.length && !add.length) break;
+      for (const [x, y] of cut) clear(x, y);
+      for (const [x, y] of add) fill(x, y);
+    }
+  }
+
+  for (let pass = 0; pass < 8; pass++) {
+    const thin = [];
+    for (let y = 0; y < height; y++)
+      for (let x = 0; x < width; x++) {
+        if (!isRock(x, y)) continue;
+        if (!(x > 0 && isRock(x - 1, y)) && !(x < width - 1 && isRock(x + 1, y))) thin.push([x, y]);
+      }
+    if (!thin.length) break;
+    for (const [x, y] of thin) clear(x, y);
+  }
+
+  const seen = [];
+  for (let y = 0; y < height; y++) seen.push(new Array(width).fill(0));
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    if (!isRock(x, y) || seen[y][x]) continue;
+    const mass = [], stack = [[x, y]];
+    seen[y][x] = 1;
+    while (stack.length) {
+      const [cx, cy] = stack.pop();
+      mass.push([cx, cy]);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+        if (!isRock(nx, ny) || seen[ny][nx]) continue;
+        seen[ny][nx] = 1; stack.push([nx, ny]);
+      }
+    }
+    let top = Infinity, bot = -Infinity;
+    for (const [, cy] of mass) { if (cy < top) top = cy; if (cy > bot) bot = cy; }
+    if (mass.length < MIN_MASS || bot - top + 1 < MIN_ROWS)
+      for (const [cx, cy] of mass) clear(cx, cy);
+  }
+}
 
 class Match {
   // `started` defaults to true because a Match is a running game — that is what
@@ -355,11 +447,21 @@ class Match {
     this.wallVersion = 0;
     // Scratch for findRoute, reused across calls with a stamp rather than
     // cleared. The pathfinder used to run only when a wall was in the way;
-    // now that water and rock also trigger it, allocating three arrays of
+    // now that water and rock also trigger it, allocating arrays of
     // width*height on every call is a cost worth not paying.
+    //
+    // `routeHeap` is the open set as a binary heap of tile indices, with
+    // `routeHeapPos` holding each tile's slot in it so a cheaper way to a tile
+    // already queued can sift it up in place. That is what keeps the heap to
+    // one entry a tile — the lazy alternative pushes a duplicate per
+    // improvement and would need eight times the room.
     this.routeFrom = new Int32Array(MAP.width * MAP.height);
     this.routeSeen = new Int32Array(MAP.width * MAP.height);
-    this.routeQueue = new Int32Array(MAP.width * MAP.height);
+    this.routeDone = new Int32Array(MAP.width * MAP.height);
+    this.routeG = new Float64Array(MAP.width * MAP.height);
+    this.routeF = new Float64Array(MAP.width * MAP.height);
+    this.routeHeap = new Int32Array(MAP.width * MAP.height);
+    this.routeHeapPos = new Int32Array(MAP.width * MAP.height);
     this.routeStamp = 0;
   }
 
@@ -376,51 +478,115 @@ class Match {
     this.events.push(e);
   }
 
-  // Grow a connected blob field: seed noise, then smooth it a few times so
-  // neighbours reinforce each other. Scattered single tiles are the thing to
-  // avoid — the client autotiles this, and one-tile features read as noise.
-  growField(fillChance, passes, keepNeighbours, growAt, eraseBelow) {
+  // Mountains, as rounded lobes rather than as smoothed noise.
+  //
+  // This used to be a cellular field: seed every tile at random, then smooth a
+  // few times so neighbours reinforce each other. It made ragged, scattered,
+  // one-and-two-tile scraps, and once the terrain layer started drawing
+  // mountains as plateaus — a surface with a ring of rock round it — that shape
+  // had nowhere to put a surface. A scrap three tiles across is all ring.
+  //
+  // Noise also could not be steered. The old threshold sat on a knife edge:
+  // fill 0.34 covered 0.8% of the map, 0.42 covered 8%, 0.52 covered 34%, and
+  // 0.18 covered nothing at all. Two of the six maps were getting essentially
+  // no mountains and nobody had noticed, because the number in the map
+  // definition looked reasonable.
+  //
+  // So masses are placed instead of grown. Each is a short chain of overlapping
+  // discs — a run of round lobes leaning into each other, which is what real
+  // plateaus look like from above — laid until the map has the coverage it
+  // asked for. Coverage is now a number that is set rather than discovered.
+  //
+  // The radii are the other half of it, and they are set by how the terrain
+  // layer draws a plateau rather than by taste. Stone goes on the three edges
+  // that face the viewer, roughly a tile deep, so a lobe of radius three is
+  // nothing but edge: it comes out as a little roofless rectangle, which is why
+  // small lobes read as ruins rather than as high ground.
+  //
+  // Too large fails the other way. At radius ten the masses merge into one field
+  // of high ground with the odd cliff stranded in the middle of it, and a
+  // plateau you cannot see the edges of is not a plateau. The reference sits
+  // between: formations four to eight tiles across, big enough to carry a few
+  // tiles of top, small enough that you are never far from an edge that tells
+  // you which level you are standing on.
+  growRanges(coverage, opts = {}) {
     const { width, height } = MAP;
-    let grid = [];
-    for (let y = 0; y < height; y++) {
-      const row = [];
-      for (let x = 0; x < width; x++) row.push(Math.random() < fillChance ? 1 : 0);
-      grid.push(row);
+    const minR = opts.minR || 5, maxR = opts.maxR || 8;
+    const grid = [];
+    for (let y = 0; y < height; y++) grid.push(new Array(width).fill(0));
+    if (coverage <= 0) return grid;
+
+    // The smoothing pass below rounds the joins and drops single-tile nubs,
+    // and costs about a twelfth of what was laid. Ask for that much extra so
+    // the coverage a map asks for is the coverage it gets.
+    const target = Math.round(coverage * width * height / 0.92);
+    const disc = (cx, cy, r) => {
+      let laid = 0;
+      for (let y = Math.max(0, cy - r); y <= Math.min(height - 1, cy + r); y++)
+        for (let x = Math.max(0, cx - r); x <= Math.min(width - 1, cx + r); x++) {
+          // Squashed, so a lobe is a ridge rather than a dome — but not flat.
+          //
+          // Depth is what costs legibility. Only the southern rows of a mass
+          // carry the drop, so a mass ten rows deep hides most of itself; the
+          // same area laid wide and shallow shows the same amount of cliff
+          // while never leaving you more than a row or two from an edge. It is
+          // also the shape real ranges have from above, and the shape the
+          // reference art uses — its formations are all wider than they are
+          // tall.
+          // 0.45 went too far the other way: at that flatness a mass is a long
+          // horizontal band two or three rows deep, which is the shape of a
+          // freestanding wall, and the map filled up with them. 0.6 keeps a
+          // mass wide enough that its edges are never far away and deep enough
+          // that it has a middle.
+          const dx = (x - cx) / r, dy = (y - cy) / (r * 0.6);
+          if (dx * dx + dy * dy > 1) continue;
+          if (!grid[y][x]) { grid[y][x] = 1; laid++; }
+        }
+      return laid;
+    };
+
+    let laid = 0, guard = 0;
+    while (laid < target && guard++ < 20000) {
+      let cx = 2 + Math.floor(Math.random() * (width - 4));
+      let cy = 2 + Math.floor(Math.random() * (height - 4));
+      const lobesHere = 1 + Math.floor(Math.random() * 2);
+      for (let k = 0; k < lobesHere && laid < target; k++) {
+        const r = Math.round(minR + Math.random() * (maxR - minR));
+        laid += disc(cx, cy, r);
+        // Step about a radius on, so the next lobe leans into this one.
+        const a = Math.random() * Math.PI * 2, step = r * (1 + Math.random() * 0.5);
+        cx = Math.max(2, Math.min(width - 3, Math.round(cx + Math.cos(a) * step)));
+        cy = Math.max(2, Math.min(height - 3, Math.round(cy + Math.sin(a) * step)));
+      }
     }
+
+    // One majority pass: rounds the notches where two lobes meet and takes off
+    // anything left standing on its own.
     const neighbours = (g, x, y) => {
       let n = 0;
       for (let dy = -1; dy <= 1; dy++)
         for (let dx = -1; dx <= 1; dx++) {
           if (!dx && !dy) continue;
           const nx = x + dx, ny = y + dy;
-          // Treat off-map as open so features don't hug the border.
           if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
           n += g[ny][nx];
         }
       return n;
     };
-    for (let pass = 0; pass < passes; pass++) {
-      const next = [];
-      for (let y = 0; y < height; y++) {
-        const row = [];
-        for (let x = 0; x < width; x++) {
-          const n = neighbours(grid, x, y);
-          // Grow where a tile is already well surrounded, erode elsewhere. The
-          // asymmetric thresholds keep total coverage down to a fraction of the
-          // starting noise, leaving open ground between features.
-          row.push(n > growAt ? 1 : n < eraseBelow ? 0 : grid[y][x]);
-        }
-        next.push(row);
-      }
-      grid = next;
-    }
-    // Drop anything that ended up as one or two tiles — that is the noise.
     const out = [];
     for (let y = 0; y < height; y++) {
       const row = [];
-      for (let x = 0; x < width; x++) row.push(grid[y][x] === 1 && neighbours(grid, x, y) >= keepNeighbours ? 1 : 0);
+      for (let x = 0; x < width; x++) {
+        const n = neighbours(grid, x, y);
+        row.push(n > 4 ? 1 : n < 4 ? 0 : grid[y][x]);
+      }
       out.push(row);
     }
+
+    // Scraps go here rather than at the end of generation only, because the
+    // shape wants to be clean before anything is measured off it.
+    sweepMountainScraps((x, y) => !!out[y][x], (x, y) => { out[y][x] = 0; }, width, height,
+      (x, y) => { out[y][x] = 1; });
     return out;
   }
 
@@ -476,7 +642,7 @@ class Match {
   generateTerrain() {
     const { width, height } = MAP;
     const def = this.map || MAPS[DEFAULT_MAP];
-    const mountains = this.growField(def.mountainFill, 5, 3, 5, 4);
+    const mountains = this.growRanges(def.mountainCover);
     const lakes = this.growLakes(def.lakeCount, def.lakeSize);
     const rows = [];
     for (let y = 0; y < height; y++) {
@@ -753,6 +919,16 @@ class Match {
         }
       }
     }
+    // Clearing a seat can bite a chunk out of a range and leave the rest of it
+    // standing as a stray block, so the scraps are swept again now that every
+    // hole has been punched. Doing it only at lay-down time left one-tile
+    // mountains and seven-tile ribbons on finished maps.
+    // No fill on this pass: a seat was cleared for a reason and filling notches
+    // back in could put rock inside somebody's opening circle.
+    sweepMountainScraps(
+      (x, y) => this.terrain[y][x] === TILE_MOUNTAIN,
+      (x, y) => { this.terrain[y][x] = TILE_LAND; },
+      MAP.width, MAP.height);
     // Seats are handed out in the order they sit in this list, so put the most
     // central first. A two-player game is then played in the middle of the map
     // rather than in whichever corner the shuffle happened to pick, and a full
@@ -1159,10 +1335,13 @@ class Match {
   // rather than wedged against somebody's border.
   fairestSpot(bases, camps, avoid) {
     let best = null;
-    // Every other tile is plenty: a shrine is one tile and the map is 240x160,
-    // and this runs once per shrine.
-    for (let y = 6; y < MAP.height - 6; y += 2) {
-      for (let x = 6; x < MAP.width - 6; x += 2) {
+    // Every tile, not every other one. This runs once per shrine on a 240x160
+    // map, so the whole scan is a few hundred thousand distance checks and costs
+    // nothing anybody can feel — and sampling coarsely was quietly costing a
+    // tile or two of fairness, which showed up as a six-empire spread landing
+    // just the wrong side of its allowance when the terrain moved under it.
+    for (let y = 6; y < MAP.height - 6; y++) {
+      for (let x = 6; x < MAP.width - 6; x++) {
         if (this.terrain[y][x] !== TILE_LAND) continue;
         let near = Infinity, far = 0;
         for (const b of bases) {
@@ -1260,6 +1439,8 @@ class Match {
     return player.buildings[tileKey(player.baseX, player.baseY)];
   }
 
+  // ---- Territory ----
+
   // How far this player's border reaches right now. Grows with the town
   // center's level, which is the whole point of upgrading it.
   buildRadius(player) {
@@ -1270,13 +1451,8 @@ class Match {
   }
 
   // Standing water inside your own border reads as a generation bug, so it is
-  // drained as the border reaches it. Doing this at map-build time instead —
-  // keeping every seat's *maximum* border clear — was measured at 80% of the
-  // map's water, because twelve radius-15 discs cover almost all of it. Doing
-  // it per player, as their border actually grows, costs one disc scan at the
-  // three moments the radius can change and leaves every lake nobody has
-  // reached alone.
-  //
+  // drained as the border reaches it: once per player at the three moments the
+  // radius can change, which leaves every lake nobody has reached alone.
   // Mountains are left standing: they are scenery you can build around, and
   // Reshape the Land exists for the ones you cannot.
   reclaimBorder(player) {
@@ -1293,14 +1469,27 @@ class Match {
     }
   }
 
-  // Territory is no longer one disc: the border around the town center, plus a
-  // smaller one around every camp this empire has razed.
+  // Territory is the border around the town center, plus a smaller disc round
+  // every camp this empire has razed.
   inTerritory(player, x, y) {
     if (Math.hypot(x - player.baseX, y - player.baseY) <= this.buildRadius(player)) return true;
     for (const o of player.outposts) {
       if (Math.hypot(x - o.x, y - o.y) <= OUTPOST.radius) return true;
     }
     return false;
+  }
+
+  // Where troops muster when deployed and march home to: the keep.
+  musterPoint(player) {
+    return { x: player.baseX, y: player.baseY };
+  }
+
+  // The ground the town center's sprite stands on. Bigger than the one tile it
+  // occupies, because the art is: see CASTLE.footprint.
+  inCastleFootprint(player, x, y) {
+    const f = CASTLE.footprint;
+    const dx = x - player.baseX, dy = y - player.baseY;
+    return dx >= -f.left && dx <= f.right && dy >= -f.up && dy <= f.down;
   }
 
   // Is (x,y) already taken by any building (any player) or a live AI camp?
@@ -1354,25 +1543,28 @@ class Match {
   // would have a segment on the far side of the empire soak a blow aimed at
   // the front door, and would charge the attacker for the same stonework
   // twice.
+  // Towers are deliberately not in here either, and that is the last piece of
+  // this rule falling into place. A tower used to add its `defensePower` to the
+  // garrison's punch and take a slice off every blow that landed, from wherever
+  // on the map it happened to stand — so a tower on the far side of the empire
+  // defended the front door, and three towers with no garrison at all beat
+  // twenty swordsmen. It was the one number left in the game that was pretending
+  // to be a place.
+  //
+  // A tower still shoots what comes within five tiles of it (stepTowers) and
+  // still hits back at whoever is knocking it down (hitBuilding). Both of those
+  // happen where the tower is. Neither of them reaches the town center.
+  //
+  // So this is the garrison, and only ever the garrison.
   homeDefense(player) {
     const race = player.mods;
-    let power = totalAttack(player.idleUnits, race);
-    // The garrison's own health, and nothing else's. A tower's hp used to be
-    // added in here, which is what made three of them a thousand-point buffer
-    // an attacker ground off before reaching a single defender.
-    const hp = standingHp(player, player.idleUnits, race);
-    const structures = [];
-    let reduction = 0;
-    for (const b of Object.values(player.buildings)) {
-      if (b.underConstruction) continue;
-      if (b.type === 'wall') continue;          // fought at the wall, not here
-      const def = BUILDING_TYPES[b.type];
-      if (!def || !def.defensePower) continue;   // towers
-      structures.push(b);
-      power += def.defensePower;
-      reduction += def.damageReduction || 0;
-    }
-    return { power, hp, structures, reduction: Math.min(TOWER_REDUCTION_CAP, reduction) };
+    return {
+      power: totalAttack(player.idleUnits, race),
+      // The garrison's own health, and nothing else's. A tower's hp used to be
+      // added in here, which is what made three of them a thousand-point buffer
+      // an attacker ground off before reaching a single defender.
+      hp: standingHp(player, player.idleUnits, race),
+    };
   }
 
   // Everything this empire owns, with how far each of them sees. One list, so
@@ -1604,12 +1796,22 @@ class Match {
     return damage;
   }
 
+  // A building stands on one tile, unless it says otherwise: the bastions and
+  // the gatehouse carry `tiles`, every one of which resolves to the same
+  // building object, so hitting any part of a bastion hits the bastion and
+  // felling it clears every tile it stood on at once.
   indexBuilding(owner, building) {
-    if (building) this.buildingIndex.set(tileKey(building.x, building.y), { building, owner });
+    if (!building) return;
+    for (const [x, y] of building.tiles || [[building.x, building.y]]) {
+      this.buildingIndex.set(tileKey(x, y), { building, owner });
+    }
   }
 
   unindexBuilding(building) {
-    if (building) this.buildingIndex.delete(tileKey(building.x, building.y));
+    if (!building) return;
+    for (const [x, y] of building.tiles || [[building.x, building.y]]) {
+      this.buildingIndex.delete(tileKey(x, y));
+    }
   }
 
   // Every building that appears or disappears goes through these two, so that
@@ -1634,7 +1836,11 @@ class Match {
     if (building.type !== 'castle') this.wallVersion++;
     // Rubble is what a fight leaves behind, whatever was standing there. Pull
     // it down yourself and the ground is clear.
-    if (!demolished) this.rubble.set(tileKey(building.x, building.y), RUBBLE_SEC);
+    if (!demolished) {
+      for (const [x, y] of building.tiles || [[building.x, building.y]]) {
+        this.rubble.set(tileKey(x, y), RUBBLE_SEC);
+      }
+    }
   }
 
   // Rubble clears on its own. One pass for the whole match rather than one per
@@ -1658,9 +1864,12 @@ class Match {
   // Only your own walls count. Otherwise an enemy could build alongside your
   // line to deny you your own ground.
   wouldThickenWall(player, x, y) {
+    // The compound's own walls are left out: the back wall is two tiles thick
+    // by design, and a run laid along the outside of it would otherwise be
+    // refused for closing squares the castle had already closed.
     const has = (tx, ty) => {
       const b = player.buildings[tileKey(tx, ty)];
-      return !!b && b.type === 'wall';
+      return !!b && b.type === 'wall' && !b.builtin;
     };
     // A wall may not complete a 2x2 block of walls — which is exactly what "one
     // tile thick" means on a grid. A parallel run laid alongside an existing one
@@ -1683,17 +1892,10 @@ class Match {
     return false;
   }
 
-  // The ground the town center's sprite stands on. Bigger than the one tile it
-  // occupies, because the art is: see CASTLE.footprint.
-  inCastleFootprint(player, x, y) {
-    const f = CASTLE.footprint;
-    const dx = x - player.baseX, dy = y - player.baseY;
-    return dx >= -f.left && dx <= f.right && dy >= -f.up && dy <= f.down;
-  }
-
   // Is (x,y) a legal tile for `player` to place a building on right now? The
   // client's isMyBuildable mirrors it for the hover highlight; this is the one
   // that decides.
+  //
   canBuildAt(player, x, y) {
     if (!Number.isInteger(x) || !Number.isInteger(y)) return false;
     if (x < 0 || y < 0 || x >= MAP.width || y >= MAP.height) return false;
@@ -1733,7 +1935,7 @@ class Match {
   buildingsUsed(player) {
     let used = 0;
     for (const b of Object.values(player.buildings)) {
-      if (b.type === 'castle' || b.type === 'wall') continue;
+      if (b.type === 'castle' || b.type === 'wall' || b.builtin) continue;
       used++;
     }
     return used;
@@ -1796,7 +1998,7 @@ class Match {
       if (seen.has(key)) continue;
       seen.add(key);
       if (player.gold < cost) break;            // out of gold -> stop
-      if (!this.canBuildAt(player, x, y)) continue;
+      if (!this.canBuildAt(player, x, y, 'wall')) continue;
       if (this.wouldThickenWall(player, x, y)) continue;   // no second layer
       player.gold -= cost;
       const buildTime = def.buildTimeSec * race.buildTimeMult;
@@ -1827,6 +2029,12 @@ class Match {
       this.emit(playerId, 'The town center cannot be pulled down.');
       return;
     }
+    // The compound is not for sale. Its walls cost nothing and a refund on them
+    // would be free gold; more to the point, they are the castle.
+    if (b.builtin) {
+      this.emit(playerId, 'The castle walls cannot be pulled down.');
+      return;
+    }
     const def = BUILDING_TYPES[b.type];
     const paid = def ? Math.round(def.cost * player.mods.costMult) : 0;
     const refund = Math.floor(paid * DEMOLISH_REFUND);
@@ -1845,7 +2053,7 @@ class Match {
     x = Math.round(x); y = Math.round(y);
     if (!Number.isInteger(x) || !Number.isInteger(y)) return;
     if (x < 0 || y < 0 || x >= MAP.width || y >= MAP.height) return;
-    if (this.terrain[y][x] === TILE_LAND) {
+    if (isPassable(this.terrain[y][x])) {
       this.emit(playerId, 'That ground is already clear.');
       return;
     }
@@ -2065,7 +2273,7 @@ class Match {
       for (let tx = Math.floor(x - spec.radius); tx <= Math.ceil(x + spec.radius); tx++) {
         if (tx < 0 || ty < 0 || tx >= MAP.width || ty >= MAP.height) continue;
         if (Math.hypot(tx - x, ty - y) > spec.radius) continue;
-        if (this.terrain[ty][tx] === TILE_LAND) continue;
+        if (isPassable(this.terrain[ty][tx])) continue;
         if (!this.inTerritory(player, tx, ty)) continue;
         this.terrain[ty][tx] = TILE_LAND;
         this.terrainEdits.push({ x: tx, y: ty, tile: TILE_LAND });
@@ -2139,7 +2347,7 @@ class Match {
       const damage = this.mitigate(other.id, spec.damage, player.race, true);
       let theirs = 0;
       for (const b of Object.values(other.buildings)) {
-        if (b.type !== 'wall' && b.type !== 'tower') continue;
+        if (b.type !== 'wall' && b.type !== 'tower' && !b.builtin) continue;
         if (Math.hypot(b.x - x, b.y - y) > spec.radius) continue;
         b.hp -= damage;
         theirs++;
@@ -2560,11 +2768,35 @@ class Match {
     this.holdPosition(army);
   }
 
-  // Breadth-first over the tile grid, four-connected — so a diagonal line of
-  // wall seals instead of leaving a corner to slip through. Returns the corners
-  // of the route, or null when there is no way round at all. That null is the
-  // case that matters: it is the moment an army stops going round a wall and
-  // starts going through it.
+  // A* over the tile grid, eight-connected, costing a diagonal at root two.
+  // Returns the corners of the route, or null when there is no way round at
+  // all. That null is the case that matters: it is the moment an army stops
+  // going round a wall and starts going through it.
+  //
+  // **Eight, not four, and this is the whole of why marching looked wrong.**
+  // A four-connected search cannot represent a diagonal at all, so every route
+  // it returns is made of right angles. `pullTaut` was added to straighten
+  // those out, and it does — but string-pulling can only ever *delete* a corner
+  // from the list it is handed, never move one. So when the direct line was
+  // blocked the corner it was forced to keep was whichever corner the search
+  // happened to produce, and a breadth-first search that expands east before
+  // south produces the extreme one: a group sent diagonally past a rock walked
+  // due east until the rock was behind it and then due south, forty tiles and
+  // forty tiles, instead of sliding past the corner. Measured on that exact
+  // shape: 80 tiles walked against a best of 66.5, and it read as the group
+  // ignoring its orders and then remembering them.
+  //
+  // Costing the diagonal properly is what fixes it, because now the L is 80 and
+  // the slide is 56.6 and the search prefers the slide on its own account. The
+  // pull then has a route worth pulling and the result is two clean legs.
+  //
+  // **A diagonal line of wall still seals.** That was the stated reason for
+  // four-connectedness and it is preserved explicitly instead: a diagonal step
+  // is only allowed when both of the tiles it squeezes between are walkable, so
+  // there is no slipping through the corner where two wall segments touch.
+  //
+  // Ties are broken towards the deeper node, which is exact — it changes which
+  // of several equally short routes comes back, not how long it is.
   findRoute(army, destX, destY, ignoreWalls = false) {
     const W = MAP.width, H = MAP.height;
     const sx = Math.round(army.x), sy = Math.round(army.y);
@@ -2574,28 +2806,92 @@ class Match {
     const start = sy * W + sx, goal = gy * W + gx;
     if (start === goal) return null;
 
-    if (this.routeStamp > 2e9) { this.routeSeen.fill(0); this.routeStamp = 0; }
+    if (this.routeStamp > 2e9) {
+      this.routeSeen.fill(0); this.routeDone.fill(0); this.routeStamp = 0;
+    }
     const stamp = ++this.routeStamp;
-    const from = this.routeFrom, seen = this.routeSeen, queue = this.routeQueue;
-    let tail = 0;
-    queue[tail++] = start;
+    const from = this.routeFrom, seen = this.routeSeen, done = this.routeDone;
+    const gScore = this.routeG, fScore = this.routeF;
+    const heap = this.routeHeap, pos = this.routeHeapPos;
+    let size = 0;
+
+    // f first, and on a tie the node that is further along, which settles the
+    // goal sooner without ever picking a longer route.
+    const before = (a, b) => fScore[a] < fScore[b] ||
+      (fScore[a] === fScore[b] && gScore[a] > gScore[b]);
+    const up = (i) => {
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if (!before(heap[i], heap[p])) break;
+        const t = heap[p]; heap[p] = heap[i]; heap[i] = t;
+        pos[heap[p]] = p; pos[heap[i]] = i;
+        i = p;
+      }
+    };
+    const down = (i) => {
+      for (;;) {
+        const l = i * 2 + 1, r = l + 1;
+        let s = i;
+        if (l < size && before(heap[l], heap[s])) s = l;
+        if (r < size && before(heap[r], heap[s])) s = r;
+        if (s === i) return;
+        const t = heap[s]; heap[s] = heap[i]; heap[i] = t;
+        pos[heap[s]] = s; pos[heap[i]] = i;
+        i = s;
+      }
+    };
+    // Octile: the diagonal part of the trip costs root two a tile and the rest
+    // costs one. Never an overestimate, which is what makes the first route to
+    // reach the goal the shortest one.
+    const heuristic = (x, y) => {
+      const dx = Math.abs(x - gx), dy = Math.abs(y - gy);
+      return (dx + dy) + (Math.SQRT2 - 2) * Math.min(dx, dy);
+    };
+
     seen[start] = stamp;
-    let head = 0, found = false;
-    while (head < tail && !found) {
-      const cur = queue[head++];
+    gScore[start] = 0;
+    fScore[start] = heuristic(sx, sy);
+    heap[size] = start; pos[start] = size++;
+
+    let found = false;
+    while (size > 0) {
+      const cur = heap[0];
+      if (cur === goal) { found = true; break; }
+      size--;
+      if (size > 0) { heap[0] = heap[size]; pos[heap[0]] = 0; down(0); }
+      done[cur] = stamp;
       const cx = cur % W, cy = (cur - cx) / W;
-      for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const nx = cx + ox, ny = cy + oy;
-        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
-        const n = ny * W + nx;
-        if (seen[n] === stamp) continue;
-        // The goal is always enterable. A keep with a wall across its doorway
-        // is still the thing the army was sent to.
-        if (n !== goal && this.routeBlocked(army, nx, ny, ignoreWalls)) continue;
-        seen[n] = stamp;
-        from[n] = cur;
-        queue[tail++] = n;
-        if (n === goal) { found = true; break; }
+      const cg = gScore[cur];
+      for (let oy = -1; oy <= 1; oy++) {
+        for (let ox = -1; ox <= 1; ox++) {
+          if (!ox && !oy) continue;
+          const nx = cx + ox, ny = cy + oy;
+          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          const n = ny * W + nx;
+          if (done[n] === stamp) continue;
+          // The goal is always enterable. A keep with a wall across its doorway
+          // is still the thing the army was sent to.
+          if (n !== goal && this.routeBlocked(army, nx, ny, ignoreWalls)) continue;
+          // No cutting the corner where two blocked tiles touch: that gap is
+          // not a gap, and it is the only thing four-connectedness was buying.
+          // The goal gets no exemption from this one — a tile you could only
+          // reach by squeezing between two rocks is a tile the walk would
+          // refuse anyway, and planning a route into it is how a group ends up
+          // shuffling against a cliff. A keep behind its own wall is still
+          // reachable, because the retry in planRoute makes stonework passable
+          // and the rule then has nothing to catch on.
+          if (ox && oy &&
+              (this.routeBlocked(army, cx + ox, cy, ignoreWalls) ||
+               this.routeBlocked(army, cx, cy + oy, ignoreWalls))) continue;
+          const step = ox && oy ? Math.SQRT2 : 1;
+          const ng = cg + step;
+          if (seen[n] === stamp && ng >= gScore[n] - 1e-9) continue;
+          from[n] = cur;
+          gScore[n] = ng;
+          fScore[n] = ng + heuristic(nx, ny);
+          if (seen[n] === stamp) up(pos[n]);
+          else { seen[n] = stamp; heap[size] = n; pos[n] = size++; up(size - 1); }
+        }
       }
     }
     if (!found) return null;
@@ -2830,6 +3126,7 @@ class Match {
     // toughen troops already in the field, and the health bar of an army that
     // has been out for ten minutes still means what it meant when it left.
     const unitMaxHp = UNIT_TYPES[type].hp * player.mods.hpMult;
+    const home = this.musterPoint(player);
     this.armies.set(id, {
       id, ownerId: player.id, race: player.race,
       type,
@@ -2839,7 +3136,7 @@ class Match {
       mustered: count,
       unitMaxHp,
       plunder: 0,          // gold this army's current assault has earned so far
-      x: player.baseX, y: player.baseY,
+      x: home.x, y: home.y,
       order,                                  // 'move' | 'attack' | 'return' | 'hold'
       // Set while the army is knocking down a wall segment that stood in its
       // way; null the rest of the time.
@@ -2849,7 +3146,7 @@ class Match {
       route: null, routeFor: null,
       destX: dest.x, destY: dest.y,
       targetType: targetType || null, targetId: targetId || null,
-      homeX: player.baseX, homeY: player.baseY,
+      homeX: home.x, homeY: home.y,
     });
     return id;
   }
@@ -2952,6 +3249,17 @@ class Match {
     const units = this.takeIdleUnits(player, requestedUnits);
     if (!units) return;
     this.spawnArmies(player, units, 'move', { x: Math.round(x), y: Math.round(y) });
+    // The keep opens its gate to let them out. It is sent as an effect rather
+    // than inferred on the client from a new group appearing, because troops
+    // muster anywhere inside your territory — the group may come into being
+    // half the map from the keep, and it is still the keep they came out of.
+    // buildings is an object keyed by "x,y", not a list, and the keep is the one
+    // at the seat. It can be gone — losing your keep does not stop you
+    // deploying — so this checks rather than assumes.
+    const keep = player.buildings[tileKey(player.baseX, player.baseY)];
+    if (keep && keep.type === 'castle') {
+      this.effects.push({ kind: 'gate', x: keep.x, y: keep.y });
+    }
   }
 
   // Every order below starts the same way: is this a group you own, and are you
@@ -3043,6 +3351,80 @@ class Match {
     const def = UNIT_TYPES[into.type];
     const name = !def ? into.type : (joined === 1 ? def.name : def.plural);
     this.emit(into.ownerId, `${joined} ${name} joined the group — ${armyCount(into)} strong.`);
+  }
+
+  // Peel `count` soldiers off a group into a new one standing where it stood.
+  // The inverse of mergeArmies, and the reason merging is no longer a one-way
+  // door: joining two groups to move them used to cost you the ability to ever
+  // send a scout again, with nothing on screen saying so.
+  //
+  // Splitting is deliberately NOT a way to shed a fight, a wound or a root:
+  //
+  //   - the detachment holds where it stands, so it is out of the parent's
+  //     fight, but it is standing in the same place and can be set upon there.
+  //     `holdPosition` is the same landing the recall path uses.
+  //   - roots come with it. A group frozen by Entangle could otherwise split
+  //     and walk away in the half that was not carrying the spell, which is
+  //     exactly the hole mergeArmies already guards on the way in.
+  //   - health is moved, never created. The detachment carries the soldiers
+  //     themselves, at whatever health they had.
+  //
+  // Refused while breaching: a group taking a wall apart has a `breach` that
+  // names one segment and a route planned to it, and there is no sensible
+  // answer to which half keeps it.
+  cmdSplitArmy(playerId, armyId, count) {
+    const army = this.ownArmy(playerId, armyId);
+    if (!army) return null;
+    const alive = armyCount(army);
+    const n = Math.floor(finiteOr(count, 0));
+    if (!(n >= 1) || n >= alive) return null;   // must leave somebody behind
+    if (army.breach) {
+      this.emit(playerId, 'A group breaking through a wall cannot be split.');
+      return null;
+    }
+
+    const id = `army-${this.nextArmyId++}`;
+    // Taken off the front, which is the end damage lands on (see damageArmy).
+    // That makes the detachment carry any wound the group was already nursing
+    // rather than leaving it behind, so splitting can never be used to sort the
+    // healthy into one group and the hurt into another.
+    const roster = army.roster.splice(0, n);
+
+    // `mustered` is the ceiling Reincarnation raises a group back to, so it is
+    // the fallen as well as the living and it has to be divided rather than
+    // copied — copying it would let a player split a group in two and raise
+    // back twice the dead. Shared out in proportion to the living, then floored
+    // at what each side actually has standing, and the parent takes the
+    // remainder so the two always add back up to what they were.
+    const share = Math.round(army.mustered * n / alive);
+    const mustered = Math.max(n, Math.min(share, army.mustered - (alive - n)));
+
+    this.armies.set(id, {
+      id, ownerId: army.ownerId, race: army.race,
+      type: army.type,
+      roster,
+      mustered,
+      unitMaxHp: army.unitMaxHp,
+      // Plunder stays with the parent rather than being divided. It belongs to
+      // the assault in progress and the detachment is walking out of it, and a
+      // group sitting on 'hold' has nowhere to bank it — bankPlunder only fires
+      // on a group that is fighting.
+      plunder: 0,
+      x: army.x, y: army.y,
+      order: 'hold',
+      breach: null,
+      route: null, routeFor: null,
+      destX: army.x, destY: army.y,
+      targetType: null, targetId: null,
+      homeX: army.homeX, homeY: army.homeY,
+      speedSpell: army.speedSpell ? { ...army.speedSpell } : null,
+    });
+    army.mustered -= mustered;
+
+    const def = UNIT_TYPES[army.type];
+    const name = !def ? army.type : (n === 1 ? def.name : def.plural);
+    this.emit(playerId, `${n} ${name} split off — ${armyCount(army)} left in the group.`);
+    return id;
   }
 
   cmdRecallArmy(playerId, armyId) {
@@ -3206,7 +3588,12 @@ class Match {
           this.holdPosition(army);        // nothing left to join
           continue;
         }
-        if (Math.hypot(into.x - army.x, into.y - army.y) <= COMBAT.engageRange) {
+        // With the same small slack the engagement table gives reach. Two
+        // groups raised on the same tile, one of which has taken one step,
+        // stand exactly engageRange apart, and in floating point that came out
+        // a hair over: the merge did not fire, the follower's destination was
+        // rounded onto its own tile, and the arrival code below parked it.
+        if (Math.hypot(into.x - army.x, into.y - army.y) <= COMBAT.engageRange + 0.05) {
           this.mergeArmies(army, into);
           continue;                        // this group no longer exists
         }
@@ -3253,6 +3640,10 @@ class Match {
           // Reincarnation.
           if (owner) owner.idleUnits[army.type] = (owner.idleUnits[army.type] || 0) + armyCount(army);
           this.armies.delete(army.id);
+        } else if (army.order === 'merge') {
+          // Standing on the rounded tile of a group that is still walking is
+          // not arriving. Only joining it ends a merge (above); until then the
+          // group keeps following.
         } else { // 'move' finished -> hold position
           army.x = army.destX; army.y = army.destY;
           army.order = 'hold';
@@ -3819,29 +4210,26 @@ class Match {
 
     const dealt = Math.min(camp.hp, outgoing);
     camp.hp -= dealt;
-    // A camp pays for every point of damage put into it. A shrine pays nothing
-    // — the prize is what walks out of it, and the block below says so in a
-    // comment while this line was quietly handing over four hundred gold a
-    // capture on the way past. A comment describing what the code does not do
-    // is worse than no comment, because it is the thing the next person checks
-    // instead of the code.
-    if (!camp.shrine) army.plunder += dealt * AI_CAMP.plunderPerDamage;
+    // Nothing is added to `plunder` here, and that is the whole of what a camp
+    // pays now: nothing. It used to pay per point of damage, plus loot, plus a
+    // bonus for razing it — roughly 550 gold a camp — which made a quiet corner
+    // of the map into a farm. What you get for taking one is where it stands.
+    // See AI_CAMP in config.js.
     if (camp.hp <= 0) {
       camp.defeated = true;
       if (camp.shrine) {
-        // No gold and no outpost: the prize is what walks out of it. And it is
-        // not claimed — it goes quiet and wakes up again, so the shrine stays a
-        // thing to fight over rather than a thing somebody owns.
+        // Not claimed either — it goes quiet and wakes up again, so the shrine
+        // stays a thing to fight over rather than a thing somebody owns. The
+        // prize is what walks out of it.
         camp.respawnRemaining = SHRINE.dormantSec;
         this.awakenGolems(army.ownerId, camp);
-        this.finishRaid(army, true);
+        this.finishRaid(army, true, true);
         return;
       }
       camp.capturedBy = army.ownerId;      // claimed, so it never comes back
       camp.respawnRemaining = 0;
       const owner = this.players.get(army.ownerId);
       if (owner) owner.outposts.push({ x: camp.x, y: camp.y });
-      army.plunder += AI_CAMP.lootGold + AI_CAMP.clearBonusGold;
       this.finishRaid(army, true);
     }
   }
@@ -3881,14 +4269,19 @@ class Match {
     this.emit(playerId, `The shrine answers — ${what} rise at your command.`);
   }
 
-  finishRaid(army, razed) {
-    const gold = Math.round(army.plunder);
-    const owner = this.players.get(army.ownerId);
-    if (owner) owner.gold += gold;
-    if (gold > 0 || razed) {
-      this.emit(army.ownerId, razed
-        ? `Camp taken — +${gold} gold, and a new outpost to build around.`
-        : `Raid broken off — +${gold} gold.`);
+  // `shrine` is passed because the two prizes are nothing alike and the message
+  // used to be written as though they were: a shrine went quiet, woke its
+  // golems, and then announced "Camp taken — +0 gold, and a new outpost to build
+  // around", which is wrong three times over. A shrine says its own piece in
+  // awakenGolems, so there is nothing left to add here.
+  //
+  // Camps no longer pay gold at all (see AI_CAMP), so there is no figure to
+  // report and a raid broken off half way has nothing to show for itself but
+  // the walk home. That is the intended shape: what a camp is worth is the
+  // ground, and you only get the ground by finishing the job.
+  finishRaid(army, razed, shrine = false) {
+    if (razed && !shrine) {
+      this.emit(army.ownerId, 'Camp taken — the ruins are yours to build on.');
     }
     army.plunder = 0;
     this.holdPosition(army);
@@ -3924,13 +4317,11 @@ class Match {
     // Mitigated once, at the top: what the defender soaks is the same number
     // whether it lands on their walls, their garrison or their town center.
     const pool = this.homeDefense(defender);
-    // Towers cut the blow down; they no longer stand in front of it.
-    let outgoing = this.mitigate(defender.id, this.outputAgainst(army, dt, 'p:' + defender.id), army.race, true)
-      * (1 - pool.reduction);
+    let outgoing = this.mitigate(defender.id, this.outputAgainst(army, dt, 'p:' + defender.id), army.race, true);
 
-    // The garrison, then the keep. Towers are not in this chain — see
-    // applyDefenderLosses for why — so a tower line no longer reads as a health
-    // bar the attacker has to chew through before reaching anybody.
+    // The garrison, then the keep, and nothing else in between. Towers are not
+    // in this chain at all any more — not as health, not as punch, and not as a
+    // slice off the top — see homeDefense.
     if (pool.hp > 0) {
       // One garrison, one swing, divided among everyone at the gate. It used
       // to meet each besieging group at full strength, so an attack pressed
@@ -4097,6 +4488,11 @@ class Match {
           underConstruction: b.underConstruction, remainingSec: Math.max(0, Math.ceil(b.remainingSec || 0)),
           upgrading: !!b.upgrading,
           trainQueueLen: b.trainQueue ? b.trainQueue.length : 0,
+          // The compound's pieces say which sprite they are and how many tiles
+          // they stand on; everything else is one tile and one sprite per type,
+          // and these fields are simply absent — the client reads their absence.
+          ...(b.piece ? { piece: b.piece, builtin: true } : {}),
+          ...(b.w ? { w: b.w, h: b.h } : {}),
         })),
         idleUnits: p.idleUnits,
       })),
