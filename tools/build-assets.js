@@ -28,6 +28,9 @@ const MINI = path.join(SRC, 'MiniWorldSprites');
 const UI = path.join(SRC, 'UI', '9-Slice');
 // The keep's health bar and the attack banner. One tilesheet, 12x11 tiles of 32.
 const DARKAGES = path.join(SRC, 'DarkAgesUi_v1.0', '32x32-Tilesheet.png');
+// The icon sheet. The interface pack has no icons in it at all — it is frames,
+// bars, rules and diamonds — so every icon in this game comes from here.
+const ICON_SHEET = path.join(SRC, 'newuiadds', 'ChatGPT Image Sep 1, 2026, 02_27_57 PM.png');
 // Purpose-drawn elves, replacing the recoloured MiniWorldSprites ones.
 const ELVES = path.join(SRC, 'Elves', 'elves.png');
 // What a spell looks like when it lands.
@@ -74,7 +77,7 @@ function write(img, ...parts) {
   return parts.join('/');
 }
 
-const manifest = { tileSize: TILE, terrain: {}, buildings: {}, props: {}, units: {}, fx: {}, ui: {}, cards: {} };
+const manifest = { tileSize: TILE, terrain: {}, buildings: {}, props: {}, units: {}, fx: {}, ui: {}, icons: {}, cards: {} };
 
 // ---------------------------------------------------------------------------
 // Terrain
@@ -1903,6 +1906,7 @@ function buildUi() {
     borders.push(`${name} ${slice[0] === slice[1] ? slice[0] : slice.join('/')}`);
   }
   buildGear();
+  buildIcons();
   buildKeepBar();
   buildBanner();
   // Printed because these are the numbers the stylesheet has to repeat, and
@@ -1930,6 +1934,47 @@ function buildGear() {
   const img = ops.scaleUp(ops.crop(sheet, GEAR.x, GEAR.y, GEAR.w, GEAR.h), GEAR.scale);
   manifest.ui.gear = { file: write(img, 'ui', 'gear.png'), w: img.width, h: img.height };
   console.log(`  gear: ${img.width}x${img.height}`);
+}
+
+// Icons
+// ---------------------------------------------------------------------------
+//
+// One icon per thing the player clicks, cut from the sheet above and squared
+// off. The boxes are literal pixel rectangles rather than a grid because the
+// sheet has no grid: a column scan across it finds exactly two empty runs, and
+// both of them are the outer margin. tools/slice-icons.js is what found these —
+// it cuts the whole sheet into numbered PNGs and a contact sheet, which is how
+// you pick a new one without guessing at coordinates.
+//
+// Every icon lands in the same square whatever shape it started, so a row of
+// them is a row rather than a skyline. Scaled to fit rather than filled, so
+// nothing is cropped and nothing is stretched.
+const ICON_PX = 64;
+
+const ICONS = {
+  // Buildings, in the order the build bar puts them.
+  barracks: { x: 17, y: 17, w: 120, h: 114 },     // crossed swords
+  stable:   { x: 299, y: 7, w: 101, h: 124 },     // a plumed helm; the sheet has no horse
+  siege:    { x: 640, y: 599, w: 93, h: 86 },     // hammer and wrench, for a workshop
+  bank:     { x: 864, y: 165, w: 111, h: 83 },    // a stack of coins
+  tower:    { x: 525, y: 703, w: 88, h: 106 },    // a stone tower
+  wall:     { x: 1185, y: 697, w: 91, h: 113 },   // an arched gate
+  castle:   { x: 272, y: 682, w: 120, h: 129 },   // the keep
+};
+
+function buildIcons() {
+  const sheet = decodePNG(need(ICON_SHEET));
+  for (const [name, box] of Object.entries(ICONS)) {
+    const cut = ops.crop(sheet, box.x, box.y, box.w, box.h);
+    // Fit inside the square, keeping the aspect, then centre it.
+    const scale = Math.min(ICON_PX / box.w, ICON_PX / box.h);
+    const dw = Math.max(1, Math.round(box.w * scale));
+    const dh = Math.max(1, Math.round(box.h * scale));
+    const square = ops.blank(ICON_PX, ICON_PX);
+    ops.blit(square, ops.resize(cut, dw, dh), (ICON_PX - dw) >> 1, (ICON_PX - dh) >> 1);
+    manifest.icons[name] = { file: write(square, 'icons', name + '.png'), w: ICON_PX, h: ICON_PX };
+  }
+  console.log(`  icons: ${Object.keys(ICONS).length} at ${ICON_PX}px`);
 }
 
 // The town center's health bar, from the Dark Ages UI sheet.

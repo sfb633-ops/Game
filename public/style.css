@@ -54,7 +54,9 @@ canvas { image-rendering: pixelated; }
 .frame { image-rendering: pixelated; }
 /* Each one reserves its own corner, because each one's corner is its own size.
    inset shares the panel's box art cut deeper, so it shares its border too. */
-.frame-panel  { border: var(--frame-panel) solid transparent;  border-image: url("assets/ui/panel.png")  28 fill repeat; }
+/* .frame-panel went with #panel. The heavier of the two weights of the same
+   box art; .frame-inset still uses its border width, and the map overlays all
+   use .frame-plate, which is the same box at 1:1. */
 .frame-inset  { border: var(--frame-panel) solid transparent;  border-image: url("assets/ui/inset.png")  28 fill repeat; }
 .frame-card   { border: var(--frame-card) solid transparent;   border-image: url("assets/ui/card.png")   20 fill repeat; }
 /* The same box as the panel at half the weight, for everything that floats on
@@ -225,12 +227,34 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 
 /* ---- Main game layout ---- */
 
+/* The map is the interface. There is no second column any more: everything
+   that used to live in a 336px bar down the right now sits on the map's own
+   edges, where it is either something you act on (the bottom stack) or a
+   figure you glance at (the top row). */
 #game-ui { display: flex; height: 100vh; }
 #game-ui.hidden { display: none; }
 #map-wrap { flex: 1; overflow: hidden; background: #0e0b08; position: relative; }
 #map { cursor: crosshair; display: block; }
 
-/* Treasury sits on the map instead of eating panel height. */
+/* Every figure worth glancing at, in one row along the top. Gold, income and
+   troops were always here; works and border came off the Town Center card when
+   the panel went. */
+.hud-dim { color: var(--ink); }
+/* The right half of the top row: what your empire can hold, as against what
+   it has. Sits left of the gear, mirroring the treasury on the far side. */
+#hud-right {
+  /* Clear of the gear: it is 56 wide at right:12, so it finishes 68 from the
+     edge and this starts a gap after that. Measured, not guessed — at 60 the
+     two overlapped by eight pixels. */
+  position: absolute; top: 10px; right: 80px;
+  display: flex; gap: 1.1rem;
+  font-size: 0.85rem;
+  padding: 0;
+  z-index: 6;
+}
+#hud-right.hidden { display: none; }
+#works-stat, #border-stat { cursor: help; pointer-events: auto; }
+
 #hud {
   position: absolute; top: 10px; left: 10px;
   display: flex; gap: 1.1rem;
@@ -313,15 +337,20 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 
      The width is the interesting number. It no longer dodges the stat row by
      sitting BELOW it, which is what kept the bar pinned unhappily far down the
-     screen; it dodges it sideways instead. The stat row runs to about 325px on
-     the left and the Music/Exit row takes about 250 on the right, so 700 is the
-     pair of gutters the bar has to keep out of, and what is left in the middle
-     is what it may have — up to 760, which is where it stops growing on a wide
+     screen; it dodges it sideways instead.
+
+     The gutters were re-measured when the side panel went. 100% used to be the
+     window minus a 336px panel; it is now the whole window, so the old figure
+     silently handed the bar an extra 336 and it grew from 228 to 564 and put
+     itself under the stat row. What it has to clear today is the treasury on
+     the left, which finishes at 325, and the works/border pair on the right,
+     which starts at about 1025 of 1264 — so 335 either side of centre, and 670
+     is the pair of them. Up to 760, which is where it stops growing on a wide
      screen. On a narrow one it gives up length rather than moving down, which
      is the trade that keeps it at the top where it belongs. */
   position: absolute; top: 22px; left: 50%;
   transform: translateX(-50%);
-  width: min(760px, calc(100% - 700px));
+  width: min(760px, calc(100% - 680px));
   z-index: 4;             /* under #conn-notice, which owns the top edge */
   pointer-events: none;
 }
@@ -341,7 +370,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
    as two separate labels that happened to share a row and the whole assembly
    looked uncentred — the crest was over the middle and the writing was not. */
 #keep-cap {
-  display: flex; justify-content: center; gap: 0.9rem; align-items: baseline;
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 0.9rem; align-items: baseline;
   font-size: 0.78rem; letter-spacing: 0.06em;
   padding: 5px 0 0;
   text-shadow:
@@ -349,6 +378,22 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
     0 0 7px #000d;
 }
 #keep-name { color: #d8c8ac; }
+/* Under the caption, not in it. #keep-cap is a centred flex row, so a button
+   inside it widens the whole bar — which is how the keep bar grew from 228
+   to 564 wide and collided with the stat row. */
+/* Centred under the bar and sized to its own label. It was a flex item in
+   #keep-cap, where `flex: 0 0 100%` did exactly what it says and stretched a
+   26px button across the full 584px of the keep bar. */
+#upgrade-btn {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  top: 100%; margin-top: 4px;
+  min-height: 26px; padding: 0 0.7rem; font-size: 0.66rem;
+  white-space: nowrap;
+  /* #keep-bar takes no pointer events so it never eats a click meant for the
+     map underneath it. This is the one thing on it you click. */
+  pointer-events: auto;
+}
+#upgrade-btn.hidden { display: none; }
 #keep-hp { color: var(--gold); font-weight: bold; }
 
 #keep-trough {
@@ -489,35 +534,15 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 .hud-label { color: var(--ink); margin-right: 0.35rem; }
 .gold { color: var(--gold); font-weight: bold; }
 
-#panel {
-  width: 336px;
-  flex: none;
-  overflow-y: auto;
-  font-size: 0.85rem;
-  border-left-width: 20px;
-}
+/* #panel is gone. It was 336px of screen holding four sections: two of them
+   were figures that are now in the HUD, one was the build palette which is now
+   a bar under the troop roster, and one was a list of your buildings which is
+   now the count on each palette icon. Nothing moved into a submenu. */
 /* The sheet has a scroll-capped plaque and this is what it is for. A heading
    used to be gold text floating on the panel, which read as a label for the
    card under it rather than as a division of the panel; on a plaque it reads as
    a division. The caps are 28px of art either side, so short words need the
    min-height to keep the plaque from collapsing around them. */
-#panel h2 {
-  color: var(--gold);
-  font-size: 0.78rem;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  margin: 0.8rem 0 0.4rem;
-  text-shadow: 0 1px 0 #0009;
-  border: 8px solid transparent;
-  border-left-width: var(--frame-head);
-  border-right-width: var(--frame-head);
-  border-image: url("assets/ui/header.png") 8 28 fill repeat;
-  image-rendering: pixelated;
-  min-height: 38px;
-  display: flex; align-items: center;
-}
-#panel h2:first-child { margin-top: 0; }
-#panel > .btn { width: 100%; margin-bottom: 0.4rem; }
 
 /* ---- Cards: tan parchment notes pinned to the wood ---- */
 
@@ -544,8 +569,34 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 /* Sits directly above the troop bar and is centred on the same line, so the
    two read as one stack rather than two floating boxes. Only up while a group
    is selected, which is the only time it means anything. */
+/* The bottom stack, read upward: what you build, what you train, what you have
+   selected. Each bar is centred on the same line so they read as one column of
+   controls rather than three floating boxes, and each one is only up when it
+   has something to say. */
+#build-bar {
+  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  max-width: calc(100% - 24px);
+}
+#build-bar.hidden { display: none; }
+/* Inside the bar, the way #deploy-hint lives inside the troop bar. It was a
+   floating line positioned above the bar, which is a line that lands on the
+   bar the moment the bar is a pixel taller than the guess. */
+#build-bar { flex-direction: column; align-items: stretch; gap: 0.35rem; }
+.build-row { display: flex; align-items: flex-end; gap: 0.7rem; }
+#build-hint {
+  text-align: center; font-size: 0.68rem; color: var(--ink);
+  max-width: 620px; min-height: 1em;
+}
+#build-hint .sub { display: block; color: var(--gold); }
+#build-hint .hidden { display: none; }
+.bar-sep { width: 1px; align-self: stretch; background: #ffffff18; margin: 2px 0; }
+.build-tools { display: flex; flex-direction: column; gap: 4px; }
+.build-tools .btn { min-height: 28px; padding: 0 0.6rem; }
+
 #group-bar {
-  position: absolute; left: 50%; bottom: 128px; transform: translateX(-50%);
+  position: absolute; left: 50%; bottom: 236px; transform: translateX(-50%);
   z-index: 6;
   display: flex; align-items: center; gap: 0.9rem;
   max-width: calc(100% - 24px);
@@ -562,11 +613,12 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 #group-bar output { flex: 0 0 2.2rem; text-align: right; }
 
 @media (max-height: 780px) {
-  #group-bar { bottom: 118px; }
+  #group-bar { bottom: 214px; }
+  #build-hint { bottom: 96px; }
 }
 
 #troop-bar {
-  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+  position: absolute; left: 50%; bottom: 124px; transform: translateX(-50%);
   z-index: 6;
   display: flex; align-items: center; gap: 0.9rem;
   max-width: calc(100% - 24px);
@@ -625,7 +677,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 #deploy-btn.armed { background: #ffd76a2e; border-color: var(--gold); }
 
 @media (max-height: 620px) {
-  #troop-bar { bottom: 6px; }
+  #troop-bar { bottom: 112px; }
   .troop-slot { width: 46px; }
 }
 
@@ -656,10 +708,10 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 
 /* ---- Scrollbars ---- */
 
-#panel, #log { scrollbar-width: thin; scrollbar-color: #6b563a #1a140e; }
-#panel::-webkit-scrollbar, #log::-webkit-scrollbar { width: 10px; }
-#panel::-webkit-scrollbar-track, #log::-webkit-scrollbar-track { background: #1a140e; }
-#panel::-webkit-scrollbar-thumb, #log::-webkit-scrollbar-thumb { background: #6b563a; border: 2px solid #1a140e; }
+#log { scrollbar-width: thin; scrollbar-color: #6b563a #1a140e; }
+#log::-webkit-scrollbar { width: 10px; }
+#log::-webkit-scrollbar-track { background: #1a140e; }
+#log::-webkit-scrollbar-thumb { background: #6b563a; border: 2px solid #1a140e; }
 
 .btn-note { color: var(--ink); font-size: 0.7rem; margin-left: 0.5rem; }
 
@@ -768,10 +820,23 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
    writes them (51x79). Fixed, never scaled — see .card-face. Names and rules
    live in the tooltip; spelling them out here cost more panel height than the
    rest of the section put together. */
-.card-hand { display: flex; flex-wrap: wrap; gap: 6px; }
+/* A draft keeps three, so the hand never grows and needs no room to. It sits
+   under the ability because both are things you spend. */
+#card-list {
+  position: absolute; right: 292px; bottom: 96px; z-index: 6;
+  opacity: 0.92; transition: opacity 120ms;
+}
+#card-list:hover { opacity: 1; }
+@media (max-width: 1440px) {
+  #card-list { right: 12px; bottom: 292px; }
+}
+.card-hand { display: flex; gap: 5px; }
+/* Two thirds of what it was. On a panel a card could afford to be a card; on
+   the map it is a button with a picture on it, and the picture only has to be
+   recognisable. */
 .owned-card {
   position: relative; flex: none;
-  width: 51px; height: 79px;
+  width: 38px; height: 59px;
   display: flex; align-items: center; justify-content: center;
   background: linear-gradient(180deg, #2b1f14, #17110b);
   border: 1px solid #00000066;
@@ -910,28 +975,59 @@ input[type="range"]:disabled { cursor: not-allowed; filter: grayscale(1) brightn
    Buildings are picked up here and dropped on the map, so the icons are the
    real sprites rather than labels: what you drag is what you get. */
 
-#build-palette {
-  display: flex; flex-wrap: wrap; gap: 4px;
-  align-items: flex-end;
-  margin-bottom: 0.45rem;
-}
+/* A row, not a wrapping grid: it is a bar along the bottom of the map now, and
+   six things fit on one line at any width worth playing at. */
+#build-palette { display: flex; gap: 5px; align-items: flex-end; }
 .build-item {
-  width: 54px;
+  width: 52px;
   text-align: center;
   cursor: grab;
-  padding-bottom: 2px;
-  border: 2px solid transparent;
-  border-radius: 2px;
   touch-action: none;
-  transition: background .1s, border-color .1s;
 }
+/* The icon sits in a sunk well so a row of them reads as a row of slots rather
+   than as pictures floating on the map. The well is a fixed square whatever the
+   icon inside it started as — see ICON_PX in tools/build-assets.js. */
+.build-well {
+  position: relative;
+  width: 48px; height: 48px; margin: 0 auto;
+  display: grid; place-items: center;
+  background: #131a26;
+  border: 1px solid #000;
+  box-shadow: inset 0 0 0 1px #ffffff10;
+  transition: background .1s, box-shadow .1s;
+}
+.build-item:hover .build-well { background: #1b2534; box-shadow: inset 0 0 0 1px #ffffff2e; }
+.build-item.armed .build-well { background: #3a2f14; box-shadow: inset 0 0 0 1px var(--gold); cursor: grabbing; }
+.build-item.unaffordable { opacity: 0.42; }
+/* No room left under the town center's building limit. Same dimming as being
+   unable to afford it — it is the same answer: not this one, not yet. */
+.build-item.at-limit { opacity: 0.42; cursor: not-allowed; }
+
+/* How many of this kind you run. This is the whole of what the old Buildings
+   section did, and it does it on the thing you already look at to build one. */
+.build-item .count {
+  position: absolute; right: -4px; top: -4px;
+  min-width: 16px; height: 16px; padding: 0 3px;
+  font-size: 0.6rem; line-height: 16px;
+  color: #33240a; background: var(--gold);
+  border: 1px solid #2a2116;
+}
+/* Anything mid-build or hurt, which a plain total would hide. */
+.build-item .note {
+  position: absolute; left: -4px; top: -4px;
+  min-width: 16px; height: 16px; padding: 0 3px;
+  font-size: 0.6rem; line-height: 16px;
+  color: var(--parchment); background: #2f4a6b;
+  border: 1px solid #101a26;
+}
+.build-item .note.hurt { background: #6b2f2f; border-color: #260f0f; }
 .build-item:hover { background: #ffffff14; border-color: #ffffff2e; }
 .build-item.armed { background: #ffd76a2e; border-color: var(--gold); cursor: grabbing; }
 .build-item.unaffordable { opacity: 0.42; }
 /* No room left under the town center's building limit. Same dimming as being
    unable to afford it — it is the same answer: not this one, not yet. */
 .build-item.at-limit { opacity: 0.42; cursor: not-allowed; }
-.build-icon { display: block; margin: 0 auto; image-rendering: pixelated; }
+.build-icon { display: block; width: 40px; height: 40px; image-rendering: pixelated; }
 .build-name {
   display: block; font-size: 0.58rem; color: var(--ink);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -969,7 +1065,7 @@ input[type="range"]:disabled { cursor: not-allowed; filter: grayscale(1) brightn
 /* Taller than it was: the list is one row per kind of building now rather than
    one per building, so the whole of an empire's works fits without scrolling
    where it used to run off the bottom after four banks. */
-#plots-list { max-height: 260px; overflow-y: auto; }
+/* The buildings list is the build bar now — see .build-item .count. */
 
 /* ---- The race ability ----------------------------------------------------
    Deliberately not styled as a card. A card is something you drew and might
@@ -1147,14 +1243,9 @@ input[type="range"]:disabled { cursor: not-allowed; filter: grayscale(1) brightn
 #ability-dock .ability-timer { font-size: 0.66rem; color: #8fd08f; }
 
 /* ---- The garrison, inside the Town Center card ---------------------------- */
-.garrison-head {
-  cursor: pointer;
-  border-top: 1px solid #00000022;
-  margin-top: 0.35rem; padding-top: 0.3rem;
-}
-.garrison-head:hover .label { color: #000; }
-.garrison-row { display: flex; justify-content: space-between; gap: 0.5rem; }
-.garrison-none { margin-top: 0.35rem; }
+/* The garrison had a fold-out inside the Town Center card, with a clickable
+   head and a row per kind. There is no card to fold out of; clicking your own
+   keep says it in the log instead — see logGarrison. */
 
 #minimap-wrap {
   position: absolute; right: 12px; bottom: 12px; z-index: 6;
@@ -1190,7 +1281,7 @@ input[type="range"]:disabled { cursor: not-allowed; filter: grayscale(1) brightn
    number is highlighted, right-clicking it opens the browser menu for the
    selection instead of issuing an order. None of this text is meant to be
    copied; the room code on the menu screen is, and is left alone. */
-#game-ui, #map-wrap, #hud, #log, #troop-bar, #minimap-wrap, #exit-wrap, #panel {
+#game-ui, #map-wrap, #hud, #hud-right, #log, #troop-bar, #build-bar, #minimap-wrap, #exit-wrap {
   -webkit-user-select: none;
   user-select: none;
 }

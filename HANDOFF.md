@@ -3965,6 +3965,84 @@ custom properties reach into the pseudo-element, which is the only reason it
 works.
 
 
+### The interface came off the side of the screen (1 Sep 2026)
+
+A 336px bar down the right held four sections. It is gone, and everything it
+held is on the map's own edges. The rule the layout follows now: along the top
+are figures you glance at, along the bottom are things you act on, and the
+middle is the game.
+
+**Where the four sections went.**
+
+| was | is |
+|---|---|
+| Town Center — level, border, limit, outposts, garrison, Upgrade | the stat row, split either side of the keep bar; the button under the bar; the garrison on the Works tooltip |
+| Build — palette, Wall, Clear, hints | a bar under the troop roster, hint inside it |
+| Cards | three small faces beside the ability, bottom right |
+| Buildings — a row per kind | the count on each palette icon |
+
+The last of those is the one worth arguing about, and the argument is that a
+list of your works and a row of things to build from were always the same six
+kinds in the same order, printed twice. The gold corner is how many you run;
+the other corner is how many are still going up, or how many are damaged, in
+red — the two facts a plain total hides. Everything the list said in prose is
+the tooltip.
+
+**Icons, and where they had to come from.** The interface pack has no icons in
+it at all. It is frames, bars, rules, diamonds, an X and a warning — that is the
+whole sheet, and it is worth knowing before somebody spends an afternoon hunting
+for a gear in it. So the icons come off a separate sheet, which is now the one
+exception to "the interface is one pack" and is confined to icons: every frame,
+button, slider and bar is still Dark Ages.
+
+`tools/slice-icons.js` is how that sheet becomes assets. It is not a grid — a
+column scan across it finds exactly two empty runs and both are the outer margin
+— so icons are found as regions of opaque pixels and pieces that OVERLAP are
+merged back together (the bar and the dot of an exclamation mark, the two halves
+of a pair of crossed flags). The first pass merged on a plain horizontal gap
+instead, and swallowed the entire buildings row into one strip: 63 icons instead
+of 100, with the castle, the cottage and the tower all inside a single blob.
+Overlap is the test; a bare gap has to be almost nothing.
+
+It writes numbered PNGs and a contact sheet, and the contact sheet is the point
+— the boxes in `build-assets.js` were chosen by looking at it, not by counting
+pixels. Two of the seven are compromises worth recording: the sheet has no horse
+and no catapult, so the Stable is a plumed helm and the Siege Factory is a
+hammer and wrench. Every icon is squared off to the same 64px whatever shape it
+started, because a row of buildings at their own proportions is a skyline rather
+than a row.
+
+**The palette stopped drawing live sprites.** It used to run the real draw call
+into a canvas per cell, every frame, so that what you dragged was literally what
+you got. That was right while the palette was a wide column in a panel — cells
+could afford to be 34x68 and the sprites read at that size. In a bar along the
+bottom they cannot, and the archer tower alone is three tiles tall. One square
+icon each; the map is where you look at buildings.
+
+**Two things the browser had to tell us.**
+
+The keep bar's width is `min(760px, calc(100% - 680px))`, and that 680 is a
+measurement, not a preference. It used to be 700, where `100%` meant the window
+minus a 336px panel. Removing the panel silently handed the bar an extra 336
+pixels: it grew from 228 wide to 564 and put itself underneath the stat row,
+which `browser.test.js` caught and no static check could have. The figure is
+re-derived in a comment against what actually sits either side of it now.
+
+And `flex: 0 0 100%` does exactly what it says. The Upgrade button was a flex
+item inside `#keep-cap`, which is a centred row, so giving it a full-width basis
+to force it onto its own line stretched a 26px button across the whole 584px of
+the keep bar. It is positioned under the bar now rather than living in the
+caption at all — with `pointer-events: auto`, because `#keep-bar` takes none so
+it never eats a click meant for the map, and this is the one thing on it you
+click.
+
+**What is pinned.** `client.test.js` checks that each of the four sections
+landed somewhere — the failure mode of a change like this is not a crash, it is
+a figure that quietly stops being displayed anywhere — and that every buildable
+type has an icon file that exists and is square. `browser.test.js` covers the
+overlaps, because the cascade is still not a thing you can grep.
+
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

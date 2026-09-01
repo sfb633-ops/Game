@@ -63,6 +63,9 @@
       <div class="hud-stat"><span class="hud-label">Gold</span><span class="gold" id="gold-val">0</span></div>
       <div class="hud-stat"><span class="hud-label">Income</span><span id="income-val">0</span>/s</div>
       <div class="hud-stat"><span class="hud-label">Troops</span><span id="troops-val">0</span></div>
+      <!-- The Town Center card's two numbers. They were a paragraph in a panel
+           and they are two figures you glance at, so they belong up here with
+           the rest of the figures you glance at. -->
       <div class="hud-stat"><span class="hud-label">Code</span><span class="gold" id="room-code">—</span></div>
     </div>
 
@@ -80,6 +83,9 @@
         <span id="keep-name">Town Center</span>
         <span id="keep-hp">—</span>
       </div>
+      <!-- Under the caption rather than in it: #keep-cap is a centred flex
+           row, so anything added to it widens the whole bar. -->
+      <button class="btn btn-sm hidden" id="upgrade-btn"></button>
     </div>
 
     <!-- Somebody is storming your empire. Loud on purpose and gone on its own:
@@ -97,6 +103,14 @@
          existed, so the only way to learn that X splits a group was to already
          know. Leaving is still destructive, so it still asks first and still
          says what it will do. -->
+    <!-- The other half of the stat row. These two came off the Town Center
+         card; putting them on the left with the rest made a 484px run of
+         figures that reached the keep bar in the middle of the screen, so
+         the row is balanced around it instead. -->
+    <div id="hud-right" class="frame frame-plate">
+      <div class="hud-stat" id="works-stat" title=""><span class="hud-label">Works</span><span id="works-val">0</span><span class="hud-dim">/<span id="works-cap">0</span></span></div>
+      <div class="hud-stat" id="border-stat" title=""><span class="hud-label">Border</span><span id="border-val">0</span></div>
+    </div>
     <div id="exit-wrap">
       <div id="exit-row">
         <button id="menu-btn" class="btn btn-sm" title="Menu" aria-label="Menu"
@@ -151,6 +165,10 @@
     <div id="ability-dock" class="frame frame-plate">
       <div id="ability-card"></div>
     </div>
+    <!-- Three cards, which is all a draft ever leaves you with, so a row of
+         them needs no room to grow. Beside the ability because both are things
+         you spend rather than things you read. -->
+    <div id="card-list"></div>
 
     <div id="minimap-wrap" class="frame frame-plate">
       <canvas id="minimap" width="240" height="160"></canvas>
@@ -171,6 +189,25 @@
       </div>
       <button id="split-btn" class="btn btn-sm">Split</button>
     </div>
+    <!-- What you build, where you already look. This is also the buildings
+         list the side panel used to carry: the count on each icon is how many
+         of that kind you run, so the thing you build from and the thing you
+         read your works off are one row instead of two sections. -->
+    <div id="build-bar" class="frame frame-plate">
+      <div id="build-hint">
+        <div id="build-menu"></div>
+        <div class="sub hidden" id="cost-note"></div>
+      </div>
+      <div class="build-row">
+        <div id="build-palette"></div>
+        <div class="bar-sep"></div>
+        <div class="build-tools">
+          <button class="btn btn-sm" id="wall-tool-btn">Wall<span class="btn-note" id="wall-cost">drag</span></button>
+          <button class="btn btn-sm" id="clear-tool-btn">Clear<span class="btn-note" id="clear-cost"></span></button>
+        </div>
+      </div>
+    </div>
+
     <div id="troop-bar" class="frame frame-plate">
       <div id="unit-inputs"></div>
       <div class="troop-actions">
@@ -184,23 +221,6 @@
     </div>
   </div>
 
-  <div id="panel" class="frame frame-panel">
-    <h2>Town Center</h2>
-    <div class="card" id="castle-card"></div>
-
-    <h2>Build</h2>
-    <div id="build-palette"></div>
-    <button class="btn" id="wall-tool-btn">Wall Tool<span class="btn-note" id="wall-cost">click-drag</span></button>
-    <button class="btn" id="clear-tool-btn">Clear Ground<span class="btn-note" id="clear-cost"></span></button>
-    <div class="sub" id="cost-note"></div>
-    <div class="card" id="build-menu"><div class="sub">Drag a building onto your ground.</div></div>
-
-    <h2>Cards</h2>
-    <div class="card" id="card-list"></div>
-
-    <h2>Buildings</h2>
-    <div id="plots-list"></div>
-  </div>
 </div>
 
 <!-- The lobby. Sits over the map like the draft does, because the empire is

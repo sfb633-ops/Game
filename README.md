@@ -554,7 +554,7 @@ because a parapet is a lit top and the walkway between them is not.
 
 ### The interface is one pack, and its corners are the contract
 
-Every frame the UI is built from — the side panel, the cards, the buttons, the
+Every frame the UI is built from — the map overlays, the cards, the buttons, the
 section headings, the health bar, the attack banner — is cut from a single
 sheet, `DarkAgesUi_v1.0/32x32-Tilesheet.png`. It used to be two packs: Kenney's
 9-slices for the panels and buttons, this sheet for the health bar and the
@@ -585,7 +585,8 @@ own image. If you change a scale in the build, read the new numbers off its
 output and put them in the stylesheet.
 
 The same rule is why there are two weights of the same charcoal box. `panel`
-is it at x2 for the side panel, which is tall enough to carry a 28px frame;
+is it at x2, which was the side panel — that is gone, and `inset` is what
+still uses the heavier weight;
 `plate` is it at x1 for the things floating on the map — the log, the minimap,
 the roster, the ability dock — which are not. Squeezing `panel` into a 14px
 border would have been the same bug.
@@ -690,6 +691,13 @@ sprite anchors and layering can be eyeballed as a PNG.
   roster is up whenever you have a group selected, and is where you pick a
   number rather than take half — its ceiling is one less than your smallest
   selected group, because somebody always has to be left behind.
+- **There is no side panel.** Everything sits on the map: figures you glance
+  at along the top — treasury on the left, what your empire can hold on the
+  right, your keep between them — and things you act on along the bottom, in a
+  stack that reads upward as build, train, and whatever you have selected. The
+  count on a building icon is how many of that kind you run, so the row you
+  build from is also the list of your works; a second corner appears in blue
+  for anything still going up and red for anything damaged.
 - **The gear in the top corner** holds the sound sliders, the whole list of
   controls, and the way back to the main menu. The list is written from the
   same table the key handler reads, so it cannot drift out of date — which
@@ -822,7 +830,7 @@ sprite anchors and layering can be eyeballed as a PNG.
   lose. Towers ignore bandit camps, which never move. There is an archer standing in
   the gallery who does the shooting: he turns to face what the tower is
   aiming at, draws, and holds his loose until the arrow lands.
-- **Buildings are dragged from the panel onto the map.** Pick one of the
+- **Buildings are dragged from the bar at the bottom onto the map.** Pick one of the
   building icons up and drop it on your ground; the ghost under your cursor
   turns green where it will go and red where it won't. A plain click arms it
   instead, so you can click the icon and then click the map. Escape puts it
@@ -932,12 +940,13 @@ after 15 minutes idle and would look like the server crashed mid-game.
 config.js            — every tunable number: races, buildings, units, map size
 game.js              — authoritative rules: terrain, build/train queues, combat
 server.js            — WebSocket wiring + serves the client
-public/client.js     — game state, UI panel, input, camera
+public/client.js     — game state, the map overlays, input, camera
 public/sprites.js    — asset manifest + every draw call that puts art on screen
 public/artdefs.js    — tile-selection rules shared by the client and the preview
 public/assets/       — generated sprite sheets, UI frames + manifest.json
 public/media/        — hand-supplied menu background, music and ambience
 tools/build-assets.js— slices the raw art packs into public/assets/
+tools/slice-icons.js — cuts the icon sheet up, with a numbered contact sheet
 tools/rmautotile.js  — RPG Maker autotile blocks -> this game's blob sheet
 tools/preview.js     — renders a real match to a PNG, no browser needed
 tools/shoot-ui.js    — screenshots the real page in headless Chrome at several states

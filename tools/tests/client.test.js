@@ -804,5 +804,60 @@ if (geomStart > 0 && geomEnd > geomStart) {
     client.includes("if (pct > 0 && muted)"));
 }
 
+
+// --- the side panel is gone, and nothing it held went with it -------------
+//
+// The panel was 336px down the right holding four sections. Every one of them
+// had to land somewhere on the map, and the failure mode of a change like this
+// is not a crash — it is a figure that quietly stops being shown anywhere. So
+// each of the four is pinned to its new home.
+{
+  const css = fs.readFileSync(path.join(SRC, 'style.css'), 'utf8');
+  check('there is no side panel any more', !html.includes('id="panel"'));
+  check('  and nothing still styles one', !css.includes('#panel {'));
+
+  check('the Town Center figures are in the stat row',
+    html.includes('id="works-val"') && html.includes('id="works-cap"') && html.includes('id="border-val"'));
+  check('  and the client writes them',
+    client.includes("setText('works-val'") && client.includes("setText('border-val'"));
+  check('  with the garrison on the tooltip that replaced the fold-out',
+    client.includes("setTip('works-stat'") && client.includes('garrisonRoster('));
+
+  check('upgrading the keep hangs off the keep bar', html.includes('id="upgrade-btn"'));
+  check('  and still asks the server rather than deciding locally',
+    client.includes("send({ type: 'upgradeCastle' })"));
+
+  check('the build palette is a bar on the map', html.includes('id="build-bar"'));
+  check('  drawn from icon files, not a live sprite per cell',
+    client.includes('assets/icons/') && !client.includes('buildIcons.push'));
+
+  check('the buildings list is the count on each palette icon',
+    client.includes('data-count=') && client.includes('data-note='));
+  check('  and says what is going up as well as what is standing',
+    client.includes('const note = building ? String(building)'));
+  check('  which is the one fact a plain total would hide',
+    css.includes('.build-item .note'));
+}
+
+// --- every icon the palette asks for was actually built -------------------
+//
+// The interface pack has no icons in it, so these come off a separate sheet
+// and are cut by hand-written boxes in build-assets.js. A typo in one box is a
+// missing file, and a missing file is a blank square nobody notices until a
+// screenshot.
+{
+  const manifest = JSON.parse(fs.readFileSync(path.join(SRC, 'assets', 'manifest.json'), 'utf8'));
+  const cfg = require('../../config.js');
+  const buildable = Object.keys(cfg.BUILDING_TYPES)
+    .filter(t => !cfg.BUILDING_TYPES[t].isWall && !cfg.BUILDING_TYPES[t].builtin);
+  for (const type of buildable) {
+    const icon = manifest.icons && manifest.icons[type];
+    check(`  ${type} has an icon`, !!icon && fs.existsSync(path.join(SRC, 'assets', icon.file)),
+      icon ? icon.file : 'not in the manifest');
+  }
+  check('  and they are all the same square, so a row of them is a row',
+    Object.values(manifest.icons || {}).every(i => i.w === i.h),
+    Object.values(manifest.icons || {}).map(i => i.w + 'x' + i.h).join(' '));
+}
 console.log(failures ? `\n${failures} FAILURES` : '\nall client checks pass');
 process.exit(failures ? 1 : 0);

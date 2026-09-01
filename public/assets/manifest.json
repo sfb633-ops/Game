@@ -2777,6 +2777,43 @@
    "h": 24
   }
  },
+ "icons": {
+  "barracks": {
+   "file": "icons/barracks.png",
+   "w": 64,
+   "h": 64
+  },
+  "stable": {
+   "file": "icons/stable.png",
+   "w": 64,
+   "h": 64
+  },
+  "siege": {
+   "file": "icons/siege.png",
+   "w": 64,
+   "h": 64
+  },
+  "bank": {
+   "file": "icons/bank.png",
+   "w": 64,
+   "h": 64
+  },
+  "tower": {
+   "file": "icons/tower.png",
+   "w": 64,
+   "h": 64
+  },
+  "wall": {
+   "file": "icons/wall.png",
+   "w": 64,
+   "h": 64
+  },
+  "castle": {
+   "file": "icons/castle.png",
+   "w": 64,
+   "h": 64
+  }
+ },
  "cards": {
   "prosperity": {
    "file": "cards/prosperity.png",

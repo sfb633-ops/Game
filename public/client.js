@@ -88,7 +88,6 @@ let wallDrag = null;       // Set of "x,y" tiles in the in-progress drag
 let selectedBuilding = null;   // { x, y }
 // Whether the Town Center card is showing the garrison broken down by kind.
 // Click your keep on the map, or the garrison line itself, to open it.
-let garrisonOpen = false;
 let demolishHit = null;        // { x0, y0, x1, y1 } in tiles, set while drawn
 let camera = { x: 0, y: 0 }; // viewport top-left in world pixels
 let cameraReady = false;     // have we centered on the player's base yet?
@@ -2801,7 +2800,7 @@ function onCanvasClick(e) {
     const keepHit = mine.buildings.find(b =>
       (b.type === 'castle' || b.builtin) && withinBuilding(b, ix, iy));
     if (keepHit) {
-      garrisonOpen = !garrisonOpen;
+      logGarrison(mine);
       selectedBuilding = null;
       selectedArmies.clear();
       render();
@@ -3424,38 +3423,41 @@ function syncLive(root, values) {
 // followed by a click on the map does the same thing — one state machine
 // covers both habits.
 let armedBuild = null;      // building type being carried, or null
-const buildIcons = [];      // { type, ctx } — redrawn by the render loop
 
 // Palette cells are narrow, so the labels are short. The real name is on the
 // tooltip, where there is room for it.
 const BUILD_SHORT_NAME = { siege: 'Siege', tower: 'Tower' };
 
-const BUILD_ICON_W = 34;
-// Tall enough for two tiles. The archer tower is taller still and is dealt
-// with in drawBuildIcons.
-const BUILD_ICON_H = 68;
-
 function buildPalette() {
   const holder = document.getElementById('build-palette');
   holder.innerHTML = '';
-  buildIcons.length = 0;
   for (const type in buildingTypes) {
     if (buildingTypes[type].isWall) continue;      // walls have their own tool
     if (buildingTypes[type].builtin) continue;     // the compound's own pieces are not for sale
     const item = document.createElement('div');
     item.className = 'build-item';
     item.dataset.build = type;
-    item.title = buildingTypes[type].name + ' \u2014 drag onto your ground to build';
-    const def = Sprites.buildingDef(type, { race: myRace });
-    const h = def && def.h > 40 ? BUILD_ICON_H : BUILD_ICON_H / 2;
+    item.title = buildingTypes[type].name + ' — drag onto your ground to build';
+    // An icon, not the building's own sprite drawn live.
+    //
+    // The palette used to run the real draw call into a canvas per cell, every
+    // frame, so that what you dragged was literally what you got. That was the
+    // right answer while the palette was a wide column in a panel: the cells
+    // could afford to be 34x68 and the sprites read at that size. In a bar
+    // along the bottom of the map they cannot, and a row of buildings at their
+    // own proportions is a skyline rather than a row — the archer tower alone
+    // is three tiles tall. So each kind gets one square icon, and the map is
+    // where you look at buildings.
     item.innerHTML =
-      `<canvas class="build-icon" width="${BUILD_ICON_W}" height="${h}"></canvas>` +
-      `<span class="build-name">${BUILD_SHORT_NAME[type] || buildingTypes[type].name}</span>` +
-      `<span class="build-cost" data-price="${type}">${priceFor(buildingTypes[type].cost)}g</span>`;
+      '<span class="build-well">' +
+        '<img class="build-icon" src="assets/icons/' + type + '.png" alt="" ' +
+             'onerror="this.remove()">' +
+        '<span class="count hidden" data-count="' + type + '"></span>' +
+        '<span class="note hidden" data-note="' + type + '"></span>' +
+      '</span>' +
+      '<span class="build-name">' + (BUILD_SHORT_NAME[type] || buildingTypes[type].name) + '</span>' +
+      '<span class="build-cost" data-price="' + type + '">' + priceFor(buildingTypes[type].cost) + 'g</span>';
     holder.appendChild(item);
-    const c = item.querySelector('canvas').getContext('2d');
-    c.imageSmoothingEnabled = false;
-    buildIcons.push({ type, ctx: c, w: BUILD_ICON_W, h });
   }
   holder.addEventListener('pointerdown', (e) => {
     const item = e.target.closest('.build-item');
@@ -3487,29 +3489,11 @@ function dropBuild(x, y) {
 // The palette icons are the real building sprites, animated off the same clock
 // as everything else so the panel doesn't look like a different program.
 //
-// A sprite taller than its slot is stood so its *top* is what shows rather
-// than its floor: the archer tower is three tiles tall and the half of it
-// worth recognising is the roof and the gallery, not the stonework. Nothing is
-// scaled to fit — that would resample the one thing the whole pipeline exists
-// to keep at 1:1 — so an over-tall sprite simply runs off the bottom.
-function drawBuildIcons() {
-  if (!assetsReady || !myRace) return;
-  for (const icon of buildIcons) {
-    const c = icon.ctx;
-    c.setTransform(1, 0, 0, 1, 0, 0);
-    c.clearRect(0, 0, icon.w, icon.h);
-    const def = Sprites.buildingDef(icon.type, { race: myRace });
-    // drawBuilding anchors bottom-centre a third of a tile below the point it
-    // is given, so aim below the canvas to stand the sprite on its floor.
-    const floor = icon.h - 4 - mapCfg.tileSize * 0.35;
-    const overflow = def ? Math.max(0, def.h - (icon.h - 4)) : 0;
-    Sprites.drawBuilding(c, icon.type, icon.w / 2, floor + overflow,
-      { race: myRace, shadow: false, time: clock });
-    if (icon.type === 'tower') {
-      Sprites.drawTowerArcher(c, icon.w / 2, floor + overflow, clock, { race: myRace });
-    }
-  }
-}
+// The palette used to be redrawn every frame, one live building sprite per
+// cell. It is <img> icons now, so there is nothing per-frame left to do — but
+// the render loop still calls this, and a palette that animates again later
+// would want it back. Kept as the seam rather than threaded out of the loop.
+function drawBuildIcons() { /* icons are static */ }
 
 // Each slot is the unit's own sprite, idling, with what you have and what you
 // are about to send. Clicking it orders one; the grey that sits over the
@@ -3620,6 +3604,21 @@ function updateDeployButton() {
 
 document.getElementById('deploy-btn').addEventListener('click', () => armDeploy(!armedDeploy));
 
+// Write text only when it changed. renderPanel runs five times a second, and
+// touching textContent on every field of every frame is how a panel starts
+// fighting the browser for no visible gain.
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el && el.textContent !== String(value)) el.textContent = String(value);
+}
+// Tooltips carry what the panel's paragraphs used to. Same rule: only write a
+// title that actually changed, or the browser tears down a tooltip that is
+// open while you are reading it.
+function setTip(sel, text, isSelector = false) {
+  const el = isSelector ? document.querySelector(sel) : document.getElementById(sel);
+  if (el && el.title !== text) el.title = text;
+}
+
 function renderPanel() {
   if (!latestState) return;
   const me = latestState.players.find(p => p.id === myId);
@@ -3642,7 +3641,11 @@ function renderPanel() {
     .reduce((sum, a) => sum + a.count, 0);
   const garrison = Object.values(me.idleUnits).reduce((n, v) => n + v, 0);
   document.getElementById('troops-val').textContent = marching ? `${garrison} + ${marching} out` : garrison;
-  const castleCard = document.getElementById('castle-card');
+  // The Town Center card, which was a paragraph of figures and a button in a
+  // panel. The figures are figures you glance at, so they are in the stat row
+  // with the rest of them; the button is about the keep, so it sits against the
+  // keep's own health bar. The garrison is the tooltip on Works — it is a
+  // number you check before an assault, not one you watch.
   const maxed = castle.level >= castleCfg.maxLevel;
   const upgradeCost = maxed ? 0 : priceFor(castleCfg.upgradeCost[castle.level]);
   // The server's radius already includes any border boon, so carry the same
@@ -3657,27 +3660,34 @@ function renderPanel() {
   const limitBonus = me.buildLimit - castleCfg.buildLimit[castle.level - 1];
   const nextLimit = maxed ? null : castleCfg.buildLimit[castle.level] + limitBonus;
   const keepGarrison = garrisonRoster(me);
-  const castleSig = [castle.level, castle.maxHp, borderRadius(me), nextRadius, outpostCount,
-    castle.upgrading, maxed, upgradeCost, me.buildLimit, nextLimit,
-    garrisonOpen, keepGarrison.total, keepGarrison.hp,
-    keepGarrison.rows.map(r => r.type + r.count).join(',')].join('|');
-  if (syncSection(castleCard, castleSig, `
-    <div class="row"><span class="label">Level ${castle.level}</span><span class="sub">HP <span data-live="hp">${castle.hp}</span>/${castle.maxHp}</span></div>
-    <div class="sub">Border ${borderRadius(me)} tiles${nextRadius ? ` → ${nextRadius} next level` : ''}</div>
-    <div class="sub">Buildings <span data-live="used">${me.buildingsUsed}</span>/${me.buildLimit}${nextLimit ? ` → ${nextLimit} next level` : ''}</div>
-    ${outpostCount ? `<div class="sub">${outpostCount} outpost${outpostCount === 1 ? '' : 's'} held \u2014 ${outpostRadius()} tiles and ${outpostSlots()} building slots each</div>` : ''}
-    ${garrisonHtml(keepGarrison)}
-    ${castle.upgrading ? `<div class="sub">Upgrading… <span data-live="upgradeLeft">${castle.remainingSec}</span>s</div>` :
-      maxed ? `<div class="sub">Max level</div>` :
-      `<div class="btn-row"><button class="btn btn-sm" id="upgrade-btn" data-cost="${upgradeCost}">Upgrade (${upgradeCost}g)</button></div>`}
-  `)) {
-    if (!castle.upgrading && !maxed) {
-      document.getElementById('upgrade-btn').addEventListener('click', () => send({ type: 'upgradeCastle' }));
+
+  setText('works-val', me.buildingsUsed);
+  setText('works-cap', me.buildLimit);
+  setText('border-val', borderRadius(me));
+  const worksTip = [
+    `${me.buildingsUsed} of ${me.buildLimit} buildings${nextLimit ? ` — ${nextLimit} at the next level` : ''}`,
+    outpostCount ? `${outpostCount} outpost${outpostCount === 1 ? '' : 's'} held, worth ${outpostRadius()} tiles and ${outpostSlots()} slots each` : '',
+    keepGarrison.total ? `${keepGarrison.total} standing at your keep (${keepGarrison.hp} hp)` : 'Nobody standing at your keep',
+    'Walls do not count against the limit.',
+  ].filter(Boolean).join('\n');
+  setTip('works-stat', worksTip);
+  setTip('border-stat', `Your border reaches ${borderRadius(me)} tiles${nextRadius ? ` — ${nextRadius} at the next level` : ''}.`);
+
+  const upgradeBtn = document.getElementById('upgrade-btn');
+  const upgradeState = castle.upgrading ? 'going' : maxed ? 'max' : 'buy';
+  if (upgradeBtn.dataset.state !== upgradeState + upgradeCost) {
+    upgradeBtn.dataset.state = upgradeState + upgradeCost;
+    upgradeBtn.classList.toggle('hidden', maxed);
+    upgradeBtn.dataset.cost = upgradeState === 'buy' ? upgradeCost : '';
+    upgradeBtn.textContent = upgradeState === 'going' ? 'Upgrading…' : `Upgrade ${upgradeCost}g`;
+    upgradeBtn.disabled = upgradeState !== 'buy';
+    if (!upgradeBtn.dataset.bound) {
+      upgradeBtn.dataset.bound = '1';
+      upgradeBtn.addEventListener('click', () => send({ type: 'upgradeCastle' }));
     }
-    const toggle = document.getElementById('garrison-toggle');
-    if (toggle) toggle.addEventListener('click', () => { garrisonOpen = !garrisonOpen; renderPanel(); });
   }
-  syncLive(castleCard, { hp: castle.hp, upgradeLeft: castle.remainingSec, used: me.buildingsUsed });
+  if (upgradeState === 'going') upgradeBtn.textContent = `Upgrading… ${castle.remainingSec}s`;
+  syncAffordability(document.getElementById('keep-bar'), me.gold);
   syncAffordability(castleCard, me.gold);
 
   // The troops standing at home, by kind.
@@ -3708,21 +3718,23 @@ function garrisonRoster(me) {
   return { rows, total, hp: Math.round(hp) };
 }
 
-function garrisonHtml(g) {
+// Who is standing at your keep, as a sentence.
+//
+// This was a fold-out list inside the Town Center card, opened by clicking
+// your own keep. There is no card to fold anything out of now, so the click
+// says it in the log instead — which is where everything else that happens
+// to your empire is already said, and does not need a section to live in.
+function logGarrison(me) {
+  const g = garrisonRoster(me);
   if (!g.total) {
-    return '<div class="sub garrison-none">No garrison — your keep is taking the next blow itself.</div>';
+    log('No garrison — your keep would take the next blow itself.');
+    return;
   }
-  const head = `<div class="row garrison-head" id="garrison-toggle" role="button" tabindex="0">` +
-    `<span class="label">Garrison ${g.total}</span>` +
-    `<span class="sub">${g.hp} hp ${garrisonOpen ? '\u25b4' : '\u25be'}</span></div>`;
-  if (!garrisonOpen) return head;
   const kinds = g.rows.map(r => {
     const def = unitTypes[r.type];
-    const name = r.count === 1 ? def.name : (def.plural || def.name + 's');
-    return `<div class="sub garrison-row"><span>${r.count} ${name}</span><span>${r.count * def.attack} atk</span></div>`;
-  }).join('');
-  return head + kinds +
-    '<div class="sub">They take an assault before your walls do.</div>';
+    return `${r.count} ${r.count === 1 ? def.name : (def.plural || def.name + "s")}`;
+  }).join(', ');
+  log(`Garrison: ${kinds} — ${g.hp} hp, and they take an assault before your walls do.`);
 }
 
 // The palette is static; only its prices, what you can afford, and whether
@@ -3766,80 +3778,53 @@ function garrisonHtml(g) {
         : atLimit ? '<div class="sub">No room for another building — upgrade the town center. Walls do not count against the limit.</div>'
           : '<div class="sub">Drag a building onto your ground, or use the Wall Tool to drag a wall.</div>');
 
-  // Constructed buildings, one row per KIND rather than one per building.
+  // What the empire runs, on the icons it builds from.
   //
-  // It used to be one card each, headed by its coordinates. An empire of any
-  // size turned that into a scrolling column of near-identical cards — three
-  // Banks reading "Bank (111,72)", "Bank (112,73)", "Bank (111,74)" — and the
-  // coordinates were the only thing that told them apart, which is the one
-  // thing you cannot do anything with: you find a building by looking at the
-  // map, not by reading a grid reference. What the list is actually for is
-  // "what do I own and is any of it hurt", and that is a question about kinds.
-  //
-  // So each kind gets a line: how many, their pooled health, and what they do
-  // once rather than once per copy. Anything mid-build or damaged is called out
-  // by count, because those are the two facts a total would hide — five Banks
-  // at "740/750" says nothing about the one that is nearly down.
-  const plotsList = document.getElementById('plots-list');
-  const walls = me.buildings.filter(b => b.type === 'wall');
-  const rows = [];
-  const sig = [];
-  // What the empire runs: not the keep, not walls, and not the compound's own
-  // bastions and gatehouse, which are the castle rather than things in it.
+  // This was a section of its own: one row per KIND of building, saying how
+  // many, their pooled health and what they do. Every one of those facts is
+  // still here, it is just not a list any more — the count rides the palette
+  // icon, anything mid-build or hurt rides the other corner, and the detail is
+  // the tooltip. A list of your works and a row of things to build with were
+  // always the same six kinds in the same order, printed twice.
   const byType = new Map();
   for (const b of me.buildings) {
     if (!b.type || b.type === 'castle' || b.type === 'wall' || b.builtin) continue;
     if (!byType.has(b.type)) byType.set(b.type, []);
     byType.get(b.type).push(b);
   }
-  for (const [type, group] of byType) {
-    const def = buildingTypes[type];
+  for (const type in buildingTypes) {
+    const countEl = document.querySelector(`[data-count="${type}"]`);
+    const noteEl = document.querySelector(`[data-note="${type}"]`);
+    if (!countEl || !noteEl) continue;
+    const group = byType.get(type) || [];
     const done = group.filter(b => !b.underConstruction);
     const building = group.length - done.length;
+    const hurt = done.filter(b => b.hp < b.maxHp).length;
+    countEl.classList.toggle('hidden', group.length === 0);
+    if (countEl.textContent !== String(group.length)) countEl.textContent = group.length;
+    // One corner, two things it can say, and going up wins — a building that is
+    // not finished cannot be damaged yet.
+    const note = building ? String(building) : hurt ? String(hurt) : '';
+    noteEl.classList.toggle('hidden', !note);
+    noteEl.classList.toggle('hurt', !building && !!hurt);
+    if (noteEl.textContent !== note) noteEl.textContent = note;
+
+    const def = buildingTypes[type];
     const hp = done.reduce((n, b) => n + b.hp, 0);
     const maxHp = done.reduce((n, b) => n + b.maxHp, 0);
-    const hurt = done.filter(b => b.hp < b.maxHp).length;
-
-    const notes = [];
-    if (building) notes.push(`${building} still going up`);
-    if (hurt) notes.push(`${hurt} damaged`);
-    if (def.trains) {
-      // Orders are placed from the roster at the bottom of the map, so this
-      // only has to say what the building does and how busy it all is.
-      const queued = done.reduce((n, b) => n + b.trainQueueLen, 0);
-      notes.push(`Trains ${unitTypes[def.trains].name}${queued ? ` · ${queued} queued` : ''}`);
-    } else if (def.shotDamage) {
-      // What a tower actually does, which is shoot things near it.
-      notes.push(`Shoots ${def.shotDamage} every ${def.shotSec}s within ${def.range} tiles`);
-    } else if (def.incomePerSec) {
-      notes.push(`+${trim(def.incomePerSec * done.length * modOf('incomeMult'))} gold/sec`);
-    }
-
-    // No Pull down button here. Selling is a map gesture — click the building,
-    // click the cross over it — which puts the decision next to the thing it is
-    // about, reaches walls, and is the only way that still works now that a row
-    // stands for several buildings at once.
-    const count = group.length > 1 ? ` <span class="sub">×${group.length}</span>` : '';
-    rows.push(`<div class="card"><div class="row"><span class="label">${def.name}${count}</span>` +
-      `<span class="sub">${done.length ? `HP ${Math.round(hp)}/${maxHp}` : '—'}</span></div>` +
-      `<div class="sub">${notes.join(' · ')}</div></div>`);
-    sig.push(`${type}:${group.length}:${done.length}:${hurt}:${maxHp}:${me.cards.length}`);
+    const tip = [
+      `${def.name} — ${priceFor(def.cost)}g`,
+      def.trains ? `Trains ${unitTypes[def.trains].name}` : def.shotDamage ? 'Shoots what comes near it' : '',
+      group.length ? `You run ${done.length}${building ? ` (${building} still going up)` : ''}` : 'You have none',
+      done.length ? `${hp} / ${maxHp} hp${hurt ? ` — ${hurt} damaged` : ''}` : '',
+      'Drag onto your ground to build',
+    ].filter(Boolean).join('\n');
+    setTip(`[data-build="${type}"]`, tip, true);
   }
-  if (walls.length) {
-    // Not a defence number any more: a wall is ground an enemy has to go round
-    // or break through, so what matters is how many are still whole.
-    const hurt = walls.filter(w => w.hp < w.maxHp).length;
-    rows.push(`<div class="card"><div class="row"><span class="label">Walls ×${walls.length}</span>` +
-      `<span class="sub">${hurt ? hurt + ' under attack' : 'all sound'}</span></div></div>`);
-    sig.push(`walls:${walls.length}:${hurt}`);
-  }
-  if (!rows.length) rows.push('<div class="card"><div class="sub">No buildings yet — click inside your border to build.</div></div>');
-  // The signature now carries every number on a row — counts, damage, the
-  // total — so a change redraws the row it belongs to. There is nothing left
-  // for syncLive to patch in place: the per-building ids it keyed on were the
-  // coordinates, and rows do not have coordinates any more.
-  syncSection(plotsList, sig.join('|'), rows.join(''));
-  syncAffordability(plotsList, me.gold);
+  const walls = me.buildings.filter(b => b.type === 'wall');
+  setTip('wall-tool-btn', walls.length
+    ? `${walls.length} wall segment${walls.length === 1 ? '' : 's'} standing. Click-drag across your border to lay more.`
+    : 'Click-drag across your border to lay a wall.');
 
   // The Empires standings and the Selected Army card used to sit here, and both
   // are gone.

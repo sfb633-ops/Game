@@ -65,7 +65,61 @@ function controlsRows() {
   return src.slice(open + HEAD.length, close);
 }
 
+// The build bar and the hand are filled by client.js out of the init message,
+// which needs a server. These stand them up from the same asset files the
+// client would use, so the shot shows the real icons at the real size.
+const FAKE_BARS = `
+function fillBuildBar(rows) {
+  const holder = document.getElementById("build-palette");
+  holder.innerHTML = rows.map(function (r) {
+    return '<div class="build-item" data-build="' + r.type + '">' +
+      '<span class="build-well">' +
+        '<img class="build-icon" src="assets/icons/' + r.type + '.png" alt="">' +
+        (r.count ? '<span class="count">' + r.count + '</span>' : '') +
+        (r.note ? '<span class="note' + (r.hurt ? ' hurt' : '') + '">' + r.note + '</span>' : '') +
+      '</span>' +
+      '<span class="build-name">' + r.name + '</span>' +
+      '<span class="build-cost">' + r.cost + 'g</span></div>';
+  }).join("");
+}
+function fillHand(ids) {
+  document.getElementById("card-list").innerHTML =
+    '<div class="card-hand">' + ids.map(function (id) {
+      return '<div class="owned-card card-spell"><img src="assets/cards/' + id + '-sm.png" alt=""></div>';
+    }).join("") + '</div>';
+}
+`;
+
 const CASES = {
+  // The whole interface, with the bars a running match would have filled.
+  overhaul: FAKE_BARS + `
+    keep(0.78, "hp-green", "Town Center \u00b7 Level 2", "1170 / 1500");
+    document.getElementById("gold-val").textContent = "1240";
+    document.getElementById("income-val").textContent = "18";
+    document.getElementById("troops-val").textContent = "24 + 38 out";
+    document.getElementById("works-val").textContent = "7";
+    document.getElementById("works-cap").textContent = "16";
+    document.getElementById("border-val").textContent = "19";
+    document.getElementById("room-code").textContent = "FRTK";
+    var up = document.getElementById("upgrade-btn");
+    up.classList.remove("hidden"); up.textContent = "Upgrade 400g";
+    fillBuildBar([
+      { type: "barracks", name: "Barracks", cost: 100, count: 2, note: "1" },
+      { type: "stable", name: "Stable", cost: 200, count: 1 },
+      { type: "siege", name: "Siege", cost: 300 },
+      { type: "bank", name: "Bank", cost: 150, count: 3 },
+      { type: "tower", name: "Tower", cost: 120, count: 1, note: "1", hurt: true },
+    ]);
+    document.getElementById("build-menu").textContent =
+      "Drag a building onto your ground, or use the Wall Tool to drag a wall.";
+    fillHand(["prosperity", "ironhide", "meteor"]);
+    var gb = document.getElementById("group-bar");
+    gb.classList.remove("hidden");
+    document.getElementById("group-summary").textContent = "20 selected \u2014 6 off, 14 stay";
+    var sc = document.getElementById("split-count");
+    sc.max = "19"; sc.value = "6";
+    document.getElementById("split-out").textContent = "6";
+    paintRange(sc);`,
   // The gear menu open: three sliders and every binding in the game.
   menu: `
     keep(0.78, 'hp-green', 'Town Center', '702 / 900');
