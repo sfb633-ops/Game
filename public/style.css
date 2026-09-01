@@ -573,8 +573,12 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
    selected. Each bar is centred on the same line so they read as one column of
    controls rather than three floating boxes, and each one is only up when it
    has something to say. */
+/* What you build sits on the left of the bottom edge and what you train on
+   the right, rather than both stacked down the middle. Each is clear of the
+   corner beside it: the log takes the first 310px on the left, the minimap
+   and the ability take about 290 on the right. */
 #build-bar {
-  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+  position: absolute; left: 320px; bottom: 12px; transform: none;
   z-index: 6;
   display: flex;
   max-width: calc(100% - 24px);
@@ -612,13 +616,21 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 #group-bar input[type="range"] { width: 150px; flex: 0 0 150px; }
 #group-bar output { flex: 0 0 2.2rem; text-align: right; }
 
+@media (max-width: 1180px) {
+  #build-bar { left: 50%; transform: translateX(-50%); }
+  #troop-bar { right: auto; left: 50%; bottom: 124px; transform: translateX(-50%); }
+}
+
 @media (max-height: 780px) {
   #group-bar { bottom: 214px; }
   #build-hint { bottom: 96px; }
 }
 
+/* Not up until the empire has something that trains — same scoped-.hidden
+   rule every other element here needs. */
+#troop-bar.hidden { display: none; }
 #troop-bar {
-  position: absolute; left: 50%; bottom: 124px; transform: translateX(-50%);
+  position: absolute; right: 300px; left: auto; bottom: 12px; transform: none;
   z-index: 6;
   display: flex; align-items: center; gap: 0.9rem;
   max-width: calc(100% - 24px);
@@ -677,7 +689,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 #deploy-btn.armed { background: #ffd76a2e; border-color: var(--gold); }
 
 @media (max-height: 620px) {
-  #troop-bar { bottom: 112px; }
+  #troop-bar { bottom: 6px; }
   .troop-slot { width: 46px; }
 }
 
@@ -823,13 +835,13 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 /* A draft keeps three, so the hand never grows and needs no room to. It sits
    under the ability because both are things you spend. */
 #card-list {
-  position: absolute; right: 292px; bottom: 96px; z-index: 6;
+  /* 212 of ability plus the 98 it stands, plus a gap. Measured in the page,
+     not guessed: at 306 the two boxes overlapped by four pixels. */
+  position: absolute; right: 12px; bottom: 322px; z-index: 6;
   opacity: 0.92; transition: opacity 120ms;
 }
 #card-list:hover { opacity: 1; }
-@media (max-width: 1440px) {
-  #card-list { right: 12px; bottom: 292px; }
-}
+/* Same stack at every width; the wide-screen variant is gone. */
 .card-hand { display: flex; gap: 5px; }
 /* Two thirds of what it was. On a panel a card could afford to be a card; on
    the map it is a button with a picture on it, and the picture only has to be
@@ -1021,6 +1033,9 @@ input[type="range"]:disabled { cursor: not-allowed; filter: grayscale(1) brightn
   border: 1px solid #101a26;
 }
 .build-item .note.hurt { background: #6b2f2f; border-color: #260f0f; }
+/* .hidden in this sheet is scoped per element, so these need their own rule
+   — without it every icon carried a 0 for a building nobody had built. */
+.build-item .count.hidden, .build-item .note.hidden { display: none; }
 .build-item:hover { background: #ffffff14; border-color: #ffffff2e; }
 .build-item.armed { background: #ffd76a2e; border-color: var(--gold); cursor: grabbing; }
 .build-item.unaffordable { opacity: 0.42; }
@@ -1226,16 +1241,17 @@ input[type="range"]:disabled { cursor: not-allowed; filter: grayscale(1) brightn
    is centred along the same edge and grows with the number of unit types, so on
    a narrow window the two would meet; below about 1440 the dock goes above the
    minimap instead, which is always free. */
+/* The right edge, read upward: minimap, then the ability, then the hand.
+   These used to sit beside the minimap on a wide window, which is where the
+   troop roster goes now — the ability dock spent a while underneath it,
+   drawn and invisible. One arrangement at every width. */
 #ability-dock {
-  position: absolute; right: 292px; bottom: 12px; z-index: 6;
-  width: 168px;
+  position: absolute; right: 12px; bottom: 212px; z-index: 6;
+  width: 240px;
   opacity: 0.9; transition: opacity 120ms;
 }
 #ability-dock:hover { opacity: 1; }
-@media (max-width: 1440px) {
-  /* 160 of minimap + its own two borders + the gap under it. */
-  #ability-dock { right: 12px; bottom: 208px; width: 240px; }
-}
+/* The width-dependent variant is gone — see the block above. */
 .ability-head { display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.25rem; cursor: help; }
 #ability-dock .ability-sigil { font-size: 1.1rem; color: var(--gold); }
 #ability-dock .ability-name { font-weight: bold; font-size: 0.74rem; letter-spacing: 1px; color: var(--gold); }
@@ -1298,3 +1314,19 @@ input[type="range"]:disabled { cursor: not-allowed; filter: grayscale(1) brightn
    sent out again, but it stays out of the row until you actually have one. */
 .troop-slot.special.hidden { display: none; }
 .troop-slot.special .build-cost, .troop-slot.special .troop-queue { display: none; }
+
+/* ---- Tooltips -------------------------------------------------------
+   The interface ran on title attributes, which is the browser's tooltip: it
+   waits a second, it renders in the OS style, and on a dark pixel-art game
+   it looks like a stray dialog from another program. One element, moved to
+   the cursor, styled like everything else here. */
+#tip {
+  position: fixed; z-index: 40; pointer-events: none;
+  max-width: 280px; padding: 0.4rem 0.55rem;
+  font-size: 0.7rem; line-height: 1.35; color: var(--parchment);
+  background: #10141c; border: 1px solid #000;
+  box-shadow: inset 0 0 0 1px #ffffff14, 0 3px 10px #0009;
+  white-space: pre-line;
+}
+#tip.hidden { display: none; }
+#tip b { color: var(--gold); font-weight: normal; }

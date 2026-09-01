@@ -1134,7 +1134,12 @@ const WINLU_PROPS = {
   // a dark lump balanced on its point.
   tree: [
     ['round',  0,  0, 4, 4, 2.4],
-    ['lean',   3,  1, 5, 4, 2.4],
+    // Row 2, not row 1. Row 1 catches the sawn STUMP standing directly above
+    // this tree, and the stump's foliage touches the canopy — so largestIsland
+    // cannot separate them and the tree shipped with a log balanced over its
+    // crown. Exactly the trap described for the pine below, and found the same
+    // way: by rendering the sprite onto grass and looking at it.
+    ['lean',   3,  2, 5, 4, 2.4],
     ['broad',  0,  8, 5, 5, 2.6],
     ['pine',   5, 10, 3, 5, 2.8],
     ['broad2', 0, 12, 4, 4, 2.4],

@@ -817,9 +817,13 @@ if (geomStart > 0 && geomEnd > geomStart) {
   check('  and nothing still styles one', !css.includes('#panel {'));
 
   check('the Town Center figures are in the stat row',
-    html.includes('id="works-val"') && html.includes('id="works-cap"') && html.includes('id="border-val"'));
+    html.includes('id="works-val"') && html.includes('id="works-cap"'));
+  // Border was a number for a thing drawn on the map as a ring. The ring is the
+  // answer; the figure only repeated it, so it is a line on the tooltip now.
+  check('  and the border is the ring on the map, not a figure',
+    !html.includes('id="border-val"') && client.includes('Your border reaches'));
   check('  and the client writes them',
-    client.includes("setText('works-val'") && client.includes("setText('border-val'"));
+    client.includes("setText('works-val'") && client.includes("setText('works-cap'"));
   check('  with the garrison on the tooltip that replaced the fold-out',
     client.includes("setTip('works-stat'") && client.includes('garrisonRoster('));
 

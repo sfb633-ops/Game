@@ -4043,6 +4043,82 @@ type has an icon file that exists and is square. `browser.test.js` covers the
 overlaps, because the cascade is still not a thing you can grep.
 
 
+### Playing it, which is how the last pass should have ended (1 Sep 2026)
+
+The overhaul shipped with `renderPanel` throwing on **every state message**:
+
+    ReferenceError: castleCard is not defined
+      at renderPanel (client.js:3691)
+
+One stale line. `syncAffordability(castleCard, …)` outlived the declaration it
+read, so the function died a third of the way through, five times a second, for
+the whole match. Everything above the throw worked and everything below it never
+ran — which is why the golem and colossus slots sat in the roster with a price
+nobody can pay. Their hiding rule was fine; the line that applies it was past
+the throw.
+
+**Nothing caught it.** `npm test` passed. The static checks passed because the
+code they grep for is all present. `browser.test.js` passed because it measures
+boxes on a page that has never received a state message. The shot harness
+passed because it fakes the bars rather than filling them. Every one of those is
+worth having and not one of them can see a function that throws at run time on
+real data.
+
+What found it was opening the game, hosting a match, and reading the console.
+**That is now the last step of any client change**, and it is cheap: `npm start`,
+drive the menu with the DOM, and read `console` for exceptions. Two minutes, and
+it is the only thing between a passing suite and an interface that does not work.
+
+**The rest of the pass, from a marked-up screenshot.**
+
+- *Works* is *Buildings*. It was a word for the thing that is called a building
+  in every other sentence in the game.
+- *Border* is gone. It was a number for a ring that is drawn on the map — the
+  ring is the answer and the figure only repeated it. It survives as a line on
+  the Buildings tooltip.
+- Building on the left of the bottom edge, troops on the right, each clear of
+  the corner beside it. They were both down the middle, stacked.
+- The roster is not on screen until a building that trains something is
+  standing. A fresh empire had three portraits you could click for a message
+  telling you to go and build a barracks. Once one has stood, it stays — a bar
+  that came and went as buildings fell would be worse than one that waits.
+- The hand moved up. It and the ability dock were both pinned to `right: 292px`
+  with 96px between them, and the dock is taller than that, so the two
+  overlapped on any window wide enough to miss the narrow-screen rule. The right
+  edge now reads upward — minimap, ability, hand — at every width, because the
+  roster is what sits beside the minimap now.
+- **The count badges never hid.** There is no global `.hidden` in this
+  stylesheet — every element scopes its own, and that is written down — and I
+  added the class without the rule. Every icon wore a `0` for a building nobody
+  had built. Same trap caught `#troop-bar` an hour later.
+
+**Tooltips are ours now.** Every explanation was a `title`, which is the
+browser's tooltip: it waits about a second, renders in the OS style, and against
+this art reads as a stray dialog from another program. One element follows the
+cursor instead, flipping sides near an edge. It takes over any element carrying
+a `title` — moving it to `data-tip` and removing the attribute the first time
+the pointer meets it — so no call site had to change and the native tooltip can
+never fire alongside it.
+
+**Two art faults, found by rendering the sprites onto grass and looking.**
+
+`tree2` shipped with a sawn log balanced over its crown. The crop was
+`['lean', 3, 1, …]` and row 1 holds the stump standing directly above the tree;
+their foliage touches, so `largestIsland` cannot separate them and keeps both.
+Row 2. This is the same trap the pine's comment already describes, three lines
+further down, which is a good argument for looking at every sprite rather than
+the ones you have a reason to doubt.
+
+The other is not a bug and should not be fixed as one. The `bloom` layer — the
+drift of flowers over open ground — renders as multicoloured confetti. The cause
+is that A2 block `[4, 1]` is a **transparent overlay**: sparse flowers with no
+ground under them, meant to be laid over a base. `brush` next to it is a filled
+leafy carpet, which is why that one reads correctly. Laid as a ground autotile
+the flowers float on grass as specks. Quieter blocks exist on the same sheet
+(`[5, 1]` is a single-hue scatter), and dropping the layer is one line. It is a
+look, not a defect, so it is written down rather than changed.
+
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

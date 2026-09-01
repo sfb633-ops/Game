@@ -1307,6 +1307,7 @@ function deployStagedAt(ix, iy) {
     return false;
   }
   send({ type: 'deployUnits', units, x: ix, y: iy });
+  sawTrainer = false;
   document.querySelectorAll('#unit-inputs input').forEach(inp => { inp.value = 0; });
   updateDeployButton();
   // Counts move as soldiers fall, so the slider's ceiling has to move with
@@ -3422,6 +3423,9 @@ function syncLive(root, values) {
 // go over the panel instead leaves it armed, so a plain click on the icon
 // followed by a click on the map does the same thing — one state machine
 // covers both habits.
+// Whether this empire has ever had a building that trains something. The
+// troop roster is not on screen before that; see renderPanel.
+let sawTrainer = false;
 let armedBuild = null;      // building type being carried, or null
 
 // Palette cells are narrow, so the labels are short. The real name is on the
@@ -3568,6 +3572,7 @@ function stagedCount(type) {
 // an Orc player sees orcs here, not a generic icon.
 function drawTroopIcons() {
   if (!assetsReady || !myRace) return;
+
   for (const icon of troopIcons) {
     const c = icon.ctx;
     c.setTransform(1, 0, 0, 1, 0, 0);
@@ -3614,9 +3619,74 @@ function setText(id, value) {
 // Tooltips carry what the panel's paragraphs used to. Same rule: only write a
 // title that actually changed, or the browser tears down a tooltip that is
 // open while you are reading it.
+// Hovering anything with something to say.
+//
+// Every explanation in this interface was a title attribute, which is the
+// browser's own tooltip: it waits about a second, it renders in the OS style,
+// and against a dark pixel-art game it reads as a stray dialog from another
+// program. This is one element moved to the cursor instead.
+//
+// It takes over any element carrying a title rather than needing every call
+// site changed: the title is moved to data-tip the first time the pointer
+// meets it and the attribute is removed, so the native tooltip never fires
+// and nothing has to remember which mechanism it is using.
+const tipEl = (() => {
+  const el = document.createElement('div');
+  el.id = 'tip';
+  el.className = 'hidden';
+  document.body.appendChild(el);
+  return el;
+})();
+let tipFor = null;
+
+function tipTextOf(el) {
+  const own = el.getAttribute && el.getAttribute('title');
+  if (own) { el.dataset.tip = own; el.removeAttribute('title'); }
+  return el.dataset ? el.dataset.tip : null;
+}
+
+function showTip(el, x, y) {
+  const text = tipTextOf(el);
+  if (!text) { hideTip(); return; }
+  if (tipFor !== el || tipEl.dataset.text !== text) {
+    tipFor = el;
+    tipEl.dataset.text = text;
+    // The first line is the name of the thing. Everything else is the detail,
+    // and the gap between them is what makes it scannable.
+    const lines = text.split(String.fromCharCode(10));
+    tipEl.innerHTML = '<b>' + escapeHtml(lines[0]) + '</b>' +
+      (lines.length > 1 ? String.fromCharCode(10) + escapeHtml(lines.slice(1).join(String.fromCharCode(10))) : '');
+  }
+  tipEl.classList.remove('hidden');
+  // Kept on screen: past the right edge it flips to the other side of the
+  // cursor, and past the bottom it sits above it.
+  const r = tipEl.getBoundingClientRect();
+  const px = x + 14 + r.width > window.innerWidth ? x - 14 - r.width : x + 14;
+  const py = y + 18 + r.height > window.innerHeight ? y - 12 - r.height : y + 18;
+  tipEl.style.left = Math.max(4, px) + 'px';
+  tipEl.style.top = Math.max(4, py) + 'px';
+}
+
+function hideTip() {
+  if (!tipEl.classList.contains('hidden')) tipEl.classList.add('hidden');
+  tipFor = null;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+}
+
+document.addEventListener('pointermove', (e) => {
+  const el = e.target && e.target.closest && e.target.closest('[title], [data-tip]');
+  if (el) showTip(el, e.clientX, e.clientY);
+  else hideTip();
+}, { passive: true });
+document.addEventListener('pointerdown', hideTip, { passive: true });
+window.addEventListener('blur', hideTip);
+
 function setTip(sel, text, isSelector = false) {
   const el = isSelector ? document.querySelector(sel) : document.getElementById(sel);
-  if (el && el.title !== text) el.title = text;
+  if (el && el.dataset.tip !== text) el.dataset.tip = text;
 }
 
 function renderPanel() {
@@ -3663,15 +3733,13 @@ function renderPanel() {
 
   setText('works-val', me.buildingsUsed);
   setText('works-cap', me.buildLimit);
-  setText('border-val', borderRadius(me));
   const worksTip = [
     `${me.buildingsUsed} of ${me.buildLimit} buildings${nextLimit ? ` — ${nextLimit} at the next level` : ''}`,
     outpostCount ? `${outpostCount} outpost${outpostCount === 1 ? '' : 's'} held, worth ${outpostRadius()} tiles and ${outpostSlots()} slots each` : '',
     keepGarrison.total ? `${keepGarrison.total} standing at your keep (${keepGarrison.hp} hp)` : 'Nobody standing at your keep',
     'Walls do not count against the limit.',
   ].filter(Boolean).join('\n');
-  setTip('works-stat', worksTip);
-  setTip('border-stat', `Your border reaches ${borderRadius(me)} tiles${nextRadius ? ` — ${nextRadius} at the next level` : ''}.`);
+  setTip('works-stat', worksTip + `\nYour border reaches ${borderRadius(me)} tiles${nextRadius ? ` — ${nextRadius} at the next level` : ''}.`);
 
   const upgradeBtn = document.getElementById('upgrade-btn');
   const upgradeState = castle.upgrading ? 'going' : maxed ? 'max' : 'buy';
@@ -3688,7 +3756,6 @@ function renderPanel() {
   }
   if (upgradeState === 'going') upgradeBtn.textContent = `Upgrading… ${castle.remainingSec}s`;
   syncAffordability(document.getElementById('keep-bar'), me.gold);
-  syncAffordability(castleCard, me.gold);
 
   // The troops standing at home, by kind.
 //
@@ -3841,6 +3908,16 @@ function logGarrison(me) {
   // tally in the stat row. It is in the Town Center card now — see
   // renderGarrison, and the click on your own keep that opens it.
 
+  // Nothing to train until something trains it.
+  //
+  // A fresh empire has a keep and nothing else, and the roster was three
+  // portraits you could click all you liked for a message telling you to go
+  // and build a barracks. The bar is not up until one of the buildings that
+  // trains a unit is standing — after that it stays, because a roster that
+  // came and went as buildings fell would be worse than one that waits.
+  const trains = me.buildings.some(b => b.type && buildingTypes[b.type] && buildingTypes[b.type].trains);
+  if (trains) sawTrainer = true;
+  document.getElementById('troop-bar').classList.toggle('hidden', !sawTrainer);
   for (const icon of troopIcons) {
     const type = icon.type;
     const inp = document.querySelector(`#unit-inputs input[data-unit="${type}"]`);
