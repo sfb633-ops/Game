@@ -186,14 +186,9 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 
 #sound-btn { position: absolute; top: 14px; right: 16px; z-index: 2; min-height: 32px; padding: 0 0.7rem; }
 
-/* Its twin on the map lives in the corner row with Exit — see #exit-row. It
-   is the quieter of the two: Exit ends your match, this one turns the music
-   down, and they should not read as equals. */
-#sound-btn-game {
-  min-height: 32px; padding: 0 0.7rem;
-  opacity: 0.6;
-}
-#sound-btn-game:hover { opacity: 1; }
+/* The match had its own MUSIC toggle in the corner beside Exit. Both are gone:
+   the corner is one gear now, and what the toggle did is the Master slider
+   inside it. This one, on the main menu, stays — the menu has no gear. */
 
 .race-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
 
@@ -546,6 +541,30 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
    Sits over the map, centred at the bottom: the roster is what you read while
    deciding where to click, so it lives where your eyes already are. */
 
+/* Sits directly above the troop bar and is centred on the same line, so the
+   two read as one stack rather than two floating boxes. Only up while a group
+   is selected, which is the only time it means anything. */
+#group-bar {
+  position: absolute; left: 50%; bottom: 128px; transform: translateX(-50%);
+  z-index: 6;
+  display: flex; align-items: center; gap: 0.9rem;
+  max-width: calc(100% - 24px);
+}
+#group-bar.hidden { display: none; }
+#group-summary { font-size: 0.72rem; color: var(--parchment); white-space: nowrap; }
+/* Not shrinkable. The row's children are all fixed widths, so letting the row
+   itself be squeezed does not make anything narrower — it just pushes the
+   readout past the row's right edge and underneath the Split button, where it
+   was invisible and looked for all the world like it was never rendered. */
+#group-bar .slider-row { margin-bottom: 0; flex: 0 0 auto; }
+#group-bar .slider-row label { flex: 0 0 auto; }
+#group-bar input[type="range"] { width: 150px; flex: 0 0 150px; }
+#group-bar output { flex: 0 0 2.2rem; text-align: right; }
+
+@media (max-height: 780px) {
+  #group-bar { bottom: 118px; }
+}
+
 #troop-bar {
   position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
   z-index: 6;
@@ -804,7 +823,83 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 /* Music and Exit, side by side. The confirm box below is measured against the
    row, so the row is an element rather than the two buttons floating. */
 #exit-row { display: flex; gap: 0.4rem; justify-content: flex-end; }
-#exit-btn { padding: 0 0.8rem; min-height: 32px; }
+
+/* Square, and sized to the art rather than to a label: the gear is 32px and
+   the frame is 12 either side of it, so the button is exactly as big as what
+   it holds. Padding here would push the frame off the icon. */
+#menu-btn { padding: 0; line-height: 0; }
+#menu-btn img { display: block; width: 32px; height: 32px; image-rendering: pixelated; }
+#menu-btn.active { filter: brightness(1.2); }
+
+/* Wide enough that a controls line does not wrap, which is what decides this
+   number — the longest of them is the right-click line. */
+#game-menu { width: 360px; margin-top: 0.4rem; text-align: left; }
+#game-menu.hidden { display: none; }
+#game-menu .btn-row { margin-top: 0.7rem; }
+#game-menu .btn-row .btn { flex: 1 1 0; }
+
+.menu-head {
+  color: var(--gold); font-size: 0.72rem; letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0.1rem 0 0.45rem;
+}
+.menu-head + .menu-head, .slider-row + .menu-head { margin-top: 0.9rem; }
+
+/* label / track / readout. The readout is a fixed width so the track does not
+   jump about as the number goes from 8% to 100%. */
+.slider-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; }
+.slider-row label { flex: 0 0 4.4rem; font-size: 0.72rem; color: var(--ink); }
+.slider-row output { flex: 0 0 2.6rem; text-align: right; font-size: 0.72rem; color: var(--parchment); }
+.slider-row input[type="range"] { flex: 1 1 auto; min-width: 0; }
+
+/* The pack has no slider art, so this is built out of its palette rather than
+   pulled from somewhere else: a sunk charcoal track with a gold fill behind the
+   thumb, and the thumb itself the pack's own diamond turned 45 degrees. Squared
+   corners throughout, because everything else in this interface has them. */
+input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  height: 14px; background: transparent; cursor: pointer;
+}
+/* Chrome paints no filled portion of a range track — Firefox does, through
+   ::-moz-range-progress, and there is no WebKit equivalent. So the fill is a
+   gradient with a hard stop at --fill, which the client sets as a percentage
+   whenever a slider moves. Custom properties reach into the pseudo-element,
+   which is the only reason this works at all. Without it the two engines
+   disagree about whether a slider shows its own value. */
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  background: linear-gradient(to right,
+    var(--camel) 0 var(--fill, 0%), var(--navy) var(--fill, 0%) 100%);
+  border: 1px solid #000; box-shadow: inset 0 1px 0 #0008;
+}
+input[type="range"]::-moz-range-track {
+  height: 6px; background: var(--navy);
+  border: 1px solid #000; box-shadow: inset 0 1px 0 #0008;
+}
+input[type="range"]::-moz-range-progress { height: 6px; background: var(--camel); }
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 12px; height: 12px; margin-top: -4px;
+  background: var(--gold); border: 1px solid #2a2116;
+  transform: rotate(45deg);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 0;
+  background: var(--gold); border: 1px solid #2a2116;
+  transform: rotate(45deg);
+}
+input[type="range"]:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+input[type="range"]:disabled { cursor: not-allowed; filter: grayscale(1) brightness(0.7); }
+
+/* The controls list. A definition list because that is what it is, laid out in
+   two columns so the keys line up and can be scanned down. */
+#controls-list { display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.6rem; margin: 0; }
+#controls-list dt {
+  color: var(--gold); font-size: 0.68rem; white-space: nowrap;
+  text-align: right;
+}
+#controls-list dd { margin: 0; color: var(--ink); font-size: 0.68rem; }
+
 #exit-confirm { width: 250px; margin-top: 0.4rem; text-align: left; }
 #exit-confirm.hidden { display: none; }
 #exit-confirm .btn-row { margin-top: 0.5rem; }

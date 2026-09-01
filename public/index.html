@@ -91,11 +91,44 @@
       <div id="attack-alert-line2"></div>
     </div>
 
-    <!-- Leaving is destructive, so it asks first and says what it will do. -->
+    <!-- One gear in the corner, and everything that is not an order behind it:
+         the mix, the controls, and the way out. The controls list is the point
+         of it — every key in this game was undiscoverable until this menu
+         existed, so the only way to learn that X splits a group was to already
+         know. Leaving is still destructive, so it still asks first and still
+         says what it will do. -->
     <div id="exit-wrap">
       <div id="exit-row">
-        <button id="sound-btn-game" class="btn btn-sm" title="Toggle music">MUSIC ON</button>
-        <button id="exit-btn" class="btn btn-sm">Exit</button>
+        <button id="menu-btn" class="btn btn-sm" title="Menu" aria-label="Menu"
+                aria-expanded="false" aria-controls="game-menu">
+          <img src="assets/ui/gear.png" alt="">
+        </button>
+      </div>
+      <div id="game-menu" class="frame frame-plate hidden">
+        <div class="menu-head">Sound</div>
+        <div class="slider-row">
+          <label for="vol-master">Master</label>
+          <input type="range" id="vol-master" class="vol" min="0" max="100" step="1" value="100">
+          <output id="vol-master-out">100%</output>
+        </div>
+        <div class="slider-row">
+          <label for="vol-music">Music</label>
+          <input type="range" id="vol-music" class="vol" min="0" max="100" step="1" value="100">
+          <output id="vol-music-out">100%</output>
+        </div>
+        <div class="slider-row">
+          <label for="vol-sfx">Effects</label>
+          <input type="range" id="vol-sfx" class="vol" min="0" max="100" step="1" value="100">
+          <output id="vol-sfx-out">100%</output>
+        </div>
+        <div class="menu-head">Controls</div>
+        <!-- Written by renderControls() out of the same table onKeyDown reads,
+             so the list cannot drift from the bindings and start telling lies. -->
+        <dl id="controls-list"></dl>
+        <div class="btn-row">
+          <button id="exit-btn" class="btn btn-sm btn-danger">Main Menu</button>
+          <button id="menu-close" class="btn btn-sm">Close</button>
+        </div>
       </div>
       <div id="exit-confirm" class="frame frame-plate hidden">
         <div class="sub" id="exit-note"></div>
@@ -125,6 +158,19 @@
     <!-- The troop roster lives over the map rather than in the panel: it is
          what you look at while deciding where to click, so it belongs where
          you are already looking. -->
+    <!-- Only on screen while you have a group selected, and the slider is the
+         whole reason it exists: X halves, and half is not always the number you
+         want. Sits above the troop bar because that is where your eyes already
+         are when you are deciding what to do with an army. -->
+    <div id="group-bar" class="frame frame-plate hidden">
+      <div id="group-summary"></div>
+      <div class="slider-row">
+        <label for="split-count">Split off</label>
+        <input type="range" id="split-count" min="1" max="1" step="1" value="1">
+        <output id="split-out">1</output>
+      </div>
+      <button id="split-btn" class="btn btn-sm">Split</button>
+    </div>
     <div id="troop-bar" class="frame frame-plate">
       <div id="unit-inputs"></div>
       <div class="troop-actions">

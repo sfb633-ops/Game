@@ -137,8 +137,14 @@ match begins, so they are left to fetch then rather than racing the art for the
 connection. That is also the argument for encoding them: they are 16-bit PCM
 because there was no encoder on the machine that added them, and `ffmpeg -i
 music-regular.wav -q:a 4 music-regular.mp3` would take about nine tenths off
-each one. The MUSIC toggle — in the menu's corner, and in the match's, beside
-Exit — is remembered between visits and governs all four.
+each one. Three sliders govern the mix, behind the gear in the match's top
+corner: **Master**, **Music** and **Effects**. Music is the three score beds;
+Effects is the forest, which is weather and birds rather than score, and is
+where sound effects will join when there are any. All three are remembered
+between visits. The main menu keeps its MUSIC toggle, because the menu has no
+gear — and pulling any slider above zero clears that mute, since a player who
+drags a volume up has said what they want and should not have to go and find a
+toggle to be believed.
 
 ## Tests
 
@@ -673,13 +679,22 @@ sprite anchors and layering can be eyeballed as a PNG.
   health they were carrying, so reinforcing a battered group does not heal it.
   Only groups of the same kind can join: militia, knights and ballistae always
   march separately.
-- **Press X to split a group in half**, and joining stops being a one-way door.
+- **Split a group with the slider over the troop bar**, or press X to halve it.
+  Joining stops being a one-way door.
   The half that walks off holds where it stood; the half you keep is still the
   one you had selected, so your next order reaches it. Splitting moves soldiers
   rather than making them — the detachment carries whatever wounds the group was
   already nursing, and half of a rooted group is still rooted — so it is a way
   to peel off a scout or leave a garrison behind, never a way out of a fight.
-  Halving composes: half, and half again, is a quarter.
+  Halving composes: half, and half again, is a quarter. The bar over the troop
+  roster is up whenever you have a group selected, and is where you pick a
+  number rather than take half — its ceiling is one less than your smallest
+  selected group, because somebody always has to be left behind.
+- **The gear in the top corner** holds the sound sliders, the whole list of
+  controls, and the way back to the main menu. The list is written from the
+  same table the key handler reads, so it cannot drift out of date — which
+  matters, because before it existed every key here was undiscoverable, and
+  the only way to learn that X splits a group was to already know.
 - **Control groups on the number keys.** Shift+1 to 9 puts whatever you have
   selected in that slot, and a bare 1 to 9 selects it again; pressing the same
   number twice quickly also takes the camera to them, so one press stays safe
@@ -878,9 +893,10 @@ resource types beyond gold — and with camps no longer paying, gold now comes f
 the keep and its banks alone, which is one income with one decision attached
 rather than two with a grind attached.
 Nothing here is matchmade: a game is a four-letter code you share,
-which is enough for now and is not what a Steam release looks like. A group can
-be halved but not divided to a number you name, and the halves are always the
-same kind of soldier, because a group is one kind by construction.
+which is enough for now and is not what a Steam release looks like. The halves
+of a split are always the same kind of soldier, because a group is one kind by
+construction. There are no sound effects yet — the Effects slider governs the
+forest bed and is waiting for the rest.
 A group that is marching and being squared up in the same tick
 can briefly move faster than it walks, because the two movements do not share a
 budget. None of the sprite sheets carry a death animation, so units simply

@@ -32,15 +32,64 @@ function harness(steps) {
 ${body}
 <script>
 // Stand in for the parts of client.js that would otherwise need a server.
+//
+// Applied twice, and that is not belt-and-braces. The markup above carries the
+// real <script src="client.js">, so client.js genuinely runs here: it opens a
+// socket, fails to reach a server, and puts the main menu back up with an error
+// on it — AFTER this has already hidden it. Every case was quietly racing that
+// and mostly winning; the one that lost photographed the main menu instead of
+// the thing it was meant to be showing. So the state is set again once client
+// has finished losing, inside the virtual time budget below.
+function applyState() {
 document.getElementById('menu').classList.add('hidden');
 document.getElementById('game-ui').classList.remove('hidden');
 document.getElementById('lobby').classList.add('hidden');
 ${steps}
+}
+applyState();
+setTimeout(applyState, 1000);
 </script>
 </body></html>`;
 }
 
+// The controls list is written by client.js at runtime, and this harness does
+// not run client.js — it would want a socket. So the table is lifted out of the
+// source instead of being retyped here, because a screenshot of a list that is
+// not the real list is worth nothing.
+function controlsRows() {
+  const src = fs.readFileSync(path.join(GAME, 'client.js'), 'utf8');
+  const HEAD = '\nconst CONTROLS = [';
+  const open = src.indexOf(HEAD);
+  const close = open < 0 ? -1 : src.indexOf('\n];', open);
+  if (close < 0) throw new Error('CONTROLS not found in client.js — has it been renamed?');
+  return src.slice(open + HEAD.length, close);
+}
+
 const CASES = {
+  // The gear menu open: three sliders and every binding in the game.
+  menu: `
+    keep(0.78, 'hp-green', 'Town Center', '702 / 900');
+    document.getElementById('game-menu').classList.remove('hidden');
+    document.getElementById('menu-btn').classList.add('active');
+    const CONTROLS = [${controlsRows()}
+    ];
+    document.getElementById('controls-list').innerHTML = CONTROLS
+      .map(([k, w]) => '<dt>' + k + '</dt><dd>' + w + '</dd>').join('');
+    document.getElementById('vol-master').value = 80;
+    document.getElementById('vol-master-out').textContent = '80%';
+    document.getElementById('vol-music').value = 45;
+    document.getElementById('vol-music-out').textContent = '45%';
+    ['vol-master','vol-music','vol-sfx'].forEach(function (i) { paintRange(document.getElementById(i)); });`,
+  // The group bar, which is the only place splitting is visible.
+  group: `
+    keep(0.78, 'hp-green', 'Town Center', '702 / 900');
+    const gb = document.getElementById('group-bar');
+    gb.classList.remove('hidden');
+    document.getElementById('group-summary').textContent = '20 selected — 6 off, 14 stay';
+    const sc = document.getElementById('split-count');
+    sc.max = '19'; sc.value = '6';
+    document.getElementById('split-out').textContent = '6';
+    paintRange(sc);`,
   // The keep bar at three healths, and the banner up.
   full: `
     keep(1.0, 'hp-green', 'Town Center', '900 / 900');
@@ -109,7 +158,7 @@ for (const [name, steps] of Object.entries(CASES)) {
       '--force-device-scale-factor=1',
       '--window-size=1280,760',
       `--screenshot=${path.join(OUT, name + '.png')}`,
-      '--virtual-time-budget=1500',
+      '--virtual-time-budget=2200',
       'file:///' + file.replace(/\\/g, '/'),
     ], { stdio: 'pipe', timeout: 60000 });
     console.log('shot:', name);

@@ -195,5 +195,49 @@ document.getElementById('probe-result').textContent = JSON.stringify(out);
     `${leftGap}px of bare trough on the left and ${rightGap}px on the right, against a ${lip}px rim`);
 }
 
+// --- the group bar's readout is not underneath the Split button ------------
+//
+// It was. Every child of the slider row is a fixed width, so squeezing the row
+// made nothing narrower — it pushed the readout past the row's right edge and
+// under the button, where it painted nothing anybody could see. The DOM had the
+// number in it the whole time and every static check passed; only a box on
+// screen shows it, which is what this file is for.
+{
+  const r = probe(`
+    document.getElementById('group-bar').classList.remove('hidden');
+    document.getElementById('group-summary').textContent = '20 selected — 6 off, 14 stay';
+    const sc = document.getElementById('split-count');
+    sc.max = '19'; sc.value = '6';
+    document.getElementById('split-out').textContent = '6';
+    return { out: box('split-out'), btn: box('split-btn'), slider: box('split-count'),
+             bar: box('group-bar') };`);
+  const overlaps = (a, b) =>
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  check('the split readout is not hidden under the Split button',
+    !overlaps(r.out, r.btn),
+    `readout ${JSON.stringify(r.out)} vs button ${JSON.stringify(r.btn)}`);
+  check('  nor under the slider it belongs to', !overlaps(r.out, r.slider));
+  check('  and it has a box worth painting into', r.out.w > 10 && r.out.h > 6,
+    `${r.out.w}x${r.out.h}`);
+  check('  with everything inside the bar it lives in',
+    r.out.x >= r.bar.x && r.out.x + r.out.w <= r.bar.x + r.bar.w,
+    `readout ${r.out.x}..${r.out.x + r.out.w} in bar ${r.bar.x}..${r.bar.x + r.bar.w}`);
+}
+
+// --- the gear menu opens over the map, not off the side of it --------------
+{
+  const r = probe(`
+    document.getElementById('game-menu').classList.remove('hidden');
+    return { menu: box('game-menu'), gear: box('menu-btn'), wrap: box('map-wrap') };`);
+  check('the settings menu stays inside the map area',
+    r.menu.x >= r.wrap.x - 1 && r.menu.x + r.menu.w <= r.wrap.x + r.wrap.w + 1,
+    `menu ${r.menu.x}..${r.menu.x + r.menu.w} in map ${r.wrap.x}..${r.wrap.x + r.wrap.w}`);
+  check('  and hangs off the gear rather than floating loose',
+    Math.abs((r.menu.x + r.menu.w) - (r.gear.x + r.gear.w)) <= 2,
+    `menu right ${r.menu.x + r.menu.w}, gear right ${r.gear.x + r.gear.w}`);
+  check('the gear button is square, and the size of its art',
+    Math.abs(r.gear.w - r.gear.h) <= 2, `${r.gear.w}x${r.gear.h}`);
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall browser checks pass');
 process.exit(failures ? 1 : 0);

@@ -183,6 +183,10 @@ const STORE = {
   // whichever one happens to be the default.
   map: 'empire.map',
   teams: 'empire.teams',
+  // The mix, one key per bus. Kept apart from 'muted' rather than folded into
+  // it: muting is a thing you do for a minute and undo, and it must not cost
+  // you the levels you set.
+  volMaster: 'empire.vol.master', volMusic: 'empire.vol.music', volSfx: 'empire.vol.sfx',
 };
 const remembered = (key, fallback) => {
   try { const v = localStorage.getItem(key); return v === null ? fallback : v; } catch { return fallback; }
@@ -275,20 +279,34 @@ function previewFrame(ts) {
 // Autoplay with sound is blocked until the page has been interacted with, so
 // the first click or keypress is what actually starts any of it. Muting is
 // sticky, and mutes all four.
-const soundBtns = ['sound-btn', 'sound-btn-game']
-  .map(id => document.getElementById(id)).filter(Boolean);
+// Only the main menu has one now — in a match the mix is on sliders behind the
+// gear. Still a list, and still filtered, because the menu's button does not
+// exist on every screen this file runs on.
+const soundBtns = ['sound-btn'].map(id => document.getElementById(id)).filter(Boolean);
 let muted = remembered(STORE.muted, '0') === '1';
 
 // A layer's peak is how loud it is when it is the one playing, and its fade is
 // how many seconds it takes to get there. The two music beds are the slow ones:
 // a cut between them would announce the fight a beat before the fight, and be
 // the most conspicuous thing in the game.
+// `bus` is which slider governs it. The forest is on Effects rather than Music
+// because that is what it is — weather and birds, not score — and it means all
+// three sliders do something real today rather than one of them waiting for
+// sound effects that do not exist yet. When they arrive, they join that bus.
 const layers = {
-  ambience: { el: document.getElementById('ambience'),      peak: 0.11, fade: 2.5 },
-  menu:     { el: document.getElementById('menu-music'),    peak: 0.45, fade: 0.8 },
-  regular:  { el: document.getElementById('music-regular'), peak: 0.34, fade: 1.6 },
-  battle:   { el: document.getElementById('music-battle'),  peak: 0.40, fade: 1.6 },
+  ambience: { el: document.getElementById('ambience'),      peak: 0.11, fade: 2.5, bus: 'sfx' },
+  menu:     { el: document.getElementById('menu-music'),    peak: 0.45, fade: 0.8, bus: 'music' },
+  regular:  { el: document.getElementById('music-regular'), peak: 0.34, fade: 1.6, bus: 'music' },
+  battle:   { el: document.getElementById('music-battle'),  peak: 0.40, fade: 1.6, bus: 'music' },
 };
+
+// Master multiplies both buses. Stored as 0-100 because that is what the slider
+// speaks and what a player reads; used as 0-1 everywhere below.
+const volFrom = (key) => {
+  const n = Number(remembered(key, '100'));
+  return Number.isFinite(n) ? Math.max(0, Math.min(1, n / 100)) : 1;
+};
+const VOL = { master: volFrom(STORE.volMaster), music: volFrom(STORE.volMusic), sfx: volFrom(STORE.volSfx) };
 const allLayers = Object.values(layers);
 for (const l of allLayers) { l.el.volume = 0; l.want = 0; }
 
@@ -360,7 +378,12 @@ function syncSound() {
 // error worth reporting: the next gesture calls syncSound again and it takes.
 function driveAudio(dt) {
   for (const l of allLayers) {
-    const to = l.want * l.peak;
+    const to = l.want * l.peak * VOL.master * VOL[l.bus];
+    // The step is deliberately NOT scaled by the mix. Scaling it would keep the
+    // shape of the ramp at every volume, and it would also make the step zero
+    // when a bus is at zero — so a layer being turned off would crawl towards
+    // silence and never arrive, and never pause. A quiet fade finishing sooner
+    // than a loud one is not something anybody can hear.
     const step = (l.peak / l.fade) * dt;
     const v = to > l.el.volume ? Math.min(to, l.el.volume + step)
                                : Math.max(to, l.el.volume - step);
@@ -387,6 +410,49 @@ for (const b of soundBtns) b.addEventListener('click', () => {
   remember(STORE.muted, muted ? '1' : '0');
   syncSound();
 });
+
+// One wiring for all three sliders, because they differ only in which bus they
+// govern. Dragging one above zero also clears the mute: a player who muted on
+// the menu, then came into a match and pulled a slider up, has said what they
+// want twice and should not have to find the toggle to be believed.
+const VOL_ROWS = [
+  ['master', 'vol-master', STORE.volMaster],
+  ['music', 'vol-music', STORE.volMusic],
+  ['sfx', 'vol-sfx', STORE.volSfx],
+];
+// Chrome paints no filled part of a range track, so the stylesheet draws it as
+// a gradient with a hard stop and this is what tells it where the stop goes.
+function paintRange(el) {
+  if (!el) return;
+  const min = Number(el.min) || 0;
+  const max = Number(el.max) || 100;
+  const span = max - min;
+  const pct = span > 0 ? ((Number(el.value) - min) / span) * 100 : 0;
+  el.style.setProperty('--fill', Math.max(0, Math.min(100, pct)) + '%');
+}
+
+function syncVolRow(bus, id) {
+  const el = document.getElementById(id);
+  const out = document.getElementById(id + '-out');
+  if (!el) return;
+  const pct = Math.round(VOL[bus] * 100);
+  if (el.value !== String(pct)) el.value = String(pct);
+  if (out) out.textContent = pct + '%';
+  paintRange(el);
+}
+for (const [bus, id, key] of VOL_ROWS) {
+  const el = document.getElementById(id);
+  if (!el) continue;
+  syncVolRow(bus, id);
+  el.addEventListener('input', () => {
+    const pct = Math.max(0, Math.min(100, Number(el.value) || 0));
+    VOL[bus] = pct / 100;
+    remember(key, String(pct));
+    if (pct > 0 && muted) { muted = false; remember(STORE.muted, '0'); }
+    syncVolRow(bus, id);
+    syncSound();
+  });
+}
 for (const evt of ['pointerdown', 'keydown']) {
   window.addEventListener(evt, syncSound, { once: false, passive: true });
 }
@@ -636,6 +702,49 @@ function renderRoomList(list) {
 })();
 
 window.addEventListener('beforeunload', () => { if (ws) ws.intentionallyClosed = true; });
+
+// Every binding in the game, in one table, rendered into the menu. This is the
+// list and the documentation both: onKeyDown is the only other place a key is
+// named, and anything added there without a line here is a control nobody can
+// find — which is the state the whole game was in before this menu existed.
+const CONTROLS = [
+  ['Left-click', 'Select a group'],
+  ['Drag', 'Select everything in the box'],
+  ['Shift + click', 'Add to the selection, or take one out'],
+  ['Right-click', 'March there, attack it, or join another of your groups'],
+  ['X', 'Split the selected groups in half'],
+  ['R', 'Recall the selected groups'],
+  ['Q', 'Use your race ability'],
+  ['Shift + 1-9', 'Put the selection in a control group'],
+  ['1-9', 'Select that control group; twice takes the camera there'],
+  ['W A S D', 'Pan the camera, as do the arrow keys'],
+  ['Esc', 'Cancel what is armed, or close this menu'],
+];
+function renderControls() {
+  const list = document.getElementById('controls-list');
+  if (!list || list.childElementCount) return;      // static; written once
+  list.innerHTML = CONTROLS
+    .map(([key, what]) => `<dt>${key}</dt><dd>${what}</dd>`).join('');
+}
+renderControls();
+
+function showGameMenu(show) {
+  const box = document.getElementById('game-menu');
+  const btn = document.getElementById('menu-btn');
+  if (!box) return;
+  box.classList.toggle('hidden', !show);
+  if (btn) { btn.classList.toggle('active', show); btn.setAttribute('aria-expanded', String(show)); }
+  // The confirm hangs off the menu, so closing the menu takes it with it —
+  // otherwise a half-answered "are you sure" is left floating under a gear
+  // that now looks shut.
+  if (!show) showExitConfirm(false);
+}
+function gameMenuOpen() {
+  const box = document.getElementById('game-menu');
+  return !!box && !box.classList.contains('hidden');
+}
+document.getElementById('menu-btn').addEventListener('click', () => showGameMenu(!gameMenuOpen()));
+document.getElementById('menu-close').addEventListener('click', () => showGameMenu(false));
 
 document.getElementById('exit-btn').addEventListener('click', () => {
   showExitConfirm(document.getElementById('exit-confirm').classList.contains('hidden'));
@@ -1201,6 +1310,9 @@ function deployStagedAt(ix, iy) {
   send({ type: 'deployUnits', units, x: ix, y: iy });
   document.querySelectorAll('#unit-inputs input').forEach(inp => { inp.value = 0; });
   updateDeployButton();
+  // Counts move as soldiers fall, so the slider's ceiling has to move with
+  // them rather than being set once when the selection was made.
+  renderGroupBar();
   return true;
 }
 
@@ -2896,6 +3008,10 @@ function onKeyDown(e) {
   if (k === 'escape') {
     if (cancelDrag()) return;
     if (!document.getElementById('exit-confirm').classList.contains('hidden')) { showExitConfirm(false); return; }
+    // After the confirm and before everything armed: the menu is the outermost
+    // thing on screen, so it is the last of the two to close and the first of
+    // the rest.
+    if (gameMenuOpen()) { showGameMenu(false); return; }
     if (armedBuild) { armBuild(null); return; }
     if (armedSpell) { armSpell(null); return; }
     if (armedAbility) { armAbility(false); return; }
@@ -2942,6 +3058,83 @@ function splitSelection() {
     sent++;
   }
   if (!sent) log('Nothing to split — a group needs at least two soldiers.');
+}
+
+// The bar over the troop roster: what is selected, and how many to peel off.
+//
+// X halves because halving needs no second input. This is the other half of
+// that — the number you actually wanted — and it is the only way splitting is
+// visible at all, since a key nothing on screen mentions is a key nobody finds.
+//
+// `splitWant` lives out here on purpose. renderGroupBar runs on every state
+// message, five times a second, so anything it recomputes from scratch would
+// snap back under the player's thumb mid-drag. It is reset only when the
+// SELECTION changes, which is the one time a remembered number is meaningless.
+let splitWant = 1;
+let splitSig = '';
+
+function renderGroupBar() {
+  const bar = document.getElementById('group-bar');
+  if (!bar) return;
+  const groups = selectedList();
+  if (!groups.length) { bar.classList.add('hidden'); splitSig = ''; return; }
+  bar.classList.remove('hidden');
+
+  const total = groups.reduce((n, a) => n + (a.count || 0), 0);
+  // The smallest group is the ceiling: the same count goes to all of them, and
+  // somebody has to be left behind in every one — the server refuses a split
+  // that empties a group, and a slider that can ask for a refusal is a slider
+  // that lies.
+  const smallest = Math.min(...groups.map(a => a.count || 0));
+  const maxSplit = Math.max(0, smallest - 1);
+
+  const sig = groups.map(a => a.id).sort().join(',');
+  if (sig !== splitSig) { splitSig = sig; splitWant = Math.max(1, Math.floor(smallest / 2)); }
+  splitWant = Math.min(Math.max(1, splitWant), Math.max(1, maxSplit));
+
+  const slider = document.getElementById('split-count');
+  const out = document.getElementById('split-out');
+  const btn = document.getElementById('split-btn');
+  const can = maxSplit >= 1;
+  slider.max = String(Math.max(1, maxSplit));
+  if (slider.value !== String(splitWant)) slider.value = String(splitWant);
+  out.textContent = String(splitWant);
+  paintRange(slider);
+  slider.disabled = !can;
+  btn.disabled = !can;
+
+  const what = groups.length === 1
+    ? `${total} selected`
+    : `${groups.length} groups, ${total} soldiers`;
+  document.getElementById('group-summary').textContent = !can
+    ? `${what} — too few to split`
+    : groups.length === 1
+      ? `${what} — ${splitWant} off, ${total - splitWant} stay`
+      : `${what} — ${splitWant} off each`;
+}
+
+// The same count to every selected group, clamped per group so a mixed
+// selection splits what it can rather than being refused as a whole.
+function splitSelectedByCount() {
+  const groups = selectedList();
+  let sent = 0;
+  for (const a of groups) {
+    const n = Math.min(splitWant, (a.count || 0) - 1);
+    if (n < 1) continue;
+    send({ type: 'splitArmy', armyId: a.id, count: n });
+    sent++;
+  }
+  if (!sent) log('Nothing to split — a group needs at least two soldiers.');
+}
+
+{
+  const slider = document.getElementById('split-count');
+  const btn = document.getElementById('split-btn');
+  if (slider) slider.addEventListener('input', () => {
+    splitWant = Math.max(1, Number(slider.value) || 1);
+    renderGroupBar();
+  });
+  if (btn) btn.addEventListener('click', splitSelectedByCount);
 }
 
 let lastGroupKey = null, lastGroupAt = 0;

@@ -2716,6 +2716,11 @@
    "h": 45,
    "slice": 12
   },
+  "gear": {
+   "file": "ui/gear.png",
+   "w": 32,
+   "h": 32
+  },
   "keepbar": {
    "file": "ui/keepbar.png",
    "w": 258,

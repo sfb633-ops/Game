@@ -746,5 +746,63 @@ if (geomStart > 0 && geomEnd > geomStart) {
     recall.includes('centerCameraOn(') ? 'both present' : 'no centerCameraOn');
 }
 
+
+// --- a control nobody can find is a control nobody has ---------------------
+//
+// The whole game shipped with seven keyboard bindings and no way to learn any
+// of them: the only mention of X anywhere in the running client was the line it
+// logs when you press X with nothing selected, which you cannot reach without
+// already knowing to press X. The gear menu lists them now, and this is what
+// stops the list drifting away from the bindings — a key added to onKeyDown and
+// not to CONTROLS is a key nobody will ever find.
+{
+  const keys = bodyOf('onKeyDown');
+  const listed = client.slice(client.indexOf('const CONTROLS = ['), client.indexOf('function renderControls'));
+  check('the controls list exists, and the menu is written from it',
+    listed.includes("['X'") && bodyOf('renderControls').includes('CONTROLS'));
+
+  // Every bare letter onKeyDown tests for, against what the menu admits to.
+  const handled = [];
+  const re = /k === '([a-z])'/g;
+  let m;
+  while ((m = re.exec(keys))) handled.push(m[1].toUpperCase());
+  for (const key of handled) {
+    check(`  ${key} is a key the player can be told about`,
+      listed.includes(`['${key}'`), listed.includes(`['${key}'`) ? 'listed' : 'NOT IN THE MENU');
+  }
+  check('  and the digits are in there too',
+    listed.includes("['1-9'") && listed.includes("['Shift + 1-9'"));
+  check('  as is Escape, which is a word rather than a letter',
+    listed.includes("['Esc'"));
+}
+
+// --- splitting by a number, not only in half ------------------------------
+{
+  const body = bodyOf('splitSelectedByCount');
+  check('the Split button asks the server for the count on the slider',
+    body.includes("type: 'splitArmy'") && body.includes('splitWant'));
+  check('  clamped per group, so a mixed selection splits what it can',
+    body.includes("Math.min(splitWant"));
+  const bar = bodyOf('renderGroupBar');
+  check('the slider can never ask for a split the server would refuse',
+    bar.includes('smallest - 1'), 'ceiling is the smallest group less one');
+  check('  and the number survives a state message landing mid-drag',
+    bar.includes('splitSig') && client.includes('let splitWant'),
+    'reset on selection change, not on every render');
+}
+
+// --- the mix ---------------------------------------------------------------
+{
+  check('every audio layer is on a bus a slider governs',
+    (client.match(/bus: '(music|sfx)'/g) || []).length === 4,
+    `${(client.match(/bus: '(music|sfx)'/g) || []).length} of 4 layers assigned`);
+  check('  and the mix is actually applied to the volume',
+    bodyOf('driveAudio').includes('VOL.master') && bodyOf('driveAudio').includes('VOL[l.bus]'));
+  check('  and remembered between visits',
+    client.includes('STORE.volMaster') && client.includes('STORE.volSfx'));
+  check('pulling a slider up un-mutes, rather than doing nothing audible',
+    client.includes("if (pct > 0 && muted)"));
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall client checks pass');
 process.exit(failures ? 1 : 0);

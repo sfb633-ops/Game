@@ -1902,12 +1902,34 @@ function buildUi() {
     };
     borders.push(`${name} ${slice[0] === slice[1] ? slice[0] : slice.join('/')}`);
   }
+  buildGear();
   buildKeepBar();
   buildBanner();
   // Printed because these are the numbers the stylesheet has to repeat, and
   // reading them off the build beats measuring the PNGs by hand.
   console.log(`  ui: ${Object.keys(manifest.ui).length} pieces`);
   console.log(`       borders: ${borders.join(', ')}`);
+}
+
+// The one piece of interface art that is not off the Dark Ages sheet, and it
+// is worth saying why rather than letting somebody find it and assume a slip.
+// The settings menu needs a gear and that sheet has none — it is frames, bars,
+// rules and diamonds, with no icon set in it at all. The choice was a Unicode
+// gear glyph or this, and a glyph is a different shape on every platform, which
+// is not a thing to ship. So it comes off the MiniWorldSprites icon sheet,
+// which is already the pack every building and every soldier in the game is
+// drawn from; the gold one, because the amber reads against the charcoal frame
+// the way the sheet's own gold leaf does.
+//
+// If a gear ever turns up in the interface pack, this should go and take the
+// exception with it.
+const GEAR = { x: 48, y: 160, w: 16, h: 16, scale: 2 };
+
+function buildGear() {
+  const sheet = decodePNG(need(path.join(MINI, 'User Interface', 'UiIcons.png')));
+  const img = ops.scaleUp(ops.crop(sheet, GEAR.x, GEAR.y, GEAR.w, GEAR.h), GEAR.scale);
+  manifest.ui.gear = { file: write(img, 'ui', 'gear.png'), w: img.width, h: img.height };
+  console.log(`  gear: ${img.width}x${img.height}`);
 }
 
 // The town center's health bar, from the Dark Ages UI sheet.

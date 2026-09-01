@@ -3864,6 +3864,107 @@ Its fairness at 6-plus empires runs 0.64-0.77 against a ring map's 0.99. Worth
 a global relaxation pass if scattered maps ever matter more than they do.
 
 
+### The controls nobody could find (1 Sep 2026)
+
+This started as "fix unit splitting" and the splitting turned out not to be
+broken. `cmdSplitArmy` is one of the better-tested things in the codebase —
+`rules.test.js` pins conservation of soldiers, of health, of the `mustered`
+ceiling, wound distribution, root inheritance, the merge round trip and six
+refusal cases. What was broken was that **nobody could find it.**
+
+The question that opened it was "how am I supposed to split in game?", and the
+honest answer was: you press X, and the game never tells you so. There was no
+help, no controls list, no keybind hint on anything. The word "split" did not
+appear in `index.html` or `style.css` at all. The single mention of X anywhere
+in the running client was this, in `splitSelection`:
+
+    log('Select a group first — X splits it in half.');
+
+...which fires only when you press X with nothing selected. The only way to be
+told what X does was to already know to press X, and then get it wrong. Seven
+bindings were in that state: X, R, Q, Shift+1-9, 1-9, WASD and Escape. All of
+them were documented properly in the README, which is not the game.
+
+**A gear, and everything that is not an order behind it.** The corner had Exit
+and a MUSIC toggle; it has one gear now. Behind it: three sound sliders, the
+whole list of controls, and Main Menu, which is the old Exit with the same
+confirm and the same warning about what leaving costs.
+
+The controls list is rendered from `CONTROLS`, the same table nothing else may
+name a key outside of. `client.test.js` walks every `k === '<letter>'` in
+`onKeyDown` and fails if that letter is not in the table — so a binding added
+without a line in the menu is a test failure rather than a control nobody will
+ever discover. That check is the actual fix here; the menu is just where it
+shows up.
+
+**The gear is the one piece of interface art not off the Dark Ages sheet**, and
+`build-assets.js` says so where it cuts it. That sheet is frames, bars, rules and
+diamonds with no icon set in it at all, so the choice was a Unicode gear glyph or
+an icon from somewhere else. A glyph is a different shape on every platform,
+which is not a thing to ship, so it comes off the MiniWorldSprites icon sheet —
+already the pack every building and soldier is drawn from. If a gear ever turns
+up in the interface pack, that exception should go with it.
+
+**Splitting by a number.** `cmdSplitArmy` has always taken a count; only the
+client was hard-wired to send half. The bar over the troop roster is up whenever
+a group is selected, and its slider is the number. X still halves, because
+halving needs no second input and composes.
+
+Two things in it are less obvious than they look:
+
+- **The ceiling is the smallest selected group less one.** The server refuses a
+  split that empties a group, and a slider that can ask for a refusal is a
+  slider that lies. With several groups selected the same count goes to each,
+  clamped per group, so a mixed selection splits what it can instead of being
+  turned down as a whole.
+- **`splitWant` lives outside `renderGroupBar`.** That function runs on every
+  state message — five times a second — so a number recomputed from scratch each
+  time would snap back under the player's thumb mid-drag. It is reset only when
+  the *selection* changes, which is the one moment a remembered number means
+  nothing.
+
+**The mix is three buses.** `Master` multiplies everything; `Music` is the three
+score beds; `Effects` is the forest. Putting ambience on Effects rather than
+Music is deliberate — it is weather and birds, not score — and it means all three
+sliders do something real today instead of one of them waiting for sound effects
+that do not exist yet. When they arrive they join that bus. Levels are stored per
+bus and kept apart from `muted`, because muting is a thing you do for a minute
+and undo, and it must not cost you the levels you set. Pulling any slider above
+zero clears the mute.
+
+The fade step is deliberately *not* scaled by the mix. Scaling it would preserve
+the shape of the ramp at every volume and would also make the step zero when a
+bus is at zero — so a layer being turned off would crawl at silence and never
+arrive, and never pause. A quiet fade finishing sooner than a loud one is not
+something anybody can hear.
+
+**Two bugs found by looking, which is the only way either was ever going to be
+found.**
+
+The split readout rendered nothing. The DOM had `<output id="split-out">6</output>`
+in it, every static check passed, and `--dump-dom` showed the text — but the
+number was not on screen. Every child of the slider row is a fixed width, so
+shrinking the row made nothing narrower; it pushed the readout past the row's
+right edge and underneath the Split button. `flex: 0 0 auto` on the row. There is
+a check in `browser.test.js` now that the readout's box does not overlap the
+button's, because that is the only kind of thing that would have caught it.
+
+And `shoot-ui.js` was racing the client all along. The harness slices the real
+`<body>`, which carries the real `<script src="client.js">`, so client.js
+genuinely runs on those pages: it opens a socket, fails, and puts the main menu
+back up — after the harness has already hidden it. Every case had been quietly
+winning that race; the first new one lost, and photographed the main menu
+instead of the thing it was meant to show. The state is applied twice now, once
+immediately and once after client has finished losing.
+
+**Chrome paints no filled part of a range track.** Firefox does, through
+`::-moz-range-progress`, and there is no WebKit equivalent, so the two engines
+disagreed about whether a slider showed its own value. The fill is a gradient
+with a hard stop at `--fill`, which `paintRange` sets whenever a slider moves;
+custom properties reach into the pseudo-element, which is the only reason it
+works.
+
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no
