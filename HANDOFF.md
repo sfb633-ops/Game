@@ -31,12 +31,15 @@ and never was; if you find that framing anywhere else, it is wrong and should go
 Written down because it settles arguments that otherwise get relitigated every
 session. These are the owner's calls, not inferences from the code.
 
-- **Matches run 15 to 40 minutes, and vary.** Not a fixed arc. A game that takes
-  the same time every match is one whose shape the player already knows before
-  it starts. Nearly every number in `config.js` descends from this figure —
-  income rates, train times, keep health, how far across the map is — so a
-  balance change that quietly moves typical match length is a bigger change than
-  it looks.
+- **Matches run 15 to 40 minutes, and vary — a description, not a gate.**
+  Downgraded from a prime directive on 1 Sep 2026, by the owner, explicitly: the
+  build gets to decide what the length is and it gets fixed from there. What
+  stays true is the second half of it. A game that takes the same time every
+  match is one whose shape the player already knows before it starts, and nearly
+  every number in `config.js` descends from the original figure — income rates,
+  train times, keep health, how far across the map is. So a change that moves
+  typical match length is still a bigger change than its diff looks, and still
+  worth noticing. It is no longer a reason to stop and ask.
 - **Winning should feel hard-fought, and land as satisfying.** A match ends
   because somebody's keep fell, so that is the moment the whole game is building
   towards and it has to be worth arriving at — an assault should be an event,
@@ -3755,6 +3758,112 @@ the obvious source. Outposts are still discs. The keep tile draws nothing —
 its health bar hangs over the gate, which reads fine, but a banner or a pair of
 guards on the gate would say "this is the thing to hit" more clearly.
 
+### Seats, measured (1 Sep 2026)
+
+Reported from playtests as empires starting on top of each other on a small
+game. It was real, it was one function, and the audit that found it turned up
+two more sitting behind it.
+
+**Measure it first.** `tools/spawn-audit.js` seats every player count a lobby
+reaches — 2, 3, 4, 6, 8, 12 — on every map, in a free-for-all and in 2/3/4
+teams, and reports the distance from each empire to its nearest ENEMY. That is
+the number that decides whether an opening is a game or a knife fight, and an
+ally does not count towards it. It also reports `fairness`, the unluckiest
+empire's nearest-enemy distance over the luckiest's, because a set of seats is
+only as balanced as its worst one.
+
+**The bug: greedy seat selection has a blind spot on a ring.** `spreadSeats`
+took the two seats furthest apart, then kept adding whichever was furthest from
+everything chosen so far, then ran a swap pass. Choosing six seats from a
+twelve-seat ring — which is four of the six maps — it opens on a diameter,
+quarters it, and is then left with nothing but seats adjacent to one it already
+holds:
+
+    greedy   [0,3,6,7,9,11]  narrowest gap 48.8   <- 6 and 7 are NEIGHBOURS
+    optimal  [1,3,5,7,9,11]  narrowest gap 75.3   <- every other seat
+
+Half again as far, and the answer anybody would give by eye. No single swap
+improves the greedy set, so the swap pass could not climb out either — the
+whole neighbourhood is a trap.
+
+It is exhaustive now. A pool is `MAP.maxPlayers` seats, so the worst case is
+C(12,6) = 924 subsets of fifteen pairs, once per match, and it measures at 1ms
+— cheaper than the greedy pass it replaced. Ties break on the next-narrowest
+gap and the next, so the choice is stable rather than falling to whichever
+rotation of the same ring the loop happened to reach first. `SEAT_SEARCH_BUDGET`
+guards the day somebody raises `MAP.maxPlayers`: past it the old greedy runs
+instead, because a tighter set of seats is a better failure than a server that
+stops answering halfway through starting a match.
+
+**The second bug: distance does not know what a side is.** Eight empires on The
+Divide went three west and five east. Both halves are the same size, so three
+of them had half a map to themselves while five were packed at thirty tiles
+apart — and the spine means your side-mates are the neighbours you cannot get
+away from. Selection now matches the split each block should give up before it
+maximises width inside it: Divide 4/4, Four Corners 2/2/2/2. It only binds when
+a layout actually clusters, which is exactly when there are fewer groups than
+seats — a ring and a scattered map give every seat its own group, and there one
+seat per "block" is not a division of the map into sides.
+
+**The third bug: both shrines were landing on the same side.** `fairestSpot`
+scored each shrine on being equidistant from everybody *on its own*, and the
+only place that answer exists is the middle — so the second landed beside the
+first, the pair 34 tiles apart in the centre. Three teams seats a side in a
+centre column. That team started on top of both shrines while the flanks
+marched for them: **93 tiles of advantage**, against `SHRINE`'s own stated
+intent that a shrine is "a march, not a land grab by whoever happened to spawn
+nearest."
+
+Each shrine is now scored on the walk to the nearest shrine *of any*, counting
+the ones already placed, so the second goes where the first did not reach —
+which is what having two of them is for. With none placed the sum reduces
+exactly to what it was, so the first shrine lands where it always did.
+
+**What it bought.**
+
+| | before | after |
+|---|---|---|
+| Ring maps, 6 empires | 48.8, fairness 0.42 | 75.3, fairness 0.99 |
+| The Divide, 8 empires | 3/5 split, fairness 0.38 | 4/4 split, fairness 0.53 |
+| Four Corners, 8 empires | fairness 0.54 | fairness 1.00 |
+| 3 teams, 8 empires, shrine walk | 92.8 tiles apart | 44.6 tiles |
+| Four Corners, 6 empires, shrine walk | 75.8 tiles | 22.5 tiles |
+
+`tools/tests/spawn-fairness.test.js` pins it, and pins it against brute force
+rather than against the numbers above — it recomputes the best set available
+and asserts the chosen one matches, so it keeps holding if the layouts move.
+
+**What other games do, since it settles the three left open below.** Fixed,
+hand-authored start positions on symmetric maps are the norm — StarCraft II,
+Warcraft III, Company of Heroes, the AoE ladder maps. Where placement is
+procedural, AoE's random map scripts do it with an explicit circular placement
+and an angle variation, not by scattering and hoping. Blizzard disabled close
+spawns outright on several SC2 ladder maps, leaving cross-spawn only, because a
+close pairing on a four-player map is a different game from a far one. And
+AoE2's team placement deliberately keeps **pocket and flank** positions rather
+than equalising them.
+
+**Left alone, deliberately, because all three are design calls and not bugs:**
+
+- **Two teams slides from fairness 0.84 to 0.73 as the lobby fills.** That is
+  pocket-versus-flank, which AoE2 has shipped on purpose for twenty years. It
+  is a meta, not a defect, unless somebody decides otherwise.
+- **Four teams sits at 0.62-0.65.** Inherent to a square: the diagonal opponent
+  is root-two further away than the adjacent ones. This is SC2's close-spawn
+  problem, and their answer was to forbid the close pairing rather than move
+  the corners.
+- **Two shrines cannot serve twelve empires evenly** — Four Corners at 12 still
+  shows a 74-tile gap. Fixing it means shrine count scaling with player count,
+  and `SHRINE.kinds` defines exactly two on purpose, with the reasoning in
+  `config.js`. Not a thing to change quietly.
+
+The scattered map (`wilds`) is now optimal *within the seats it generated*, and
+those seats are the ceiling: `findOpenSpot` is rejection sampling with a minimum
+separation, so it places greedily and later seats wedge into whatever is left.
+Its fairness at 6-plus empires runs 0.64-0.77 against a ring map's 0.99. Worth
+a global relaxation pass if scattered maps ever matter more than they do.
+
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no
@@ -3807,11 +3916,12 @@ depend on anything it fakes without checking in a browser too.
   unit control all need server-side validation of whatever the client
   requests — the client should never be trusted to decide if a placement
   or move is legal.
-- Check a balance change against typical match length before shipping it. The
-  target is 15 to 40 minutes and varying (see "What it is aiming at"); a change
-  that moves the middle of that range is a bigger change than its diff looks,
-  and one that lengthens the *endgame* specifically is working against the thing
-  the no-resign rule is there to protect.
+- Notice what a balance change does to typical match length — but ship it
+  anyway. 15 to 40 minutes and varying is where the numbers came from rather
+  than a bar to clear (see "What it is aiming at", and the note there about when
+  that changed). The one part still worth stopping over is a change that
+  lengthens the *endgame* specifically, because that works against the thing the
+  no-resign rule exists to protect.
 - Prefer making a number into a place. The rule that walls are ground rather
   than `+defense`, that a ballista has reach rather than strength, that vision
   is eyes with radii rather than a veil — that is the spine of this design, and

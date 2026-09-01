@@ -269,6 +269,12 @@ const LAID_OUT_SPACING = CASTLE.buildRadius[1] * 2 + 4;
 // opening border clear of the map edge, so this cannot push one off the map.
 const SEAT_MARGIN_Y = 12;
 
+// How many candidate seat sets spreadSeats will sit and check before it gives
+// up on being exact. Twelve seats choose six is 924, so today nothing comes
+// close; this exists so that raising MAP.maxPlayers is a worse spread rather
+// than a server that stops answering halfway through starting a match.
+const SEAT_SEARCH_BUDGET = 200000;
+
 // Army ids used to come from a counter shared by every match in the process,
 // which made two identical matches produce different worlds — same terrain,
 // same orders, different ids, and from there a serialize() that does not
@@ -960,51 +966,148 @@ class Match {
   // NEIGHBOURS. Three empires with a whole map to spread across started in each
   // other's laps, and it looked exactly as bad as it was.
   //
-  // Farthest-point first: take the two seats furthest apart, then keep adding
-  // whichever seat is furthest from everything chosen so far. Then a swap pass,
-  // because greedy is good and not optimal — try every unused seat in place of
-  // every chosen one and keep any exchange that widens the narrowest gap. Two
-  // passes settle it at these sizes, and the whole thing runs once per match.
+  // This is exhaustive rather than greedy, and it has to be. Farthest-point
+  // insertion with a swap pass is the natural way to write it and it has a
+  // blind spot on the layout most of these maps use. Choosing six seats from a
+  // twelve-seat ring it opens with the two ends of a diameter, quarters them,
+  // and is then left with nothing but seats adjacent to one it already holds:
+  // [0,3,6,7,9,11], which contains a NEIGHBOURING PAIR and a narrowest gap of
+  // 48.8 tiles. The answer anybody would give by eye — every other seat — is
+  // 75.3, half again as far. No single swap improves the greedy set, so the
+  // swap pass could not rescue it either; the whole neighbourhood is a trap.
+  //
+  // A pool is MAP.maxPlayers seats, so this is at most C(12,6) = 924 subsets of
+  // fifteen pairs, once per match. Checking every one costs less than the
+  // greedy pass it replaces.
+  //
+  // Ties break on the next-narrowest gap, and the next after that: two sets
+  // whose tightest pair is identical are separated by their second tightest,
+  // which is what keeps the choice stable instead of falling to whichever
+  // rotation of the same ring shape the loop happened to reach first.
   spreadSeats(pool, count) {
     if (count >= pool.length) return pool.slice();
+    if (count <= 1) return pool.slice(0, count);
     const gap = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-    const minTo = (seat, chosen) => chosen.reduce((m, c) => Math.min(m, gap(seat, c)), Infinity);
 
-    // The two furthest apart start it off.
-    let best = null;
-    for (let i = 0; i < pool.length; i++) {
-      for (let j = i + 1; j < pool.length; j++) {
-        const d = gap(pool[i], pool[j]);
-        if (!best || d > best.d) best = { d, a: pool[i], b: pool[j] };
-      }
-    }
-    const chosen = count === 1 ? [pool[0]] : [best.a, best.b];
-    while (chosen.length < count) {
-      let pick = null;
-      for (const seat of pool) {
-        if (chosen.includes(seat)) continue;
-        const d = minTo(seat, chosen);
-        if (!pick || d > pick.d) pick = { d, seat };
-      }
-      chosen.push(pick.seat);
-    }
-
-    const narrowest = (set) => {
-      let m = Infinity;
-      for (let i = 0; i < set.length; i++) for (let j = i + 1; j < set.length; j++) m = Math.min(m, gap(set[i], set[j]));
-      return m;
+    // Every pairwise gap in a candidate set, narrowest first. Comparing two of
+    // these lexicographically is "widest narrowest gap, then widest second".
+    const profile = (set) => {
+      const gaps = [];
+      for (let i = 0; i < set.length; i++)
+        for (let j = i + 1; j < set.length; j++) gaps.push(gap(set[i], set[j]));
+      return gaps.sort((a, b) => a - b);
     };
-    for (let pass = 0; pass < 2; pass++) {
-      for (let i = 0; i < chosen.length; i++) {
+    const wider = (a, b) => {
+      for (let i = 0; i < a.length; i++) {
+        if (a[i] > b[i] + 1e-9) return true;
+        if (a[i] < b[i] - 1e-9) return false;
+      }
+      return false;
+    };
+
+    // Some layouts put their seats in named blocks — two facing columns on The
+    // Divide, four clusters on Four Corners — and on those, WHICH block a seat
+    // belongs to matters as much as where it is. Eight empires spread purely on
+    // distance took three seats on the west of the spine and five on the east,
+    // so three of them had half a map to themselves while five were packed into
+    // the other half at thirty tiles apart. Both halves are the same size; only
+    // the count was wrong.
+    //
+    // A ring or a scattered map gives every seat its own group, and there the
+    // blocks mean nothing — one seat each is not a division of the map into
+    // sides. So this only binds when the layout actually clusters, which is
+    // exactly when there are fewer groups than seats.
+    const groups = [...new Set(pool.map(s => s.group))];
+    const clustered = groups.length > 1 && groups.length < pool.length;
+    // How many seats each block should give up, spread as evenly as the block
+    // sizes allow: hand them out one at a time to whichever block is furthest
+    // behind and still has a seat left.
+    const ideal = new Map(groups.map(g => [g, 0]));
+    if (clustered) {
+      const capacity = new Map(groups.map(g => [g, pool.filter(s => s.group === g).length]));
+      for (let placed = 0; placed < count; placed++) {
+        let pick = null;
+        for (const g of groups) {
+          if (ideal.get(g) >= capacity.get(g)) continue;
+          if (pick === null || ideal.get(g) < ideal.get(pick)) pick = g;
+        }
+        if (pick === null) break;
+        ideal.set(pick, ideal.get(pick) + 1);
+      }
+    }
+    // How far a candidate set is from that split. Zero for every set on a map
+    // whose seats are not clustered, which leaves those decided on width alone.
+    const imbalance = (set) => {
+      if (!clustered) return 0;
+      const take = new Map(groups.map(g => [g, 0]));
+      for (const seat of set) take.set(seat.group, take.get(seat.group) + 1);
+      let off = 0;
+      for (const g of groups) off += Math.abs(take.get(g) - ideal.get(g));
+      return off;
+    };
+
+    // Exhaustive is only exhaustive while the pool is small. Twelve seats can
+    // never reach this, but a future map with far more of them would hang the
+    // whole server inside a match start, which is a worse failure than a
+    // slightly tighter set of seats — so past the budget it falls back to
+    // farthest-point insertion and takes the imperfect answer.
+    let combos = 1;
+    for (let i = 0; i < count && combos <= SEAT_SEARCH_BUDGET; i++) {
+      combos = combos * (pool.length - i) / (i + 1);
+    }
+    if (combos > SEAT_SEARCH_BUDGET) {
+      const chosen = [pool[0]];
+      const taken = new Map(groups.map(g => [g, 0]));
+      taken.set(pool[0].group, 1);
+      while (chosen.length < count) {
+        let pick = null;
         for (const seat of pool) {
           if (chosen.includes(seat)) continue;
-          const trial = chosen.slice();
-          trial[i] = seat;
-          if (narrowest(trial) > narrowest(chosen)) chosen[i] = seat;
+          // A block that has already given up its share is out of seats as far
+          // as this pass is concerned.
+          if (clustered && taken.get(seat.group) >= ideal.get(seat.group)) continue;
+          const d = chosen.reduce((m, c) => Math.min(m, gap(seat, c)), Infinity);
+          if (!pick || d > pick.d) pick = { d, seat };
         }
+        // Nothing left inside the split — take the widest seat anywhere rather
+        // than seat nobody at all.
+        if (!pick) {
+          for (const seat of pool) {
+            if (chosen.includes(seat)) continue;
+            const d = chosen.reduce((m, c) => Math.min(m, gap(seat, c)), Infinity);
+            if (!pick || d > pick.d) pick = { d, seat };
+          }
+        }
+        if (!pick) break;
+        chosen.push(pick.seat);
+        taken.set(pick.seat.group, taken.get(pick.seat.group) + 1);
       }
+      return chosen;
     }
-    return chosen;
+
+    let best = null;
+    const idx = new Array(count);
+    const walk = (from, depth) => {
+      if (depth === count) {
+        const set = idx.map(i => pool[i]);
+        const off = imbalance(set);
+        // An even split between the blocks first, and only then the widest
+        // gaps within it. The other way round is what produced the 3/5.
+        if (best && off > best.off) return;
+        const prof = profile(set);
+        if (!best || off < best.off || wider(prof, best.profile)) {
+          best = { set, profile: prof, off };
+        }
+        return;
+      }
+      // Stop early enough to still have seats left to fill the set with.
+      for (let i = from; i <= pool.length - (count - depth); i++) {
+        idx[depth] = i;
+        walk(i + 1, depth + 1);
+      }
+    };
+    walk(0, 0);
+    return best.set;
   }
 
   // The opposite job, for the other half of the rule. A side wants to be
@@ -1173,13 +1276,31 @@ class Match {
     }
   }
 
-  // Where a shrine is as EQUALLY far from every empire as it can be — minimise
-  // the spread between the nearest empire and the furthest, which for two
-  // players is the line between them and for four is the middle. Among equally
-  // fair spots the one furthest from everybody wins, so it lands in open ground
-  // rather than wedged against somebody's border.
+  // Where to put a shrine so that no empire's walk to one is meaningfully
+  // shorter than anybody else's.
+  //
+  // The thing being equalised is the walk to the NEAREST shrine of any, not the
+  // walk to this one. That distinction is the whole of the second shrine: asked
+  // only to sit equally far from everybody on its own, it lands beside the
+  // first — both of them near the middle, the only place that answer exists —
+  // and a layout that puts somebody in the middle hands them both. Three teams
+  // in three columns was the bad case, and it was bad by 93 tiles: the centre
+  // column started on top of the pair while the flanks marched for them.
+  //
+  // Scored against what the already-placed shrines cost each empire, the second
+  // one goes where the first one did not reach, which is what two of them are
+  // for. With none placed yet this reduces exactly to what it always was, so
+  // the first shrine lands where it used to.
   fairestSpot(bases, camps, avoid) {
     let best = null;
+    // What each empire's walk to a shrine already costs it before this one is
+    // put down. Infinity while nothing is placed, which is what makes the first
+    // shrine's scoring collapse back to plain distance.
+    const already = bases.map(b => {
+      let d = Infinity;
+      for (const a of avoid) d = Math.min(d, Math.hypot(a.x - b.x, a.y - b.y));
+      return d;
+    });
     // Every tile, not every other one. This runs once per shrine on a 240x160
     // map, so the whole scan is a few hundred thousand distance checks and costs
     // nothing anybody can feel — and sampling coarsely was quietly costing a
@@ -1188,11 +1309,18 @@ class Match {
     for (let y = 6; y < MAP.height - 6; y++) {
       for (let x = 6; x < MAP.width - 6; x++) {
         if (this.terrain[y][x] !== TILE_LAND) continue;
-        let near = Infinity, far = 0;
-        for (const b of bases) {
-          const d = Math.hypot(b.x - x, b.y - y);
+        // Two different measurements, and confusing them is how the pair ends
+        // up in one corner. `near` is how close THIS shrine would sit to the
+        // nearest empire, which is the doorstep rule. `reach` is how far an
+        // empire would walk to the nearest shrine of any, which is the thing
+        // that has to come out level.
+        let near = Infinity, closest = Infinity, furthest = 0;
+        for (let i = 0; i < bases.length; i++) {
+          const d = Math.hypot(bases[i].x - x, bases[i].y - y);
           if (d < near) near = d;
-          if (d > far) far = d;
+          const reach = d < already[i] ? d : already[i];
+          if (reach < closest) closest = reach;
+          if (reach > furthest) furthest = reach;
         }
         // Not on anybody's doorstep, not on top of a camp, and not on top of
         // the other shrine.
@@ -1207,7 +1335,7 @@ class Match {
         }
         if (blocked) continue;
         // Fairest first; among equally fair, the one furthest from everyone.
-        const spread = far - near;
+        const spread = furthest - closest;
         if (!best || spread < best.spread - 0.5 ||
             (Math.abs(spread - best.spread) <= 0.5 && near > best.near)) {
           best = { x, y, spread, near };

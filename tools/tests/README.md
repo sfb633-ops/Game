@@ -7,13 +7,14 @@ node tools/tests/invariants.test.js  # properties, not cases — start here
 node tools/tests/browser.test.js     # the cascade, in a real Chrome; skips if absent
 node tools/tests/rules.test.js       # game rules; needs no server
 node tools/tests/spawns.test.js      # every opening circle is fully buildable
+node tools/tests/spawn-fairness.test.js # seats are the widest set, split evenly
 node tools/tests/client.test.js      # static checks on the browser client
 node tools/tests/reconnect.test.js   # needs `npm start` running first
 node tools/tests/exit.test.js        # ditto
 node tools/tests/lobby.test.js       # ditto — host/join/start over real sockets
 ```
 
-`npm test` runs everything that needs no server — the first seven, about half a
+`npm test` runs everything that needs no server — the first eight, about half a
 minute. `npm run test:net` runs the last three, and does **not** start a server
 for you: without one already listening on :3000 it fails with `ECONNREFUSED`,
 which looks like a broken test and is not one.
