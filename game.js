@@ -70,18 +70,18 @@ function emptyUnits() {
   return out;
 }
 
-function totalAttack(units, race) {
+function totalAttack(units, mods) {
   let sum = 0;
   for (const type in units) sum += (units[type] || 0) * UNIT_TYPES[type].attack;
-  return sum * (race ? race.attackMult : 1);
+  return sum * (mods ? mods.attackMult : 1);
 }
 
 // The hp pool a set of units brings to a fight. Combat is resolved against
 // these pools, so a race's hpMult is what makes its troops harder to kill.
-function totalHp(units, race) {
+function totalHp(units, mods) {
   let sum = 0;
   for (const type in units) sum += (units[type] || 0) * UNIT_TYPES[type].hp;
-  return sum * (race ? race.hpMult : 1);
+  return sum * (mods ? mods.hpMult : 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +192,7 @@ function simplifyRoute(route) {
 // away would mean a garrison never dies at all. Instead whole soldiers are
 // killed off, weakest first, and the remainder is carried on the owner as a
 // wound on whoever is next in line.
-function damageUnits(owner, units, race, damage) {
+function damageUnits(owner, units, mods, damage) {
   owner.woundCarry = (owner.woundCarry || 0) + damage;
   for (;;) {
     // Cheapest first: the rank and file are the ones standing in front. This
@@ -206,7 +206,7 @@ function damageUnits(owner, units, race, damage) {
       if (units[t] > 0 && UNIT_TYPES[t].cost < cheapest) { cheapest = UNIT_TYPES[t].cost; type = t; }
     }
     if (!type) { owner.woundCarry = 0; return; }     // nobody left to wound
-    const unitHp = UNIT_TYPES[type].hp * (race ? race.hpMult : 1);
+    const unitHp = UNIT_TYPES[type].hp * (mods ? mods.hpMult : 1);
     if (owner.woundCarry < unitHp) return;
     units[type] -= 1;
     owner.woundCarry -= unitHp;
@@ -214,8 +214,8 @@ function damageUnits(owner, units, race, damage) {
 }
 
 // Health a stationed group has left, counting the wound already carried.
-function standingHp(owner, units, race) {
-  return Math.max(0, totalHp(units, race) - (owner.woundCarry || 0));
+function standingHp(owner, units, mods) {
+  return Math.max(0, totalHp(units, mods) - (owner.woundCarry || 0));
 }
 
 // The multipliers everything else reads. A player's race sets the baseline and
@@ -377,6 +377,12 @@ class Match {
   // when its host says so. Nothing ticks and nobody is dealt a hand until then.
   constructor({ started = true, map = DEFAULT_MAP, teams = 0 } = {}) {
     this.started = started;
+    // A wrong map id is a caller bug, and falling back silently is how it
+    // stays one: preview carried an off-by-one in its --map parsing for a day
+    // and every render came back as the default without a word said. Falling
+    // back is still right — a stale save or an old client must not crash the
+    // server — but it happens out loud now.
+    if (map && !MAPS[map]) console.warn(`unknown map "${map}" — falling back to ${DEFAULT_MAP}`);
     this.mapId = MAPS[map] ? map : DEFAULT_MAP;
     this.map = MAPS[this.mapId];
     // 0 is a free-for-all, which is what this game was until now and what every
@@ -477,6 +483,8 @@ class Match {
     if (alert) e.alert = alert;
     this.events.push(e);
   }
+
+  // ---- Map generation: rock, water, and the spine ------------------------
 
   // Mountains, as rounded lobes rather than as smoothed noise.
   //
@@ -688,6 +696,8 @@ class Match {
     }
   }
 
+  // ---- Seating: where empires start ---------------------------------------
+
   // Where the seats want to be, before the map is consulted about whether the
   // ground there is any good. Every layout tags its seats with a `group`: the
   // question a team game asks of a map is "which of these are neighbours", and
@@ -809,49 +819,6 @@ class Match {
   // it in the lobby.
   seatsPerTeam() {
     return this.teamCount ? Math.ceil(MAP.maxPlayers / this.teamCount) : MAP.maxPlayers;
-  }
-
-  // Are these two on the same side? In a free-for-all everyone is their own
-  // team, so this is true only of an empire and itself and every rule that
-  // consults it behaves exactly as it did before teams existed.
-  allied(aId, bId) {
-    if (aId === bId) return true;
-    if (!this.teamCount) return false;
-    const a = this.players.get(aId), b = this.players.get(bId);
-    return !!a && !!b && a.team != null && a.team === b.team;
-  }
-
-  // Hand a player everything their side has already uncovered, and give the
-  // side everything they can see from their own seat. Vision is shared as it is
-  // discovered, which covers every tile found *after* both empires were seated
-  // — this is the other half: an ally who joins late would otherwise start
-  // blind next to a partner who has been looking at the place for a minute.
-  syncTeamVision(player) {
-    if (!this.teamCount || player.team == null) return;
-    for (const ally of this.alliesOf(player)) {
-      if (ally === player) continue;
-      for (let i = 0; i < player.explored.length; i++) {
-        if (ally.explored[i] && !player.explored[i]) {
-          player.explored[i] = 1; player.exploredDelta.push(i);
-        } else if (player.explored[i] && !ally.explored[i]) {
-          ally.explored[i] = 1; ally.exploredDelta.push(i);
-        }
-      }
-    }
-  }
-
-  // Everyone whose eyes and orders this empire shares, itself included.
-  alliesOf(player) {
-    if (!this.teamCount || player.team == null) return [player];
-    // Only the living. An eliminated ally still owns their buildings — nothing
-    // clears them, the empire is simply marked dead — so leaving them in here
-    // meant a knocked-out teammate went on scouting for the rest of the side
-    // out of their own ruins for the rest of the match.
-    const out = [player];
-    for (const other of this.players.values()) {
-      if (other !== player && other.alive && other.team === player.team) out.push(other);
-    }
-    return out;
   }
 
   // The closest usable ground to where a layout asked for a seat. Spirals
@@ -982,177 +949,6 @@ class Match {
       return { x, y };
     }
     return null;
-  }
-
-  // The shrine rides in aiCamps deliberately. It is targeted with the same
-  // 'camp' target type, resolved by the same resolveTarget, fought by the same
-  // stepCampBattle and drawn by the same client path; the only things that
-  // differ are how hard it hits back and what it pays out, both of which are
-  // one branch each. A separate entity would have meant a second copy of all
-  // of that.
-  generateShrine() {
-    for (const kind of SHRINE.kinds) this.addShrine(kind);
-  }
-
-  addShrine(kind) {
-    const spot = this.findOpenSpot(SHRINE.spacing) || this.findOpenSpot(AI_CAMP.spacing);
-    if (!spot) return;                      // a map with nowhere for it simply has none
-    this.aiCamps.push({
-      id: kind.id,
-      shrine: true,
-      // Which shrine this is: what sleeps in it, and which stonework the client
-      // draws. Carried on the camp rather than looked up from the id, so a
-      // shrine knows its own prize wherever it is handled.
-      kind: kind.id,
-      x: spot.x, y: spot.y,
-      hp: SHRINE.hp, maxHp: SHRINE.hp,
-      garrison: { ...SHRINE.guardian },
-      defeated: false,
-      respawnRemaining: 0,
-    });
-  }
-
-  generateCamps() {
-    const camps = [];
-    for (let i = 0; i < AI_CAMP.count; i++) {
-      // usedSpawns already holds every starting position, so this spacing keeps
-      // camps out of the discs that were just cleared for the players.
-      const spot = this.findOpenSpot(AI_CAMP.spacing);
-      if (!spot) break;
-      camps.push({
-        id: `camp-${i}`,
-        x: spot.x, y: spot.y,
-        hp: AI_CAMP.hp, maxHp: AI_CAMP.hp,
-        garrison: { ...AI_CAMP.garrison },
-        defeated: false,
-        respawnRemaining: 0,
-      });
-    }
-    return camps;
-  }
-
-  // How full each team is right now, indexed by team number.
-  teamCounts() {
-    const counts = new Array(this.teamCount || 0).fill(0);
-    for (const pl of this.players.values()) {
-      if (pl.team != null && counts[pl.team] !== undefined) counts[pl.team]++;
-    }
-    return counts;
-  }
-
-  // The team a joining player ends up on: the one they asked for if it exists
-  // and has room, and otherwise the emptiest, so a lobby nobody organises still
-  // comes out even.
-  pickTeam(want) {
-    const free = (t) => this.spawns.some(sp => !sp.taken && sp.group === t);
-    if (Number.isInteger(want) && want >= 0 && want < this.teamCount && free(want)) return want;
-    const counts = this.teamCounts();
-    let best = null;
-    for (let t = 0; t < this.teamCount; t++) {
-      if (!free(t)) continue;
-      if (best === null || counts[t] < counts[best]) best = t;
-    }
-    return best;
-  }
-
-  // Returns null when the map has no seat left; the caller reports that as a
-  // full game rather than crowding two empires onto one spot.
-  addPlayer(id, race, name, team = null) {
-    if (!defOf(RACES, race)) race = 'human';
-    let seat;
-    if (this.teamCount) {
-      const t = this.pickTeam(team);
-      if (t === null) return null;                 // every side is full
-      seat = this.spawns.find(sp => !sp.taken && sp.group === t);
-    } else {
-      seat = this.spawns.find(sp => !sp.taken);
-    }
-    if (!seat) return null;
-    seat.taken = true;
-    const spot = { x: seat.x, y: seat.y };
-    // Buildings are keyed by "x,y". The Castle occupies the base tile and is the
-    // only building present at spawn; everything else is placed freely later.
-    const buildings = {};
-    buildings[tileKey(spot.x, spot.y)] = {
-      x: spot.x, y: spot.y, type: 'castle', level: 1,
-      hp: CASTLE.hp[0], maxHp: CASTLE.hp[0],
-      underConstruction: false, remainingSec: 0, upgrading: false, trainQueue: [],
-    };
-    const player = {
-      id, race, name: name || id, baseX: spot.x, baseY: spot.y,
-      // null in a free-for-all. Every alliance rule keys off this.
-      team: this.teamCount ? seat.group : null,
-      gold: 200,
-      alive: true,
-      buildings,
-      idleUnits: emptyUnits(),
-      // Starts at zero, not at undefined. Everything that touches it copes
-      // with the gap — `(player.woundCarry || 0)` — but a field that is
-      // sometimes a number and sometimes not is a trap laid for the next
-      // person, and one of those `|| 0`s will get dropped one day.
-      woundCarry: 0,
-      // Razed camps this empire has claimed; each one is a second disc it can
-      // build inside.
-      outposts: [],
-      cards: [],                 // ids of everything drafted, in pick order
-      spells: {},                // cardId -> charges left
-      // cardId -> seconds until the next charge returns. Only holds an entry
-      // while a spell is actually short of its cap; see stepSpellRecharge.
-      spellRecharge: {},
-      // The race ability: ready at spawn, then on its own cooldown. Both
-      // halves are seconds and both are counted down by stepAbility.
-      ability: { cooldownRemaining: 0, activeRemaining: 0 },
-      // One byte per tile: has this empire ever had something near here. Kept
-      // on the server so it survives a reconnect, and shipped to the client as
-      // a list of newly-lit tiles rather than the whole map every tick.
-      explored: new Uint8Array(MAP.width * MAP.height),
-      exploredDelta: [],
-      // The eyes stepVision lit last tick, so ones that have not moved are
-      // not walked again. Reset with `explored`, and only with it.
-      eyesLit: new Set(),
-      mods: { ...BASE_MODS },
-      // Held in the lobby, a player has no hand yet: start() deals every one of
-      // them at the same moment. A player who arrives after the match is
-      // already running drafts on arrival, as they always did.
-      draft: this.started ? this.rollDraft() : null,
-    };
-    player.mods = computeMods(player);
-    this.players.set(id, player);
-    this.indexBuilding(player, buildings[tileKey(spot.x, spot.y)]);
-    this.stepVision(player);          // an empire can see where it woke up
-    this.syncTeamVision(player);      // and inherits whatever its side already knew
-    // Once a match has been a contest it stays one, however many walk out
-    // later. checkWinCondition reads this rather than the current head count.
-    if (this.started && this.players.size >= 2) this.contested = true;
-    return player;
-  }
-
-  // Switch a seated player to another team, before the match starts. Their
-  // keep moves with them, which is the whole point — teammates start together,
-  // so changing team has to change where you are standing.
-  //
-  // Done in place rather than by rebuilding the world, because the alternative
-  // is regenerating the map under everyone else every time somebody clicks a
-  // different colour.
-  setTeam(playerId, team) {
-    if (this.started || !this.teamCount) return false;
-    const player = this.players.get(playerId);
-    if (!player || player.team === team) return false;
-    if (!Number.isInteger(team) || team < 0 || team >= this.teamCount) return false;
-    const seat = this.spawns.find(sp => !sp.taken && sp.group === team);
-    if (!seat) return false;                       // that side is full
-
-    const old = this.spawns.find(sp => sp.x === player.baseX && sp.y === player.baseY && sp.taken);
-    if (old) old.taken = false;
-    seat.taken = true;
-
-    this.reseat(player, seat);
-    player.team = team;
-    // What their new side knows, they now know — and what they can see from
-    // the new seat, their new side does. Their old side's map went with the
-    // clear above, so hopping teams cannot be used to tour the map.
-    this.syncTeamVision(player);
-    return true;
   }
 
   // Which seats a given number of empires should actually use, out of all the
@@ -1294,6 +1090,55 @@ class Match {
     for (const p of this.players.values()) this.syncTeamVision(p);
   }
 
+  // ---- Neutral sites: camps and the shrine --------------------------------
+
+  // The shrine rides in aiCamps deliberately. It is targeted with the same
+  // 'camp' target type, resolved by the same resolveTarget, fought by the same
+  // stepCampBattle and drawn by the same client path; the only things that
+  // differ are how hard it hits back and what it pays out, both of which are
+  // one branch each. A separate entity would have meant a second copy of all
+  // of that.
+  generateShrine() {
+    for (const kind of SHRINE.kinds) this.addShrine(kind);
+  }
+
+  addShrine(kind) {
+    const spot = this.findOpenSpot(SHRINE.spacing) || this.findOpenSpot(AI_CAMP.spacing);
+    if (!spot) return;                      // a map with nowhere for it simply has none
+    this.aiCamps.push({
+      id: kind.id,
+      shrine: true,
+      // Which shrine this is: what sleeps in it, and which stonework the client
+      // draws. Carried on the camp rather than looked up from the id, so a
+      // shrine knows its own prize wherever it is handled.
+      kind: kind.id,
+      x: spot.x, y: spot.y,
+      hp: SHRINE.hp, maxHp: SHRINE.hp,
+      garrison: { ...SHRINE.guardian },
+      defeated: false,
+      respawnRemaining: 0,
+    });
+  }
+
+  generateCamps() {
+    const camps = [];
+    for (let i = 0; i < AI_CAMP.count; i++) {
+      // usedSpawns already holds every starting position, so this spacing keeps
+      // camps out of the discs that were just cleared for the players.
+      const spot = this.findOpenSpot(AI_CAMP.spacing);
+      if (!spot) break;
+      camps.push({
+        id: `camp-${i}`,
+        x: spot.x, y: spot.y,
+        hp: AI_CAMP.hp, maxHp: AI_CAMP.hp,
+        garrison: { ...AI_CAMP.garrison },
+        defeated: false,
+        respawnRemaining: 0,
+      });
+    }
+    return camps;
+  }
+
   // Put the shrine somewhere worth arguing over.
   //
   // It used to be dropped on the first random tile that was 34 clear of
@@ -1370,6 +1215,177 @@ class Match {
       }
     }
     return best;
+  }
+
+  // ---- Teams and alliances ------------------------------------------------
+
+  // Are these two on the same side? In a free-for-all everyone is their own
+  // team, so this is true only of an empire and itself and every rule that
+  // consults it behaves exactly as it did before teams existed.
+  allied(aId, bId) {
+    if (aId === bId) return true;
+    if (!this.teamCount) return false;
+    const a = this.players.get(aId), b = this.players.get(bId);
+    return !!a && !!b && a.team != null && a.team === b.team;
+  }
+
+  // Everyone whose eyes and orders this empire shares, itself included.
+  alliesOf(player) {
+    if (!this.teamCount || player.team == null) return [player];
+    // Only the living. An eliminated ally still owns their buildings — nothing
+    // clears them, the empire is simply marked dead — so leaving them in here
+    // meant a knocked-out teammate went on scouting for the rest of the side
+    // out of their own ruins for the rest of the match.
+    const out = [player];
+    for (const other of this.players.values()) {
+      if (other !== player && other.alive && other.team === player.team) out.push(other);
+    }
+    return out;
+  }
+
+  // Hand a player everything their side has already uncovered, and give the
+  // side everything they can see from their own seat. Vision is shared as it is
+  // discovered, which covers every tile found *after* both empires were seated
+  // — this is the other half: an ally who joins late would otherwise start
+  // blind next to a partner who has been looking at the place for a minute.
+  syncTeamVision(player) {
+    if (!this.teamCount || player.team == null) return;
+    for (const ally of this.alliesOf(player)) {
+      if (ally === player) continue;
+      for (let i = 0; i < player.explored.length; i++) {
+        if (ally.explored[i] && !player.explored[i]) {
+          player.explored[i] = 1; player.exploredDelta.push(i);
+        } else if (player.explored[i] && !ally.explored[i]) {
+          ally.explored[i] = 1; ally.exploredDelta.push(i);
+        }
+      }
+    }
+  }
+
+  // How full each team is right now, indexed by team number.
+  teamCounts() {
+    const counts = new Array(this.teamCount || 0).fill(0);
+    for (const pl of this.players.values()) {
+      if (pl.team != null && counts[pl.team] !== undefined) counts[pl.team]++;
+    }
+    return counts;
+  }
+
+  // The team a joining player ends up on: the one they asked for if it exists
+  // and has room, and otherwise the emptiest, so a lobby nobody organises still
+  // comes out even.
+  pickTeam(want) {
+    const free = (t) => this.spawns.some(sp => !sp.taken && sp.group === t);
+    if (Number.isInteger(want) && want >= 0 && want < this.teamCount && free(want)) return want;
+    const counts = this.teamCounts();
+    let best = null;
+    for (let t = 0; t < this.teamCount; t++) {
+      if (!free(t)) continue;
+      if (best === null || counts[t] < counts[best]) best = t;
+    }
+    return best;
+  }
+
+  // Switch a seated player to another team, before the match starts. Their
+  // keep moves with them, which is the whole point — teammates start together,
+  // so changing team has to change where you are standing.
+  //
+  // Done in place rather than by rebuilding the world, because the alternative
+  // is regenerating the map under everyone else every time somebody clicks a
+  // different colour.
+  setTeam(playerId, team) {
+    if (this.started || !this.teamCount) return false;
+    const player = this.players.get(playerId);
+    if (!player || player.team === team) return false;
+    if (!Number.isInteger(team) || team < 0 || team >= this.teamCount) return false;
+    const seat = this.spawns.find(sp => !sp.taken && sp.group === team);
+    if (!seat) return false;                       // that side is full
+
+    const old = this.spawns.find(sp => sp.x === player.baseX && sp.y === player.baseY && sp.taken);
+    if (old) old.taken = false;
+    seat.taken = true;
+
+    this.reseat(player, seat);
+    player.team = team;
+    // What their new side knows, they now know — and what they can see from
+    // the new seat, their new side does. Their old side's map went with the
+    // clear above, so hopping teams cannot be used to tour the map.
+    this.syncTeamVision(player);
+    return true;
+  }
+
+  // ---- Players joining ----------------------------------------------------
+
+  // Returns null when the map has no seat left; the caller reports that as a
+  // full game rather than crowding two empires onto one spot.
+  addPlayer(id, race, name, team = null) {
+    if (!defOf(RACES, race)) race = 'human';
+    let seat;
+    if (this.teamCount) {
+      const t = this.pickTeam(team);
+      if (t === null) return null;                 // every side is full
+      seat = this.spawns.find(sp => !sp.taken && sp.group === t);
+    } else {
+      seat = this.spawns.find(sp => !sp.taken);
+    }
+    if (!seat) return null;
+    seat.taken = true;
+    const spot = { x: seat.x, y: seat.y };
+    // Buildings are keyed by "x,y". The Castle occupies the base tile and is the
+    // only building present at spawn; everything else is placed freely later.
+    const buildings = {};
+    buildings[tileKey(spot.x, spot.y)] = {
+      x: spot.x, y: spot.y, type: 'castle', level: 1,
+      hp: CASTLE.hp[0], maxHp: CASTLE.hp[0],
+      underConstruction: false, remainingSec: 0, upgrading: false, trainQueue: [],
+    };
+    const player = {
+      id, race, name: name || id, baseX: spot.x, baseY: spot.y,
+      // null in a free-for-all. Every alliance rule keys off this.
+      team: this.teamCount ? seat.group : null,
+      gold: 200,
+      alive: true,
+      buildings,
+      idleUnits: emptyUnits(),
+      // Starts at zero, not at undefined. Everything that touches it copes
+      // with the gap — `(player.woundCarry || 0)` — but a field that is
+      // sometimes a number and sometimes not is a trap laid for the next
+      // person, and one of those `|| 0`s will get dropped one day.
+      woundCarry: 0,
+      // Razed camps this empire has claimed; each one is a second disc it can
+      // build inside.
+      outposts: [],
+      cards: [],                 // ids of everything drafted, in pick order
+      spells: {},                // cardId -> charges left
+      // cardId -> seconds until the next charge returns. Only holds an entry
+      // while a spell is actually short of its cap; see stepSpellRecharge.
+      spellRecharge: {},
+      // The race ability: ready at spawn, then on its own cooldown. Both
+      // halves are seconds and both are counted down by stepAbility.
+      ability: { cooldownRemaining: 0, activeRemaining: 0 },
+      // One byte per tile: has this empire ever had something near here. Kept
+      // on the server so it survives a reconnect, and shipped to the client as
+      // a list of newly-lit tiles rather than the whole map every tick.
+      explored: new Uint8Array(MAP.width * MAP.height),
+      exploredDelta: [],
+      // The eyes stepVision lit last tick, so ones that have not moved are
+      // not walked again. Reset with `explored`, and only with it.
+      eyesLit: new Set(),
+      mods: { ...BASE_MODS },
+      // Held in the lobby, a player has no hand yet: start() deals every one of
+      // them at the same moment. A player who arrives after the match is
+      // already running drafts on arrival, as they always did.
+      draft: this.started ? this.rollDraft() : null,
+    };
+    player.mods = computeMods(player);
+    this.players.set(id, player);
+    this.indexBuilding(player, buildings[tileKey(spot.x, spot.y)]);
+    this.stepVision(player);          // an empire can see where it woke up
+    this.syncTeamVision(player);      // and inherits whatever its side already knew
+    // Once a match has been a contest it stays one, however many walk out
+    // later. checkWinCondition reads this rather than the current head count.
+    if (this.started && this.players.size >= 2) this.contested = true;
+    return player;
   }
 
   // The lobby is over. Everyone waiting is dealt their opening hand in the same
@@ -1524,14 +1540,14 @@ class Match {
   }
 
   incomePerSec(player) {
-    const race = player.mods;
+    const mods = player.mods;
     let income = 0;
     const castle = this.getCastle(player);
     income += CASTLE.incomePerSec[castle.level - 1];
     for (const b of Object.values(player.buildings)) {
       if (b.type === 'bank' && !b.underConstruction) income += BUILDING_TYPES.bank.incomePerSec;
     }
-    return income * race.incomeMult;
+    return income * mods.incomeMult;
   }
 
   // Everything still standing between a raider and the town center once the
@@ -1557,13 +1573,13 @@ class Match {
   //
   // So this is the garrison, and only ever the garrison.
   homeDefense(player) {
-    const race = player.mods;
+    const mods = player.mods;
     return {
-      power: totalAttack(player.idleUnits, race),
+      power: totalAttack(player.idleUnits, mods),
       // The garrison's own health, and nothing else's. A tower's hp used to be
       // added in here, which is what made three of them a thousand-point buffer
       // an attacker ground off before reaching a single defender.
-      hp: standingHp(player, player.idleUnits, race),
+      hp: standingHp(player, player.idleUnits, mods),
     };
   }
 
@@ -1963,12 +1979,12 @@ class Match {
       this.emit(playerId, `You can only run ${this.buildLimit(player)} buildings — upgrade your town center, or take a camp for ${OUTPOST.buildLimitBonus} more.`);
       return;
     }
-    const race = player.mods;
-    const cost = Math.round(def.cost * race.costMult);
+    const mods = player.mods;
+    const cost = Math.round(def.cost * mods.costMult);
     if (player.gold < cost) return;
     player.gold -= cost;
-    const buildTime = def.buildTimeSec * race.buildTimeMult;
-    const hp = def.defensePower ? Math.round(def.hp * race.structureHpMult) : def.hp;
+    const buildTime = def.buildTimeSec * mods.buildTimeMult;
+    const hp = def.defensePower ? Math.round(def.hp * mods.structureHpMult) : def.hp;
     this.placeBuilding(player, {
       x, y, type: buildingType, maxHp: hp, hp,
       underConstruction: buildTime > 0, remainingSec: buildTime,
@@ -1984,8 +2000,8 @@ class Match {
     if (!player || !player.alive || !Array.isArray(tiles)) return;
     const def = BUILDING_TYPES.wall;
     if (!def) return;
-    const race = player.mods;
-    const cost = Math.round(def.cost * race.costMult);
+    const mods = player.mods;
+    const cost = Math.round(def.cost * mods.costMult);
     const seen = new Set();
     let placed = 0;
     // Cap the input, not just the output: a drag that places nothing would
@@ -2001,8 +2017,8 @@ class Match {
       if (!this.canBuildAt(player, x, y, 'wall')) continue;
       if (this.wouldThickenWall(player, x, y)) continue;   // no second layer
       player.gold -= cost;
-      const buildTime = def.buildTimeSec * race.buildTimeMult;
-      const hp = Math.round(def.hp * race.structureHpMult);
+      const buildTime = def.buildTimeSec * mods.buildTimeMult;
+      const hp = Math.round(def.hp * mods.structureHpMult);
       this.placeBuilding(player, {
         x, y, type: 'wall', maxHp: hp, hp,
         underConstruction: buildTime > 0, remainingSec: buildTime,
@@ -2079,12 +2095,12 @@ class Match {
     const castle = this.getCastle(player);
     if (castle.upgrading) return;
     if (castle.level >= CASTLE.maxLevel) return;
-    const race = player.mods;
-    const cost = Math.round(CASTLE.upgradeCost[castle.level] * race.costMult);
+    const mods = player.mods;
+    const cost = Math.round(CASTLE.upgradeCost[castle.level] * mods.costMult);
     if (player.gold < cost) return;
     player.gold -= cost;
     castle.upgrading = true;
-    castle.remainingSec = CASTLE.upgradeTimeSec[castle.level] * race.buildTimeMult;
+    castle.remainingSec = CASTLE.upgradeTimeSec[castle.level] * mods.buildTimeMult;
   }
 
   // Every finished building of this player that can train the given unit.
@@ -2182,11 +2198,11 @@ class Match {
     // empire never queues more than its buildings between them have earned.
     if (plot.trainQueue.length >= TRAIN_QUEUE_MAX) return;
     if (this.queuedFor(player, unitType) >= this.trainCapacity(player, unitType)) return;
-    const race = player.mods;
-    const cost = Math.round(unitDef.cost * race.costMult);
+    const mods = player.mods;
+    const cost = Math.round(unitDef.cost * mods.costMult);
     if (player.gold < cost) return;
     player.gold -= cost;
-    plot.trainQueue.push({ unitType, remainingSec: unitDef.trainTimeSec * race.buildTimeMult });
+    plot.trainQueue.push({ unitType, remainingSec: unitDef.trainTimeSec * mods.buildTimeMult });
   }
 
   // ---- Spells ----

@@ -6,7 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node tools/tests/invariants.test.js && node tools/tests/fuzz.test.js && node tools/tests/rules.test.js && node tools/tests/spawns.test.js && node tools/tests/client.test.js && node tools/tests/smoke.test.js && node tools/tests/browser.test.js",
+    "test": "node tools/tests/invariants.test.js && node tools/tests/fuzz.test.js && node tools/tests/rules.test.js && node tools/tests/interactions.test.js && node tools/tests/spawns.test.js && node tools/tests/client.test.js && node tools/tests/smoke.test.js && node tools/tests/browser.test.js",
     "test:net": "node tools/tests/reconnect.test.js && node tools/tests/exit.test.js && node tools/tests/lobby.test.js"
   },
   "engines": {

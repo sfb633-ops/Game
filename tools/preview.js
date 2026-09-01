@@ -64,7 +64,10 @@ const { Match } = require('../game');
 // the map worth looking at deliberately, because its spine is the only piece of
 // terrain in the game that is placed rather than grown.
 const mapArg = process.argv.find(a => a.startsWith('--map='));
-const match = new Match(mapArg ? { map: mapArg.slice(5) } : {});
+// slice(6), not 5: '--map=' is six characters. At 5 the id came through as
+// '=divide', no map matched, and the Match fell back to the default without a
+// word — so every --map render was quietly the same map.
+const match = new Match(mapArg ? { map: mapArg.slice(6) } : {});
 const races = ['human', 'orc', 'elf', 'undead'];
 races.forEach((race, i) => match.addPlayer(`p${i + 1}`, race));
 
