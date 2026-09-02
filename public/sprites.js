@@ -255,7 +255,18 @@ const Sprites = (function () {
           continue;
         }
         const r = isRock(x, y - 1) ? 3 : 2;   // 2 = the block's north edge
-        if (r === 0 || c !== 1) drawKit(c, r, x, y);
+        // The north edge is drawn all the way along; the interior only at its
+        // two sides.
+        //
+        // This read `r === 0`, and r is only ever 2 or 3 — so the first half
+        // never fired and the rule collapsed to "draw unless this is the
+        // middle of a run". That is right for the interior, whose middle is
+        // plain grass the terrain layer has already laid, and wrong for the
+        // north edge, whose middle tile (1,2) is the one carrying the rock rim
+        // along the top. So every horizontal stretch of clifftop came out as
+        // bare grass with a stub of stone at each end, and only the vertical
+        // faces looked like a cliff.
+        if (r === 2 || c !== 1) drawKit(c, r, x, y);
       }
     }
 

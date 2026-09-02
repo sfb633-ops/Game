@@ -4163,6 +4163,49 @@ fog, position — before reasoning about the code that draws it. Half of what wa
 being blamed here was a viewing condition rather than a fault.
 
 
+### The clifftop that was only ever corners (1 Sep 2026)
+
+Reported as the autotiling being wrong, with the right tiles said to be in the
+pack. The tiles were in the pack, and in `cliffkit.png`, and cut correctly. One
+of them was never asked for.
+
+The clifftop selector ended:
+
+    const r = isRock(x, y - 1) ? 3 : 2;   // 2 = the block's north edge
+    if (r === 0 || c !== 1) drawKit(c, r, x, y);
+
+`r` is assigned from a ternary whose arms are 3 and 2. It cannot be 0, so the
+first half of that test never fired once, and the rule collapsed to *draw
+unless this is the middle of a run*.
+
+That is correct for the interior. Row 3 of the kit is the plateau's own top
+surface and its middle cell `(1,3)` is plain grass, which the terrain layer has
+already laid — drawing it again would be redundant. It is wrong for the north
+edge. Row 2 is the boundary course and its middle cell `(1,2)` is the one
+carrying the rock rim along the top. Skipping it meant every horizontal stretch
+of clifftop came out as bare grass with a stub of stone at each end, while the
+vertical faces — which are chosen further up, by a different branch — looked
+perfect. So a plateau read as a set of disconnected corner brackets.
+
+`r === 2`, and the north edge is drawn along its whole run.
+
+**Reading the kit is what settled it.** `cliffkit.png` is four columns by seven
+rows off A5, and rendering it with a grid drawn over it makes the layout plain:
+rows 0-1 are rock body, rows 2-4 are the plateau top as a nine-slice (corners,
+edges, centre), rows 5-6 are the face. Once that picture exists, `(1,2)` is
+visibly the missing tile and the fault is a one-token typo rather than anything
+about autotiling. That render is worth redoing rather than reasoning about the
+indices — the comments quote source coordinates like `(3,15)` that are offsets
+into A5, not into the kit, and mixing the two up is easy.
+
+**Verified by diffing two renders.** `tools/preview.js` at a fixed seed and map,
+once with the old line and once with the new, then a scan for the block that
+changed most. That points straight at a plateau whose north rim goes from two
+stubs and a long gap of grass to a continuous course of stone. Diffing two
+renders of the same seed is a good way to see what a terrain change actually did
+rather than what it was supposed to do.
+
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no
