@@ -1331,6 +1331,21 @@ const CHAR_LAYOUTS = {
       attack: { rows: { down: 4, up: 5, right: 6, left: 7 } },
     },
   },
+  // The farmer is laid out like a soldier for eight rows and then differs.
+  //
+  // On the soldier sheets rows 4-7 are the swing — sword out, white arc. On the
+  // farmer sheet rows 4-7 are more WALKING, and the scythe swing is down at
+  // 8-11: three frames, arc and all. Reading it as a soldier gave the worker a
+  // five-frame bob with no tool in it, which is why a crew at work looked like a
+  // crew standing still and fidgeting.
+  worker: {
+    frame: 16,
+    anims: {
+      idle:   { rows: { down: 0, up: 1, right: 2, left: 3 }, frames: [0] },
+      walk:   { rows: { down: 0, up: 1, right: 2, left: 3 } },
+      attack: { rows: { down: 8, up: 9, right: 10, left: 11 } },
+    },
+  },
   // Mounted units are grouped the other way round: three rows per facing
   // (idle, walk, lance-out attack), facings in the order down, right, left, up.
   mount: {
@@ -1365,12 +1380,12 @@ const WORKER = (c) => path.join(CHARS, 'Workers', c + 'Worker', 'Farmer' + c + '
 // Undead swap their footmen for the matching monster sheets, which use the
 // same row layout, so each race still reads as itself on the map.
 const UNIT_SRC = {
-  human:  { worker: [WORKER('Cyan'), 'foot'], swordsman: [MELEE('Cyan'), 'foot'], knight: [MOUNT('Cyan'), 'mount'], catapult: [BALLISTA, 'siege'] },
-  elf:    { worker: [WORKER('Lime'), 'foot'], swordsman: [MELEE('Lime'), 'foot'], knight: [MOUNT('Lime'), 'mount'], catapult: [BALLISTA, 'siege'] },
-  orc:    { worker: [WORKER('Red'), 'foot'],
+  human:  { worker: [WORKER('Cyan'), 'worker'], swordsman: [MELEE('Cyan'), 'foot'], knight: [MOUNT('Cyan'), 'mount'], catapult: [BALLISTA, 'siege'] },
+  elf:    { worker: [WORKER('Lime'), 'worker'], swordsman: [MELEE('Lime'), 'foot'], knight: [MOUNT('Lime'), 'mount'], catapult: [BALLISTA, 'siege'] },
+  orc:    { worker: [WORKER('Red'), 'worker'],
             swordsman: [path.join(CHARS, 'Monsters', 'Orcs', 'Orc.png'), 'foot'],
             knight: [MOUNT('Red'), 'mount'], catapult: [BALLISTA, 'siege'] },
-  undead: { worker: [WORKER('Purple'), 'foot'],
+  undead: { worker: [WORKER('Purple'), 'worker'],
             swordsman: [path.join(CHARS, 'Monsters', 'Undead', 'Skeleton-Soldier.png'), 'foot'],
             knight: [MOUNT('Purple'), 'mount'], catapult: [BALLISTA, 'siege'] },
   // Not a playable race: the goblins loitering outside an AI camp.
@@ -2420,7 +2435,30 @@ function timberBand(img, box, from) {
 // it back under the keep, and it costs nothing: every pixel is still 1:1, the
 // tower is simply shorter.
 const WINLU_TOWER_ROWS = [3, 6];      // plain shaft, rounded base
+// The cone stays. A crenellated cap off the same sheet was tried and is 144
+// wide against a 96 drum, so it flared out over the shaft like a mushroom —
+// that piece is the top of a much wider tower. The cone is 127 and overhangs
+// by a believable eave.
 const CONE_SRC = { file: '!$Big_Decoration.png', x: 9, y: 37, w: 127, h: 228 };
+
+// The roof is resampled down, and it is the only way to get this tower right.
+//
+// The cone is 228 tall on its own — nearly five TILES of roof — and that number
+// sets everything. Three courses of drum under it came to 346, taller than the
+// 337 keep it stands beside. Two came to 298, still level with it. One came to
+// 250 and looked like a hat: an enormous cone balanced on a stub, because a
+// shaft that short is not a tower. There is no course count that is both short
+// enough and shaped like a tower, so the roof itself has to give.
+//
+// A crenellated cap off the same sheet was tried first and is 144 wide against
+// a 96 drum, so it flared out like a mushroom — that piece is the top of a much
+// wider tower.
+//
+// Resampling is normally the one thing this pipeline refuses, and the reason is
+// tile art and 9-slices: those have grids and corners that a fractional scale
+// destroys. A cone is a single decorative sprite with neither. The drum under
+// it stays at 1:1, which is what actually has to line up with the tile grid.
+const CONE_SCALE = 0.72;              // 228 -> 164, and 127 wide -> 91 over a 96 drum
 const CONE_SET = 26;                  // how far the eave comes down over the drum
 
 function buildWinluTower(setName) {
@@ -2437,7 +2475,9 @@ function buildWinluTower(setName) {
   });
 
   const deco = decodePNG(need(path.join(WINLU, 'characters', CONE_SRC.file)));
-  const roof = prep(ops.crop(deco, CONE_SRC.x, CONE_SRC.y, CONE_SRC.w, CONE_SRC.h));
+  const cone = ops.crop(deco, CONE_SRC.x, CONE_SRC.y, CONE_SRC.w, CONE_SRC.h);
+  const roof = prep(ops.resize(cone,
+    Math.round(CONE_SRC.w * CONE_SCALE), Math.round(CONE_SRC.h * CONE_SCALE)));
   const inset = Math.round((roof.width - shaft.width) / 2);
   const shaftTop = roof.height - CONE_SET;
   const body = ops.blank(roof.width, shaftTop + shaft.height);

@@ -870,23 +870,23 @@
     },
     "tower": {
      "file": "buildings/cyan/tower.png",
-     "w": 127,
-     "h": 298,
+     "w": 91,
+     "h": 234,
      "frames": 1,
      "fps": 6,
-     "anchorX": 64,
-     "anchorY": 298,
+     "anchorX": 46,
+     "anchorY": 234,
      "footW": 60,
      "shadow": {
       "file": "buildings/cyan/tower_shadow.png",
-      "w": 228,
-      "h": 60,
-      "anchorX": 64,
+      "w": 171,
+      "h": 47,
+      "anchorX": 46,
       "anchorY": 0
      },
      "bannerAt": 0.78,
-     "mountX": 64,
-     "mountY": 236
+     "mountX": 46,
+     "mountY": 172
     },
     "wall": {
      "tower": {
@@ -1137,23 +1137,23 @@
     },
     "tower": {
      "file": "buildings/red/tower.png",
-     "w": 127,
-     "h": 298,
+     "w": 91,
+     "h": 234,
      "frames": 1,
      "fps": 6,
-     "anchorX": 64,
-     "anchorY": 298,
+     "anchorX": 46,
+     "anchorY": 234,
      "footW": 60,
      "shadow": {
       "file": "buildings/red/tower_shadow.png",
-      "w": 228,
-      "h": 60,
-      "anchorX": 64,
+      "w": 171,
+      "h": 47,
+      "anchorX": 46,
       "anchorY": 0
      },
      "bannerAt": 0.78,
-     "mountX": 64,
-     "mountY": 236
+     "mountX": 46,
+     "mountY": 172
     },
     "wall": {
      "tower": {
@@ -1404,23 +1404,23 @@
     },
     "tower": {
      "file": "buildings/lime/tower.png",
-     "w": 127,
-     "h": 298,
+     "w": 91,
+     "h": 234,
      "frames": 1,
      "fps": 6,
-     "anchorX": 64,
-     "anchorY": 298,
+     "anchorX": 46,
+     "anchorY": 234,
      "footW": 60,
      "shadow": {
       "file": "buildings/lime/tower_shadow.png",
-      "w": 228,
-      "h": 60,
-      "anchorX": 64,
+      "w": 171,
+      "h": 47,
+      "anchorX": 46,
       "anchorY": 0
      },
      "bannerAt": 0.78,
-     "mountX": 64,
-     "mountY": 236
+     "mountX": 46,
+     "mountY": 172
     },
     "wall": {
      "tower": {
@@ -1671,23 +1671,23 @@
     },
     "tower": {
      "file": "buildings/purple/tower.png",
-     "w": 127,
-     "h": 298,
+     "w": 91,
+     "h": 234,
      "frames": 1,
      "fps": 6,
-     "anchorX": 64,
-     "anchorY": 298,
+     "anchorX": 46,
+     "anchorY": 234,
      "footW": 60,
      "shadow": {
       "file": "buildings/purple/tower_shadow.png",
-      "w": 228,
-      "h": 60,
-      "anchorX": 64,
+      "w": 171,
+      "h": 47,
+      "anchorX": 46,
       "anchorY": 0
      },
      "bannerAt": 0.78,
-     "mountX": 64,
-     "mountY": 236
+     "mountX": 46,
+     "mountY": 172
     },
     "wall": {
      "tower": {
@@ -2155,7 +2155,7 @@
       },
       "attack": {
        "file": "units/human/worker/attack.png",
-       "frames": 5
+       "frames": 3
       }
      }
     },
@@ -2291,7 +2291,7 @@
       },
       "attack": {
        "file": "units/elf/worker/attack.png",
-       "frames": 5
+       "frames": 3
       }
      }
     },
@@ -2427,7 +2427,7 @@
       },
       "attack": {
        "file": "units/orc/worker/attack.png",
-       "frames": 5
+       "frames": 3
       }
      }
     },
@@ -2563,7 +2563,7 @@
       },
       "attack": {
        "file": "units/undead/worker/attack.png",
-       "frames": 5
+       "frames": 3
       }
      }
     },
