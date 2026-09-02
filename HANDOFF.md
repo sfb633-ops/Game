@@ -4255,6 +4255,45 @@ for a blit that actually took half a second. A 1x1 `getImageData` afterwards
 forces the flush and makes the number real.
 
 
+### X hands you the slider (1 Sep 2026)
+
+Reported as "splitting doesn't give me a slider, when I hit X it autosplits."
+The bar was working — checked in a real match with a group of fifteen selected,
+and it comes up saying "15 selected — 7 off, 8 stay" with its slider live. The
+problem was that X never let anybody get that far. It halved on the spot, which
+is a fine shortcut and a bad introduction: a key that acts before you have seen
+the control teaches you that splitting is something that happens TO your group.
+
+So X focuses the slider instead, and Enter on it commits. The whole thing is
+keyboard-workable — X, arrows, Enter — and the mouse path is unchanged. With
+nothing selected it says so; with a group of one it says that too, rather than
+focusing a control that cannot move.
+
+`splitSelection` went with it, since halving was all it did. Halving is still
+reachable — the slider opens at half.
+
+### The confirm that sat on the hand (1 Sep 2026)
+
+`#exit-confirm` was a second floating box hanging under the gear panel, from
+when the corner held Exit and a music toggle and nothing else. The right edge
+carries the hand now, and the confirm landed on top of it.
+
+It is inside `#game-menu`, and showing it adds `confirming`, which hides the
+sound rows and the controls list. Two reasons: a panel with the mix, every
+binding in the game AND a question in it runs off the bottom of the screen, and
+none of what it would be showing is what you are being asked about. The panel
+collapses to the question and the two buttons.
+
+**And a reset in the wrong function.** `sawTrainer = false` — the flag that keeps
+the troop roster off screen until something can train — had been dropped into
+`deployStagedAt` rather than into the new-match reset. Every deploy cleared it.
+It was invisible because the next `renderPanel` sets it straight back when a
+barracks is standing, which is exactly the kind of bug that survives a review:
+correct output, wrong reason, and it would have started hiding the roster the
+day the flag was used for anything else. It is with the rest of the per-match
+state now.
+
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

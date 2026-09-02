@@ -709,11 +709,16 @@ if (geomStart > 0 && geomEnd > geomStart) {
 // silently does nothing if the wiring goes, and nothing else would notice.
 {
   const keys = bodyOf('onKeyDown');
-  check('X splits the selected groups', /'x'/.test(keys) && keys.includes('splitSelection('));
-  check('  and asks the server for it rather than deciding locally',
-    bodyOf('splitSelection').includes("type: 'splitArmy'"));
+  // X used to halve on the spot. It opens the split control instead: the
+  // slider is the feature, and a key that acts before you have seen it
+  // teaches you that splitting is something that happens TO your group.
+  check('X puts you on the split control', /'x'/.test(keys) && keys.includes('focusSplit('));
+  check('  which asks the server for it rather than deciding locally',
+    bodyOf('splitSelectedByCount').includes("type: 'splitArmy'"));
+  check('  and Enter on the slider commits, so it works from the keyboard',
+    client.includes("e.key === 'Enter'") && client.includes('splitSelectedByCount()'));
   check('  leaving somebody behind, so the server never has to refuse a whole group',
-    /\/\s*2\)/.test(bodyOf('splitSelection')) && bodyOf('splitSelection').includes('< 1'));
+    bodyOf('splitSelectedByCount').includes('- 1'));
 
   check('a bare digit selects a control group', keys.includes('recallControlGroup('));
   check('  and shift+digit assigns one',

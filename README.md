@@ -680,14 +680,14 @@ sprite anchors and layering can be eyeballed as a PNG.
   health they were carrying, so reinforcing a battered group does not heal it.
   Only groups of the same kind can join: militia, knights and ballistae always
   march separately.
-- **Split a group with the slider over the troop bar**, or press X to halve it.
-  Joining stops being a one-way door.
+- **Split a group with the slider over the troop bar**, or press X to jump
+  to it. Joining stops being a one-way door.
   The half that walks off holds where it stood; the half you keep is still the
   one you had selected, so your next order reaches it. Splitting moves soldiers
   rather than making them — the detachment carries whatever wounds the group was
   already nursing, and half of a rooted group is still rooted — so it is a way
   to peel off a scout or leave a garrison behind, never a way out of a fight.
-  Halving composes: half, and half again, is a quarter. The bar over the troop
+  The bar over the troop
   roster is up whenever you have a group selected, and is where you pick a
   number rather than take half — its ceiling is one less than your smallest
   selected group, because somebody always has to be left behind.

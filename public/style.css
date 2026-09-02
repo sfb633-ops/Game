@@ -977,7 +977,14 @@ input[type="range"]:disabled { cursor: not-allowed; filter: grayscale(1) brightn
 }
 #controls-list dd { margin: 0; color: var(--ink); font-size: 0.68rem; }
 
-#exit-confirm { width: 250px; margin-top: 0.4rem; text-align: left; }
+/* It lives inside #game-menu now. While it is up the rest of the panel is
+   hidden, so the box stays the size of the question rather than adding
+   itself to the bottom of a panel that already fills the corner. */
+#exit-confirm { margin-top: 0.6rem; text-align: left; }
+#game-menu.confirming .menu-head,
+#game-menu.confirming .slider-row,
+#game-menu.confirming #controls-list,
+#game-menu.confirming > .btn-row { display: none; }
 #exit-confirm.hidden { display: none; }
 #exit-confirm .btn-row { margin-top: 0.5rem; }
 #exit-confirm .btn { flex: 1 1 0; }

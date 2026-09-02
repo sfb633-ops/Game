@@ -142,12 +142,16 @@
           <button id="exit-btn" class="btn btn-sm btn-danger">Main Menu</button>
           <button id="menu-close" class="btn btn-sm">Close</button>
         </div>
-      </div>
-      <div id="exit-confirm" class="frame frame-plate hidden">
-        <div class="sub" id="exit-note"></div>
-        <div class="btn-row">
-          <button id="exit-yes" class="btn btn-sm btn-danger">Leave</button>
-          <button id="exit-no" class="btn btn-sm">Cancel</button>
+        <!-- Inside the panel, not floating under it. On the right edge the
+             space below the gear is where the hand sits, and a second box
+             hanging there landed on top of it. Showing this hides the
+             sections above so the panel does not grow off the screen. -->
+        <div id="exit-confirm" class="hidden">
+          <div class="sub" id="exit-note"></div>
+          <div class="btn-row">
+            <button id="exit-yes" class="btn btn-sm btn-danger">Leave</button>
+            <button id="exit-no" class="btn btn-sm">Cancel</button>
+          </div>
         </div>
       </div>
     </div>

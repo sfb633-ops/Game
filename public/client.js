@@ -618,6 +618,11 @@ function showExitConfirm(show) {
   }
   box.classList.toggle('hidden', !show);
   document.getElementById('exit-btn').classList.toggle('active', show);
+  // The confirm sits inside the gear panel, so asking hides the rest of it:
+  // a panel with the sound, the controls AND a question in it runs off the
+  // bottom of the screen, and none of it is what you are being asked about.
+  const menu = document.getElementById('game-menu');
+  if (menu) menu.classList.toggle('confirming', show);
 }
 
 function leaveGame() {
@@ -713,7 +718,7 @@ const CONTROLS = [
   ['Drag', 'Select everything in the box'],
   ['Shift + click', 'Add to the selection, or take one out'],
   ['Right-click', 'March there, attack it, or join another of your groups'],
-  ['X', 'Split the selected groups in half'],
+  ['X', 'Set how many to split off the selected group'],
   ['R', 'Recall the selected groups'],
   ['Q', 'Use your race ability'],
   ['Shift + 1-9', 'Put the selection in a control group'],
@@ -818,6 +823,8 @@ function onInit(msg) {
   latestState = null;
   terrainChunks = null;
   selectedArmies.clear(); armedDeploy = false;
+  // A new empire has no buildings, so the roster waits again.
+  sawTrainer = false;
   // Army ids restart from scratch in a new match, so a slot held over would
   // point at whatever group happened to be dealt the same id.
   controlGroups = {};
@@ -1309,7 +1316,6 @@ function deployStagedAt(ix, iy) {
     return false;
   }
   send({ type: 'deployUnits', units, x: ix, y: iy });
-  sawTrainer = false;
   document.querySelectorAll('#unit-inputs input').forEach(inp => { inp.value = 0; });
   updateDeployButton();
   // Counts move as soldiers fall, so the slider's ceiling has to move with
@@ -3078,7 +3084,15 @@ function onKeyDown(e) {
   // is the only split that needs no second input and it composes: half, half
   // again is a quarter. The server takes a count, so a precise split is one
   // message away the day the UI wants to offer one.
-  if (k === 'x') { splitSelection(); return; }
+  // X puts you on the split control rather than splitting.
+  //
+  // It used to halve immediately, which is a fine shortcut and a bad first
+  // experience: the slider is the feature, and a key that acts before you
+  // have seen it teaches you that splitting is a thing that happens TO your
+  // group. So X selects the number instead — the bar is already up whenever
+  // a group is, and this hands you its slider with the value selected, so
+  // the arrow keys and a typed number both work and Enter commits.
+  if (k === 'x') { focusSplit(); return; }
 
   // Control groups. Shift+digit assigns, a bare digit selects, and the same
   // digit twice in quick succession also brings the camera to them.
@@ -3097,22 +3111,6 @@ function onKeyDown(e) {
 }
 
 // ---------- Splitting and control groups ----------
-
-// Peel half off each selected group. The new groups hold where they stand, and
-// the selection is left on the parents — the half you kept is the half you were
-// already commanding, and it is what the next order should reach.
-function splitSelection() {
-  const groups = selectedList();
-  if (!groups.length) { log('Select a group first — X splits it in half.'); return; }
-  let sent = 0;
-  for (const a of groups) {
-    const half = Math.floor((a.count || 0) / 2);
-    if (half < 1) continue;                    // a group of one has no halves
-    send({ type: 'splitArmy', armyId: a.id, count: half });
-    sent++;
-  }
-  if (!sent) log('Nothing to split — a group needs at least two soldiers.');
-}
 
 // The bar over the troop roster: what is selected, and how many to peel off.
 //
@@ -3169,6 +3167,28 @@ function renderGroupBar() {
 
 // The same count to every selected group, clamped per group so a mixed
 // selection splits what it can rather than being refused as a whole.
+// Put the player on the slider. If nothing is selected there is nothing to
+// split, and saying so is more use than doing nothing.
+function focusSplit() {
+  const groups = selectedList();
+  if (!groups.length) { log('Select a group first — X then sets how many to split off.'); return; }
+  const slider = document.getElementById('split-count');
+  if (!slider || slider.disabled) {
+    log('That group is too small to split — it takes two to leave one behind.');
+    return;
+  }
+  slider.focus();
+}
+
+// Enter on the slider is the same as pressing Split, so the whole thing can
+// be done from the keyboard: X, arrows, Enter.
+{
+  const slider = document.getElementById('split-count');
+  if (slider) slider.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); splitSelectedByCount(); }
+  });
+}
+
 function splitSelectedByCount() {
   const groups = selectedList();
   let sent = 0;
