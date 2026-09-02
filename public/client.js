@@ -1904,7 +1904,18 @@ function render() {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   // world -> screen: scale by zoom, then translate by the camera.
   ctx.setTransform(zoom, 0, 0, zoom, -Math.round(camera.x * zoom), -Math.round(camera.y * zoom));
-  ctx.imageSmoothingEnabled = false; // crisp pixel-art scaling
+  // Nearest-neighbour when magnifying, smoothed when shrinking.
+  //
+  // Off is the right answer for pixel art only while a source pixel still
+  // covers at least one screen pixel. At zoom 0.5 and 0.25 it covers less than
+  // one, and nearest-neighbour is then not preserving anything — it throws
+  // three of every four pixels away and keeps whichever happened to land on
+  // the sample point. Fine detail turns to crunch, and the worst of it lands
+  // on large soft shapes: an undergrowth blob whose leafy edge reads as
+  // organic at 1:1 loses that edge and comes back as a hard stepped block,
+  // which looks for all the world like a tree standing on a dark rectangle.
+  ctx.imageSmoothingEnabled = zoom < 1;
+  if (zoom < 1) ctx.imageSmoothingQuality = 'high';
   // Offset, not (0,0): the terrain canvas is drawn on its own 0-based grid with
   // a tile of margin, and this lines its cells up with the tile centres that
   // buildings stand on and clicks round to.

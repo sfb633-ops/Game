@@ -4119,6 +4119,50 @@ the flowers float on grass as specks. Quieter blocks exist on the same sheet
 look, not a defect, so it is written down rather than changed.
 
 
+### The tree standing on a dark block (1 Sep 2026)
+
+Reported twice, from two screenshots, as a tree whose shadow looked wrong and
+choppy. It is neither a shadow nor the tree.
+
+**What it actually is.** The dark shape is the `brush` layer — undergrowth, laid
+as ground autotile. At 1:1 with the fog lifted it is a leafy patch with a ragged
+organic edge, and it looks right; that was checked in the running game before
+anything was changed. Two things were hiding that.
+
+The first is the remembered-fog veil, which dims explored ground you are not
+currently watching, so a patch of undergrowth out at the border reads much
+darker than the same patch beside your keep.
+
+The second is the real fault. **The map was drawn nearest-neighbour at every
+zoom.** `imageSmoothingEnabled = false` is the right answer for pixel art only
+while a source pixel still covers at least one screen pixel. `ZOOM_STEPS` runs
+down to 0.5 and 0.25, where it covers less than one — and nearest-neighbour is
+then not preserving anything. It throws three of every four pixels away and
+keeps whichever landed on the sample point. Fine detail turns to crunch, and the
+worst of it lands on large soft shapes: the leafy edge that makes an undergrowth
+blob read as organic is exactly the detail that gets discarded, so what comes
+back is the tile grid underneath it — a hard stepped rectangle, with a tree
+standing on it.
+
+So: nearest when magnifying, smoothed when shrinking. One line, and it is worth
+knowing it improves the whole zoomed-out view rather than only this — grass
+texture, sprite edges and the flower drift all stop shimmering.
+
+**How it was found, and the general lesson.** Not by reading the shadow code,
+which is where two passes were spent. The comments there describe a cliff-shadow
+bug with the same symptom that was fixed long ago, and the tree sprites were
+rendered onto grass twice looking for a baked shadow that turned out to be a
+perfectly good soft ellipse. What settled it was opening the game, lifting the
+fog, going to 1:1, and looking at the same tile: the patch was fine, so nothing
+about the art or the shadow was ever the problem, and the only remaining
+variable was the scaling.
+
+The lesson is the same one as the `castleCard` crash a section above. When a
+report is about how something LOOKS, reproduce the exact conditions — zoom,
+fog, position — before reasoning about the code that draws it. Half of what was
+being blamed here was a viewing condition rather than a fault.
+
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no
