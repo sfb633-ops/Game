@@ -325,21 +325,32 @@ function sweepMountainScraps(isRock, clear, width, height, fill) {
   // or none is a nub and goes; an open tile with three or more is a notch and
   // fills. Between them they take the single-tile steps out of a boundary and
   // leave the long curves, which is what a contour is.
-  if (fill) {
-    for (let pass = 0; pass < 6; pass++) {
-      const cut = [], add = [];
-      const n4 = (x, y) => (isRock(x - 1, y) ? 1 : 0) + (isRock(x + 1, y) ? 1 : 0) +
-                           (isRock(x, y - 1) ? 1 : 0) + (isRock(x, y + 1) ? 1 : 0);
-      for (let y = 1; y < height - 1; y++)
-        for (let x = 1; x < width - 1; x++) {
-          const n = n4(x, y);
-          if (isRock(x, y)) { if (n <= 1) cut.push([x, y]); }
-          else if (n >= 3) add.push([x, y]);
-        }
-      if (!cut.length && !add.length) break;
-      for (const [x, y] of cut) clear(x, y);
-      for (const [x, y] of add) fill(x, y);
-    }
+  // Cutting always runs; filling only when the caller allows it.
+  //
+  // Both halves used to sit inside `if (fill)`, so a caller that passed no fill
+  // got no rounding at all — and the seat pass is exactly such a caller,
+  // deliberately, because filling a notch could put rock back inside somebody's
+  // opening circle. The effect was that punching twelve seats out of the
+  // mountains left every nub and one-tile ribbon that the punching created, and
+  // nothing ever swept them: a plateau would trail a single tile of rock off
+  // into open grass, and the terrain layer can only draw that as a hard
+  // vertical cut, because the SHAPE has the corner in it.
+  //
+  // Removing rock is safe for every caller — it can never put stone anywhere it
+  // was not — so the cut half is unconditional and only the fill is gated.
+  for (let pass = 0; pass < 6; pass++) {
+    const cut = [], add = [];
+    const n4 = (x, y) => (isRock(x - 1, y) ? 1 : 0) + (isRock(x + 1, y) ? 1 : 0) +
+                         (isRock(x, y - 1) ? 1 : 0) + (isRock(x, y + 1) ? 1 : 0);
+    for (let y = 1; y < height - 1; y++)
+      for (let x = 1; x < width - 1; x++) {
+        const n = n4(x, y);
+        if (isRock(x, y)) { if (n <= 1) cut.push([x, y]); }
+        else if (fill && n >= 3) add.push([x, y]);
+      }
+    if (!cut.length && !add.length) break;
+    for (const [x, y] of cut) clear(x, y);
+    if (fill) for (const [x, y] of add) fill(x, y);
   }
 
   for (let pass = 0; pass < 8; pass++) {

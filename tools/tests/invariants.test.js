@@ -673,5 +673,33 @@ for (const shrineWanted of [true, false]) {
     hijacked === worldOf(a));
 }
 
+
+// --- a plateau has no loose ends -------------------------------------------
+//
+// A rock tile with one orthogonal neighbour or none is a nub, and the terrain
+// layer can only draw one as a hard vertical cut — the SHAPE has the corner in
+// it, so no amount of choosing better tiles helps. The rounding pass exists to
+// take them out, and it used to sit entirely inside : the seat pass
+// passes no fill on purpose, so punching twelve starting circles out of the
+// mountains left every nub it created and nothing ever swept them.
+{
+  for (const map of ['highlands', 'wilds', 'divide']) {
+    let worst = 0;
+    for (const seed of [21, 99, 404]) {
+      const m = new Match({ started: false, map, seed });
+      const W = cfg.MAP.width, H = cfg.MAP.height;
+      const rock = (x, y) => x >= 0 && y >= 0 && x < W && y < H && m.terrain[y][x] === 1;
+      let nubs = 0;
+      for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+        if (!rock(x, y)) continue;
+        const n = (rock(x - 1, y) ? 1 : 0) + (rock(x + 1, y) ? 1 : 0) +
+                  (rock(x, y - 1) ? 1 : 0) + (rock(x, y + 1) ? 1 : 0);
+        if (n <= 1) nubs++;
+      }
+      worst = Math.max(worst, nubs);
+    }
+    check(`${map} leaves no one-tile rock stubs`, worst === 0, `${worst} nubs`);
+  }
+}
 console.log(failures ? `\n${failures} FAILURES` : '\nall invariants hold');
 process.exit(failures ? 1 : 0);
