@@ -311,6 +311,12 @@ const RACE_ABILITIES = {
 // upgrades in place rather than being "built". Levels are 1-indexed; arrays
 // below are 0-indexed.
 const CASTLE = {
+  // The keep is the one building that trains workers, and it is the reason it
+  // can: an empire that has lost everything else can still put somebody on a
+  // seam, and there is never a state where you cannot make the thing that
+  // makes gold. Nothing else about the keep changes — it is not in
+  // BUILDING_TYPES and does not appear in the build bar.
+  trains: 'worker',
   maxLevel: 3,
   // Measured, not guessed. At 400/700/1100 an undefended level-1 keep fell to
   // twenty swordsmen — four hundred gold, the smallest force anybody fields —
@@ -436,6 +442,15 @@ const BUILDING_TYPES = {
 // always a group of one kind now, so the plural is read constantly and
 // "Swordsmans" is not a thing.
 const UNIT_TYPES = {
+  // Not a soldier. A worker exists to stand next to a seam and be worth
+  // killing: two attack and twenty-five health means a single swordsman ends
+  // one, which is the whole reason a mine pulls an army out of your compound.
+  //
+  // Priced against a Bank, because that is the decision it is really up
+  // against. A Bank is 150 gold once for 2/s forever; two workers are 70 gold
+  // for 2.4/s that stops when the seam does. Cheaper and faster to stand up,
+  // finite, and killable — which is the trade the whole economy turns on.
+  worker:    { name: 'Worker', plural: 'Workers', cost: 35, trainTimeSec: 4.0, attack: 2, hp: 25, speed: 3.4, worker: true },
   swordsman: { name: 'Swordsman', plural: 'Swordsmen', cost: 20, trainTimeSec: 5.1,  attack: 5,  hp: 30, speed: 3.0 },
   // Knights buy speed, and that is all they buy. At 8.5s they were simply the
   // better unit: a stable running flat out out-produced a barracks on attack
@@ -565,6 +580,40 @@ const SHRINE = {
   // Well clear of anybody's doorstep: this should be a march, not a land grab
   // by whoever happened to spawn nearest.
   spacing: 34,
+};
+
+// Gold seams: income as a place, and a finite one.
+//
+// The rule this bends is written in AI_CAMP below — that a camp pays no gold,
+// because paying for it let a player farm a quiet corner and never meet
+// anybody. That reasoning is kept, and it is the reason a seam RUNS OUT. A
+// tap you can sit on is the thing that was wrong; a seam you exhaust makes
+// you go and find the next one, and the next one is further out, nearer
+// somebody else. The economy does the work the map used to be asked to do.
+//
+// Every number here is a first pass and expects to move once it has been
+// played. What they are set against: a Bank is 150 gold for 2/s forever.
+const ORE = {
+  // Plenty for four empires, thin for twelve — which is the right way round.
+  // A twelve-player map should be short of seams by the midgame.
+  count: 34,
+  // Off everybody's doorstep, and not clustered. Smaller than a camp's 14,
+  // because seams are meant to be common enough to be a route rather than a
+  // landmark.
+  spacing: 12,
+  // What a seam holds. Four workers pull 4.8/s, so a full seam is about three
+  // minutes of a small crew — long enough to be worth walking to and defending,
+  // short enough that a match visibly moves through them.
+  amount: 800,
+  // How near a worker has to be. Two tiles rather than standing exactly on it:
+  // nobody should be nudging a group a tile at a time to start it earning,
+  // and there is no hauling to make distance mean anything.
+  radius: 2,
+  perWorkerPerSec: 1.2,
+  // A seam is a place, and a place holds so many people. Past this, more
+  // workers are better spent on the next seam — which is what stops one rich
+  // tile being the whole economy.
+  maxWorkers: 4,
 };
 
 const AI_CAMP = {
@@ -814,7 +863,7 @@ const TICK_MS = 200;
 module.exports = {
   MAP, MAPS, DEFAULT_MAP, VISION, BUILD, OUTPOST, RACES, RACE_ABILITIES, CASTLE,
   BUILDING_TYPES, UNIT_TYPES,
-  AI_CAMP, SHRINE, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
+  AI_CAMP, ORE, SHRINE, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
   TERRAIN_CLEAR_COST,
   TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA, TICK_MS, MAX_TEAMS,
 };

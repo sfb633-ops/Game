@@ -4182,5 +4182,66 @@ function fightOut(m, ours, theirs) {
     sampled > 0 && turnsAfter / sampled < 12, `${(turnsAfter / sampled).toFixed(1)} heading changes a march`);
 }
 
+
+// --- gold seams -----------------------------------------------------------
+//
+// Income as a place, and a finite one. Everything here is about the seam being
+// a thing on the map rather than a number on a player: it runs out, the cap
+// belongs to the rock rather than to the empire, and the ground it stands on
+// stays occupied after it is spent.
+{
+  const m = new Match({ seed: 4242 });
+  const p = m.addPlayer('p', 'human', 'P');
+  p.draft = null;
+  m.start();
+
+  check('a map is dealt gold seams', m.ore.length === cfg.ORE.count, `${m.ore.length} seams`);
+  check('  each holding its full amount', m.ore.every(o => o.amount === cfg.ORE.amount));
+  check('  and none of them on anybody\'s doorstep',
+    m.ore.every(o => m.spawns.every(s => Math.hypot(s.x - o.x, s.y - o.y) >= cfg.ORE.spacing)));
+
+  // Standing near it is the whole verb — there is nothing to carry back.
+  const seam = m.ore[0];
+  p.idleUnits.worker = 4;
+  m.cmdDeployUnits('p', { worker: 4 }, p.baseX + 2, p.baseY + 2);
+  const crew = [...m.armies.values()][0];
+  check('the keep is what trains workers', m.trainersFor(p, 'worker').length === 1);
+  check('  and nothing else does', m.trainersFor(p, 'swordsman').length === 0);
+
+  crew.x = seam.x; crew.y = seam.y; crew.order = 'hold';
+  p.gold = 0;
+  for (let i = 0; i < 25; i++) m.tick(0.2);      // five seconds
+  const expectedOre = 4 * cfg.ORE.perWorkerPerSec * 5;
+  check('workers standing on a seam are paid for it',
+    Math.abs(p.gold - (expectedOre + 5 * cfg.CASTLE.incomePerSec[0])) < 0.5,
+    `${p.gold.toFixed(1)} gold in 5s`);
+  check('  and the seam is lighter by exactly what they took',
+    Math.abs((cfg.ORE.amount - seam.amount) - expectedOre) < 0.5,
+    `${(cfg.ORE.amount - seam.amount).toFixed(1)} mined`);
+
+  // The cap is a property of the rock, not of the empire digging it.
+  const seam2 = m.ore[1];
+  p.idleUnits.worker = 20;
+  m.cmdDeployUnits('p', { worker: 20 }, p.baseX + 2, p.baseY + 2);
+  const bigCrew = [...m.armies.values()].find(a => armyCount(a) === 20);
+  bigCrew.x = seam2.x; bigCrew.y = seam2.y; bigCrew.order = 'hold';
+  crew.x = p.baseX; crew.y = p.baseY;            // the first lot go home
+  const before2 = seam2.amount;
+  for (let i = 0; i < 25; i++) m.tick(0.2);
+  check('a seam takes only so many hands at once',
+    Math.abs((before2 - seam2.amount) - cfg.ORE.maxWorkers * cfg.ORE.perWorkerPerSec * 5) < 0.5,
+    `${(before2 - seam2.amount).toFixed(1)} mined by twenty, cap is ${cfg.ORE.maxWorkers}`);
+
+  // Run one dry and it stops paying, but the rubble stays where it was.
+  seam2.amount = 2;
+  const goldBefore = p.gold;
+  for (let i = 0; i < 50; i++) m.tick(0.2);
+  check('a spent seam stops paying', seam2.amount === 0);
+  check('  having paid out no more than was in the ground',
+    p.gold - goldBefore < 2 + 10 * cfg.CASTLE.incomePerSec[0] + 0.5,
+    `${(p.gold - goldBefore).toFixed(1)} gold from 2 of ore plus ten seconds of keep`);
+  check('  and its rubble still holds the tile', m.tileOccupied(seam2.x, seam2.y));
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');
 process.exit(failures ? 1 : 0);

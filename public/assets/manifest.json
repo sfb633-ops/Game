@@ -2139,6 +2139,26 @@
       }
      }
     },
+    "worker": {
+     "frameW": 48,
+     "frameH": 48,
+     "anchorX": 24,
+     "anchorY": 42,
+     "anims": {
+      "idle": {
+       "file": "units/human/worker/idle.png",
+       "frames": 1
+      },
+      "walk": {
+       "file": "units/human/worker/walk.png",
+       "frames": 5
+      },
+      "attack": {
+       "file": "units/human/worker/attack.png",
+       "frames": 5
+      }
+     }
+    },
     "swordsman": {
      "frameW": 48,
      "frameH": 48,
@@ -2252,6 +2272,26 @@
       "attack": {
        "file": "units/colossus/attack.png",
        "frames": 17
+      }
+     }
+    },
+    "worker": {
+     "frameW": 48,
+     "frameH": 48,
+     "anchorX": 24,
+     "anchorY": 42,
+     "anims": {
+      "idle": {
+       "file": "units/elf/worker/idle.png",
+       "frames": 1
+      },
+      "walk": {
+       "file": "units/elf/worker/walk.png",
+       "frames": 5
+      },
+      "attack": {
+       "file": "units/elf/worker/attack.png",
+       "frames": 5
       }
      }
     },
@@ -2371,6 +2411,26 @@
       }
      }
     },
+    "worker": {
+     "frameW": 48,
+     "frameH": 48,
+     "anchorX": 24,
+     "anchorY": 42,
+     "anims": {
+      "idle": {
+       "file": "units/orc/worker/idle.png",
+       "frames": 1
+      },
+      "walk": {
+       "file": "units/orc/worker/walk.png",
+       "frames": 5
+      },
+      "attack": {
+       "file": "units/orc/worker/attack.png",
+       "frames": 5
+      }
+     }
+    },
     "swordsman": {
      "frameW": 48,
      "frameH": 48,
@@ -2484,6 +2544,26 @@
       "attack": {
        "file": "units/colossus/attack.png",
        "frames": 17
+      }
+     }
+    },
+    "worker": {
+     "frameW": 48,
+     "frameH": 48,
+     "anchorX": 24,
+     "anchorY": 42,
+     "anims": {
+      "idle": {
+       "file": "units/undead/worker/idle.png",
+       "frames": 1
+      },
+      "walk": {
+       "file": "units/undead/worker/walk.png",
+       "frames": 5
+      },
+      "attack": {
+       "file": "units/undead/worker/attack.png",
+       "frames": 5
       }
      }
     },

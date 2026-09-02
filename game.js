@@ -5,7 +5,7 @@
 const {
   MAP, MAPS, DEFAULT_MAP, VISION, OUTPOST, RACES, RACE_ABILITIES, CASTLE, MAX_TEAMS,
   BUILDING_TYPES, UNIT_TYPES,
-  AI_CAMP, SHRINE, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
+  AI_CAMP, ORE, SHRINE, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
   TERRAIN_CLEAR_COST,
   TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA,
 } = require('./config');
@@ -432,6 +432,9 @@ class Match {
     // Camps are looked up by id on every tick of every raid and never added to
     // after this, so the list is indexed once.
     this.campById = new Map(this.aiCamps.map(c => [c.id, c]));
+    // After the camps and the shrine, so a seam never lands on one: they all
+    // draw from the same usedSpawns list inside findOpenSpot.
+    this.ore = this.generateOre();
     this.gameOver = false;
     this.winnerId = null;
     this.winnerTeam = null;
@@ -1237,6 +1240,29 @@ class Match {
     });
   }
 
+  // Gold seams, scattered like everything else and finite.
+  //
+  // Deliberately NOT placed fairly. The shrine gets fairestSpot because there
+  // are two of them and they are the objective; there are thirty-four of these
+  // and an empire that happens to open next to a rich patch has been dealt a
+  // map, which is the kind of variance this game says it wants. What matters is
+  // that no seam sits on anybody's doorstep, and findOpenSpot's spacing is
+  // measured from the starting positions as well as from everything else.
+  generateOre() {
+    const out = [];
+    for (let i = 0; i < ORE.count; i++) {
+      const spot = this.findOpenSpot(ORE.spacing);
+      if (!spot) break;              // a small or crowded map seats what it can
+      out.push({
+        id: `ore-${i}`,
+        x: spot.x, y: spot.y,
+        amount: ORE.amount,
+        maxAmount: ORE.amount,
+      });
+    }
+    return out;
+  }
+
   generateCamps() {
     const camps = [];
     for (let i = 0; i < AI_CAMP.count; i++) {
@@ -1653,6 +1679,9 @@ class Match {
   // Is (x,y) already taken by any building (any player) or a live AI camp?
   tileOccupied(x, y) {
     if (this.buildingIndex.has(tileKey(x, y))) return true;
+    // A seam is a thing standing on a tile, so nothing may be built on top of
+    // it — including after it is exhausted, because the rubble is still there.
+    for (const o of this.ore) if (o.x === x && o.y === y) return true;
     for (const camp of this.aiCamps) {
       // A razed camp leaves ruins standing, so its tile stays taken.
       if ((!camp.defeated || camp.capturedBy) && camp.x === x && camp.y === y) return true;
@@ -1690,6 +1719,53 @@ class Match {
       if (b.type === 'bank' && !b.underConstruction) income += BUILDING_TYPES.bank.incomePerSec;
     }
     return income * mods.incomeMult;
+  }
+
+  // Who is digging, and what it pays them.
+  //
+  // Walked per SEAM rather than per worker, because the cap is a property of
+  // the place: a seam takes so many people and no more, and a hundred workers
+  // on one tile must not out-earn four. Walking it the other way round would
+  // need a second pass to apply the cap anyway.
+  //
+  // Presence pays. There is no hauling and nothing to carry back — a worker
+  // within ORE.radius of a seam is mining it, and that is the whole verb. The
+  // cost of distance is the walk and the risk, not a round trip.
+  stepOre(dt) {
+    for (const o of this.ore) {
+      if (o.amount <= 0) continue;
+      // Everybody standing on it, by empire. An ally and I do not share a
+      // seam's cap — we are two crews on one rock, and the rock is the limit.
+      const crew = new Map();
+      for (const army of this.armies.values()) {
+        const def = UNIT_TYPES[army.type];
+        if (!def || !def.worker) continue;
+        if (Math.hypot(army.x - o.x, army.y - o.y) > ORE.radius) continue;
+        const n = armyCount(army);
+        if (n <= 0) continue;
+        crew.set(army.ownerId, (crew.get(army.ownerId) || 0) + n);
+      }
+      if (!crew.size) continue;
+      // The cap is on the seam, so it is shared out in proportion when two
+      // empires are digging the same rock — which is a fight waiting to
+      // happen, and should be.
+      let heads = 0;
+      for (const n of crew.values()) heads += n;
+      const working = Math.min(heads, ORE.maxWorkers);
+      let paid = 0;
+      for (const [ownerId, n] of crew) {
+        const share = working * (n / heads);
+        const player = this.players.get(ownerId);
+        if (!player || !player.alive) continue;
+        // Never pay out more than is in the ground.
+        const gold = Math.min(share * ORE.perWorkerPerSec * dt, o.amount - paid);
+        if (gold <= 0) continue;
+        player.gold += gold;
+        player.oreIncome = (player.oreIncome || 0) + gold / dt;
+        paid += gold;
+      }
+      o.amount = Math.max(0, o.amount - paid);
+    }
   }
 
   // Everything still standing between a raider and the town center once the
@@ -2250,6 +2326,11 @@ class Match {
     const out = [];
     for (const b of Object.values(player.buildings)) {
       if (b.underConstruction) continue;
+      // The keep trains workers and is not in BUILDING_TYPES — it is not a
+      // thing you build, it is the thing you start with — so it is named here
+      // rather than given a table entry that would put it in the build bar and
+      // count against the building limit.
+      if (b.type === 'castle') { if (CASTLE.trains === unitType) out.push(b); continue; }
       const def = BUILDING_TYPES[b.type];
       if (def && def.trains === unitType) out.push(b);
     }
@@ -3643,6 +3724,7 @@ class Match {
       this.stepSpellRecharge(player, dt);
       this.stepVision(player);
       player.gold += this.incomePerSec(player) * dt;
+      player.oreIncome = 0;
 
       this.stepCastleRepair(player, dt);
 
@@ -3675,6 +3757,9 @@ class Match {
       this.stepTowers(player, dt);
     }
 
+    // After every empire has taken its income, because a seam pays on top of it
+    // and oreIncome is reset inside that loop.
+    this.stepOre(dt);
     this.stepRubble(dt);
 
     for (const camp of this.aiCamps) {
@@ -4671,6 +4756,14 @@ class Match {
         const [x, y] = key.split(',').map(Number);
         return { x, y, sec: Math.ceil(left) };
       }),
+      // Seams. `left` rather than the raw amount, because what the client does
+      // with it is pick one of 23 drawings — see the ore strip in
+      // tools/build-assets.js — and a fraction is what that needs. Exhausted
+      // seams are still sent: the rubble stays on the tile and still blocks it.
+      ore: this.ore.map(o => ({
+        id: o.id, x: o.x, y: o.y,
+        left: o.maxAmount > 0 ? o.amount / o.maxAmount : 0,
+      })),
       aiCamps: this.aiCamps.map(c => ({
         id: c.id, x: c.x, y: c.y, hp: Math.max(0, Math.round(c.hp)), maxHp: c.maxHp,
         defeated: c.defeated, capturedBy: c.capturedBy || null,

@@ -161,6 +161,8 @@ function render(latestState) {
 
   const scene = [];
   for (const camp of latestState.aiCamps) if (!camp.defeated) scene.push({ y: camp.y, kind: 'camp', camp });
+  // Seams, at whatever stage the match has worn them down to.
+  for (const o of latestState.ore || []) scene.push({ y: o.y, kind: 'ore', o });
   for (const p of latestState.players)
     for (const b of p.buildings) if (b.type) scene.push({ y: b.y, kind: 'building', b, p });
   for (const a of latestState.armies) scene.push({ y: a.y, kind: 'army', a });
@@ -171,7 +173,9 @@ function render(latestState) {
   const t = 0.35; // a moment mid-animation
 
   for (const item of scene) {
-    if (item.kind === 'camp') {
+    if (item.kind === 'ore') {
+      Sprites.drawOre(ctx, item.o.x, item.o.y, item.o.left);
+    } else if (item.kind === 'camp') {
       const px = item.camp.x * TILE, py = item.camp.y * TILE;
       Sprites.drawBuilding(ctx, 'camp', px, py);
       Sprites.drawUnit(ctx, 'bandit', 'swordsman', 'idle', 'down', t, px - 13, py + 5);

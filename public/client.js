@@ -2080,6 +2080,7 @@ function render() {
   for (const camp of latestState.aiCamps) {
     if (!camp.defeated || camp.capturedBy) scene.push({ y: camp.y, kind: 'camp', camp });
   }
+  for (const o of latestState.ore || []) scene.push({ y: o.y, kind: 'ore', o });
   for (const p of latestState.players) {
     for (const b of p.buildings) if (b.type) scene.push({ y: b.y, kind: 'building', b, p });
   }
@@ -2092,7 +2093,12 @@ function render() {
     // shadow is still a camp you can see and click. Enemy *groups* are already
     // filtered by the server, which is the half that has to be authoritative;
     // this is the half that stops the map reading as a lit board behind glass.
-    if (item.kind === 'camp') {
+    if (item.kind === 'ore') {
+      // Same rule as a camp: the fog darkens ground you remember, it does not
+      // hide it, but ground you have never seen shows nothing at all.
+      if (!isExplored(item.o.x, item.o.y)) continue;
+      Sprites.drawOre(ctx, item.o.x, item.o.y, item.o.left);
+    } else if (item.kind === 'camp') {
       if (!isExplored(item.camp.x, item.camp.y)) continue;
       drawCamp(item.camp, ts);
     } else if (item.kind === 'building') {
@@ -3989,7 +3995,12 @@ function logGarrison(me) {
   // and build a barracks. The bar is not up until one of the buildings that
   // trains a unit is standing — after that it stays, because a roster that
   // came and went as buildings fell would be worse than one that waits.
-  const trains = me.buildings.some(b => b.type && buildingTypes[b.type] && buildingTypes[b.type].trains);
+  // The keep trains workers and is not in buildingTypes — it is not a thing
+  // you build — so it is named here too. Without it the roster stayed hidden on
+  // a fresh empire that could already make workers from the first second.
+  const trains = me.buildings.some(b => b.type === 'castle'
+    ? !!(castleCfg && castleCfg.trains)
+    : !!(b.type && buildingTypes[b.type] && buildingTypes[b.type].trains));
   if (trains) sawTrainer = true;
   document.getElementById('troop-bar').classList.toggle('hidden', !sawTrainer);
   for (const icon of troopIcons) {

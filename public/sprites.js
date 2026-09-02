@@ -819,8 +819,28 @@ const Sprites = (function () {
     return true;
   }
 
+  // A gold seam, drawn at whatever stage its remaining ore puts it at.
+  //
+  // `left` is 1 for untouched and 0 for exhausted. The strip runs fullest
+  // first, so the frame is a straight walk down it — and an exhausted seam is
+  // still drawn, as the last frame, because the rubble stays on the tile and
+  // still blocks building. A tile that goes from rock to nothing would read
+  // as the map editing itself.
+  function drawOre(ctx, tileX, tileY, left) {
+    const def = manifest.ore;
+    if (!def || !ready(def.file)) return;
+    const img = get(def.file);
+    const last = def.frames - 1;
+    const frame = Math.max(0, Math.min(last, Math.round((1 - left) * last)));
+    const t = manifest.tileSize;
+    // Cells are the tile size exactly, so this lands on the grid with no
+    // scaling and no anchor maths.
+    ctx.drawImage(img, frame * def.w, 0, def.w, def.h,
+      Math.round(tileX * t), Math.round(tileY * t), def.w, def.h);
+  }
   return {
     load,
+    drawOre,
     drawTowerArcher,
     drawArrow,
     towerMuzzle,

@@ -1357,16 +1357,21 @@ const CHARS = path.join('Characters');
 const MELEE = (c) => path.join(CHARS, 'Soldiers', 'Melee', `${c}Melee`, `Swordsman${c}.png`);
 const MOUNT = (c) => path.join(CHARS, 'Soldiers', 'Mounted', `${c}Knight.png`);
 const BALLISTA = path.join(CHARS, 'Soldiers', 'Ranged', 'Ballista.png');
+// The pack ships a farmer per faction colour on the same 80x192 sheet as its
+// swordsmen, so the foot cutter takes them unchanged.
+const WORKER = (c) => path.join(CHARS, 'Workers', c + 'Worker', 'Farmer' + c + '.png');
 
 // Who fields what. Human and Elf take the pack's own faction colours; Orc and
 // Undead swap their footmen for the matching monster sheets, which use the
 // same row layout, so each race still reads as itself on the map.
 const UNIT_SRC = {
-  human:  { swordsman: [MELEE('Cyan'), 'foot'], knight: [MOUNT('Cyan'), 'mount'], catapult: [BALLISTA, 'siege'] },
-  elf:    { swordsman: [MELEE('Lime'), 'foot'], knight: [MOUNT('Lime'), 'mount'], catapult: [BALLISTA, 'siege'] },
-  orc:    { swordsman: [path.join(CHARS, 'Monsters', 'Orcs', 'Orc.png'), 'foot'],
+  human:  { worker: [WORKER('Cyan'), 'foot'], swordsman: [MELEE('Cyan'), 'foot'], knight: [MOUNT('Cyan'), 'mount'], catapult: [BALLISTA, 'siege'] },
+  elf:    { worker: [WORKER('Lime'), 'foot'], swordsman: [MELEE('Lime'), 'foot'], knight: [MOUNT('Lime'), 'mount'], catapult: [BALLISTA, 'siege'] },
+  orc:    { worker: [WORKER('Red'), 'foot'],
+            swordsman: [path.join(CHARS, 'Monsters', 'Orcs', 'Orc.png'), 'foot'],
             knight: [MOUNT('Red'), 'mount'], catapult: [BALLISTA, 'siege'] },
-  undead: { swordsman: [path.join(CHARS, 'Monsters', 'Undead', 'Skeleton-Soldier.png'), 'foot'],
+  undead: { worker: [WORKER('Purple'), 'foot'],
+            swordsman: [path.join(CHARS, 'Monsters', 'Undead', 'Skeleton-Soldier.png'), 'foot'],
             knight: [MOUNT('Purple'), 'mount'], catapult: [BALLISTA, 'siege'] },
   // Not a playable race: the goblins loitering outside an AI camp.
   bandit: { swordsman: [path.join(CHARS, 'Monsters', 'Orcs', 'ClubGoblin.png'), 'foot'] },
