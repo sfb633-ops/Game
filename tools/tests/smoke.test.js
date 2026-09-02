@@ -26,6 +26,16 @@ const b = m.addPlayer('b', 'orc', 'B');
 a.draft = b.draft = null;
 a.gold = b.gold = 999999;
 
+// Buildings are worker-built now, and this run raises no workers: it is about
+// what a long match does to armies, walls and towers, not about construction.
+// So the sites are stood up directly, the way placing one used to.
+function standUp(m, id) {
+  const player = m.players.get(id);
+  for (const plot of Object.values(player.buildings)) {
+    if (plot.underConstruction) { plot.underConstruction = false; plot.remainingSec = 0; }
+  }
+}
+
 // towers, banks, barracks around both bases
 for (const [id, p] of [['a', a], ['b', b]]) {
   // Five out either side: the keep's art reserves the ground nearer than that.
@@ -34,6 +44,7 @@ for (const [id, p] of [['a', a], ['b', b]]) {
   // Beside the keep, clear of the ground its art reserves.
   m.cmdBuild(id, p.baseX - 4, p.baseY - 1, 'barracks');
   m.cmdBuild(id, p.baseX + 5, p.baseY - 1, 'bank');
+  standUp(m, id);
   m.cmdUpgradeCastle(id);
 }
 // A ring of wall round each of them, so armies spend the run routing round

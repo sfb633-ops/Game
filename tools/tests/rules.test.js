@@ -5,6 +5,21 @@ const path = require('path');
 const { decodePNG } = require('../png');
 const { Match, armyCount, armyHp, armyMaxHp, armyWounded } = require('../../game.js');
 
+// Place a building and have it standing, the way it used to be.
+//
+// buildTimeSec is worker-seconds now and a site only advances while workers
+// are on it, so a test about towers or training queues would otherwise have to
+// raise a build crew first. That is not what those tests are about, and making
+// each one simulate a crew would be testing construction over and over by
+// accident. The tests that ARE about construction call cmdBuild directly.
+function buildNow(m, playerId, x, y, type) {
+  const out = m.cmdBuild(playerId, x, y, type);
+  const player = m.players.get(playerId);
+  const plot = player && player.buildings[`${Math.round(x)},${Math.round(y)}`];
+  if (plot && plot.underConstruction) { plot.underConstruction = false; plot.remainingSec = 0; }
+  return out;
+}
+
 // Enough of an image reader for the sprite checks below: one cell out of a
 // strip, and whether anything was drawn in it. Pulling in imageops for two
 // four-line functions would make this file depend on the art pipeline.
@@ -71,7 +86,7 @@ const check = (label, ok, detail) => {
   caster.gold = victim.gold = 99999;
   m.takeCard(caster, 'meteor');
   const yt = yard(victim);
-  m.cmdBuild('v', yt.x, yt.y, 'bank');
+  buildNow(m, 'v', yt.x, yt.y, 'bank');
   const key = `${yt.x},${yt.y}`;
   const before = !!victim.buildings[key];
   m.cmdCastSpell('c', 'meteor', NaN, NaN);
@@ -136,7 +151,7 @@ for (const how of ['army', 'direct']) {
   castle.hp = 5;                                  // one point from falling
   const yt = yard(victim);
   const key = `${yt.x},${yt.y}`;
-  m.cmdBuild('v', yt.x, yt.y, 'bank');
+  buildNow(m, 'v', yt.x, yt.y, 'bank');
   // Dropped on the courtyard, where the bank is; the keep tile is a few tiles
   // south of it outside the gate, and is spared by type, not by distance.
   m.cmdCastSpell('c', 'meteor', yt.x, yt.y);
@@ -215,9 +230,9 @@ for (const how of ['army', 'direct']) {
     m.buildRadius(a) - m.buildRadius(b) === border);
   m.takeCard(a, 'barteringTactics');
   const before = a.gold;
-  m.cmdBuild('a', yard(a).x, yard(a).y, 'bank');
+  buildNow(m, 'a', yard(a).x, yard(a).y, 'bank');
   const beforeB = b.gold;
-  m.cmdBuild('b', yard(b).x, yard(b).y, 'bank');
+  buildNow(m, 'b', yard(b).x, yard(b).y, 'bank');
   check(`Thrift is the discount it claims (x${discount})`,
     (before - a.gold) === Math.round(cfg.BUILDING_TYPES.bank.cost * discount)
     && (beforeB - b.gold) === cfg.BUILDING_TYPES.bank.cost,
@@ -244,7 +259,7 @@ for (const how of ['army', 'direct']) {
   home.gold = raider.gold = 99999;
 
   const tx = home.baseX + 4, ty = home.baseY;      // beside the keep, clear of its art
-  m.cmdBuild('h', tx, ty, 'tower');
+  buildNow(m, 'h', tx, ty, 'tower');
   const tower = home.buildings[`${tx},${ty}`];
   check('the tower is standing', !!tower && !tower.underConstruction);
 
@@ -413,7 +428,7 @@ function marchAt(setup, units) {
     bare.power === 0 && bare.hp === 0,
     `power ${bare.power}, hp ${bare.hp}, with ${Object.values(defender.buildings).length} buildings standing`);
   defender.gold = 999999;
-  m.cmdBuild(defender.id, defender.baseX + 2, defender.baseY + 2, 'tower');
+  buildNow(m, defender.id, defender.baseX + 2, defender.baseY + 2, 'tower');
   for (const b of Object.values(defender.buildings)) b.underConstruction = false;
   const towered = m.homeDefense(defender);
   check('  and raising a tower does not change it',
@@ -606,7 +621,7 @@ function openTiles(m, p, want) {
   p.draft = null; p.gold = 999999;
   const limit = cfg.CASTLE.buildLimit[0];
   const tiles = openTiles(m, p, limit + 6);
-  for (const t of tiles) m.cmdBuild('p', t.x, t.y, 'bank');
+  for (const t of tiles) buildNow(m, 'p', t.x, t.y, 'bank');
   check('building stops at the level-1 limit',
     m.buildingsUsed(p) === limit, `${m.buildingsUsed(p)} of ${limit}`);
   check('and the refusal says why',
@@ -626,7 +641,7 @@ function openTiles(m, p, want) {
   check('levelling the town center raises the limit',
     m.buildLimit(p) === cfg.CASTLE.buildLimit[1], `${m.buildLimit(p)}`);
   const more = openTiles(m, p, 1);
-  if (more.length) m.cmdBuild('p', more[0].x, more[0].y, 'bank');
+  if (more.length) buildNow(m, 'p', more[0].x, more[0].y, 'bank');
   check('and the next building goes up', m.buildingsUsed(p) === before + 1,
     `${m.buildingsUsed(p)}`);
   check('the client is told both halves, never asked to derive them', (() => {
@@ -644,7 +659,7 @@ function openTiles(m, p, want) {
   const tiles = openTiles(m, p, 4);
   const seen = [];
   for (let n = 1; n <= 4; n++) {
-    m.cmdBuild('p', tiles[n - 1].x, tiles[n - 1].y, 'barracks');
+    buildNow(m, 'p', tiles[n - 1].x, tiles[n - 1].y, 'barracks');
     for (const b of Object.values(p.buildings)) if (b.trainQueue) b.trainQueue.length = 0;
     for (let i = 0; i < 60; i++) {
       const before = m.queuedFor(p, 'swordsman');
@@ -680,9 +695,9 @@ function openTiles(m, p, want) {
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null; p.gold = 999999;
   const tiles = openTiles(m, p, 3);
-  m.cmdBuild('p', tiles[0].x, tiles[0].y, 'barracks');
-  m.cmdBuild('p', tiles[1].x, tiles[1].y, 'barracks');
-  m.cmdBuild('p', tiles[2].x, tiles[2].y, 'stable');
+  buildNow(m, 'p', tiles[0].x, tiles[0].y, 'barracks');
+  buildNow(m, 'p', tiles[1].x, tiles[1].y, 'barracks');
+  buildNow(m, 'p', tiles[2].x, tiles[2].y, 'stable');
   const st = m.trainingStatus(p);
   check('two barracks widen only the swordsman queue',
     st.swordsman.capacity === cfg.TRAIN_QUEUE_MAX + cfg.TRAIN_QUEUE_PER_EXTRA,
@@ -1453,7 +1468,7 @@ function facingOff(aCount, bCount) {
     m.canBuildAt(p, p.baseX + f.right + 1, p.baseY) &&
     m.canBuildAt(p, p.baseX, p.baseY - f.up - 1));
   // The rule has to actually stop a build, not merely report it.
-  m.cmdBuild('p', p.baseX + 1, p.baseY, 'bank');
+  buildNow(m, 'p', p.baseX + 1, p.baseY, 'bank');
   check('and a build order into it does nothing', m.buildingsUsed(p) === 0);
   // Levelling the keep changes nothing drawn, so it reserves the same ground.
   m.getCastle(p).level = 3;
@@ -1567,23 +1582,23 @@ function facingOff(aCount, bCount) {
   const p = m.addPlayer('p', 'human', 'P');
   m.start(); p.draft = null; p.gold = 999999;
   const tx = p.baseX + 5, ty = p.baseY;
-  m.cmdBuild('p', tx, ty, 'tower');
+  buildNow(m, 'p', tx, ty, 'tower');
   m.razeBuilding(p, p.buildings[`${tx},${ty}`]);
   check('a broken tower leaves rubble too', m.rubble.has(`${tx},${ty}`));
 
   // Banks go inside the walls, so these two stand on the courtyard.
   const b1 = yard(p, 0);
-  m.cmdBuild('p', b1.x, b1.y, 'bank');
+  buildNow(m, 'p', b1.x, b1.y, 'bank');
   m.razeBuilding(p, p.buildings[`${b1.x},${b1.y}`]);
   check('and so does an ordinary building broken in a fight', m.rubble.has(`${b1.x},${b1.y}`));
 
   const b2 = yard(p, 1);
-  m.cmdBuild('p', b2.x, b2.y, 'bank');
+  buildNow(m, 'p', b2.x, b2.y, 'bank');
   m.cmdDemolish('p', b2.x, b2.y);
   check('but not one its owner demolished', !m.rubble.has(`${b2.x},${b2.y}`));
 
   const cx = p.baseX, cy = p.baseY + 3;
-  m.cmdBuild('p', cx, cy, 'tower');
+  buildNow(m, 'p', cx, cy, 'tower');
   m.razeBuilding(p, p.buildings[`${cx},${cy}`], true);   // pulled down on purpose
   check('and neither does one you pull down yourself', !m.rubble.has(`${cx},${cy}`));
   check('the client is sent the tiles so it can say why',
@@ -1718,7 +1733,7 @@ function facingOff(aCount, bCount) {
   check('a lone keep is one pair of eyes', eyes.length === 1 && eyes[0].r === cfg.VISION.castle);
   m.cmdBuildWall('p', [{ x: p.baseX + 4, y: p.baseY }]);
   check('a wall adds none', [...m.eyesOf(p)].length === 1);
-  m.cmdBuild('p', p.baseX + 5, p.baseY, 'tower');
+  buildNow(m, 'p', p.baseX + 5, p.baseY, 'tower');
   const withTower = [...m.eyesOf(p)];
   check('a tower does, and sees further than it shoots',
     withTower.length === 2 && cfg.VISION.tower > cfg.BUILDING_TYPES.tower.range,
@@ -1999,7 +2014,7 @@ function clearLane(m, x0, x1, y0, y1) {
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null; p.gold = 100000;
   const bx = p.baseX + 5, by = p.baseY;
-  for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) m.cmdBuild('p', bx + dx, by + dy, 'wall');
+  for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) buildNow(m, 'p', bx + dx, by + dy, 'wall');
   const walls = new Set(Object.values(p.buildings).filter(b => b.type === 'wall' && !b.builtin).map(b => `${b.x},${b.y}`));
   let slabs = 0;
   for (const k of walls) {
@@ -2038,8 +2053,8 @@ function clearLane(m, x0, x1, y0, y1) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null; p.gold = 100000;
-  m.cmdBuild('p', yard(p, 0).x, yard(p, 0).y, 'barracks');
-  m.cmdBuild('p', yard(p, 1).x, yard(p, 1).y, 'barracks');
+  buildNow(m, 'p', yard(p, 0).x, yard(p, 0).y, 'barracks');
+  buildNow(m, 'p', yard(p, 1).x, yard(p, 1).y, 'barracks');
   for (const b of Object.values(p.buildings)) b.underConstruction = false;
   const [b1, b2] = m.trainersFor(p, 'swordsman');
   // Both hold one unit, but the first is only just starting its.
@@ -2493,7 +2508,7 @@ function clearLane(m, x0, x1, y0, y1) {
         const x = Math.round(d.baseX + Math.cos(ang * Math.PI / 180) * r);
         const y = Math.round(d.baseY + Math.sin(ang * Math.PI / 180) * r);
         const before = Object.keys(d.buildings).length;
-        m.cmdBuild('d', x, y, 'tower');
+        buildNow(m, 'd', x, y, 'tower');
         if (Object.keys(d.buildings).length > before) placed++;
       }
     }
@@ -2527,7 +2542,7 @@ function clearLane(m, x0, x1, y0, y1) {
   const m = new Match({ started: false, map: 'openfield' });
   const d = m.addPlayer('d', 'human', 'D');
   m.start(); d.draft = null; d.gold = 999999;
-  m.cmdBuild('d', d.baseX + 5, d.baseY, 'tower');
+  buildNow(m, 'd', d.baseX + 5, d.baseY, 'tower');
   for (const b of Object.values(d.buildings)) b.underConstruction = false;
   const tower = Object.values(d.buildings).find(b => b.type === 'tower');
   const hpBefore = tower.hp;
@@ -2609,7 +2624,7 @@ function clearLane(m, x0, x1, y0, y1) {
     const { m, a, d } = fresh(0);
     a.spells.curseOfSickness = 1;
     d.idleUnits = { swordsman: 12, knight: 4, catapult: 2 };
-    m.cmdBuild('d', yard(d, 0).x, yard(d, 0).y, 'bank');
+    buildNow(m, 'd', yard(d, 0).x, yard(d, 0).y, 'bank');
     const bank = d.buildings[`${yard(d, 0).x},${yard(d, 0).y}`];
     const castleHp = m.getCastle(d).hp;
     m.cmdCastSpell('a', 'curseOfSickness', d.baseX, d.baseY);
@@ -2631,7 +2646,7 @@ function clearLane(m, x0, x1, y0, y1) {
     const tiles = [];
     for (let i = -2; i <= 2; i++) tiles.push({ x: d.baseX + i, y: d.baseY + 3 });
     m.cmdBuildWall('d', tiles);
-    m.cmdBuild('d', yard(d, 1).x, yard(d, 1).y, 'bank');
+    buildNow(m, 'd', yard(d, 1).x, yard(d, 1).y, 'bank');
     const bank = d.buildings[`${yard(d, 1).x},${yard(d, 1).y}`];
     const before = Object.values(d.buildings).filter(b => b.type === 'wall').length;
     check('a wall line goes up to break', before >= 4, `${before} segments`);
@@ -3376,7 +3391,7 @@ function fightOut(m, ours, theirs) {
   // the courtyard a few tiles from it, so this is about the building and not
   // about the gate they would otherwise have to break first.
   const yt = yard(b, 0), bx = yt.x, by = yt.y;
-  m.cmdBuild('b', bx, by, 'stable');
+  buildNow(m, 'b', bx, by, 'stable');
   const key = `${bx},${by}`;
   check('a stable can be built to knock down', !!b.buildings[key]);
   const rt = yard(b, 4);
@@ -3399,7 +3414,7 @@ function fightOut(m, ours, theirs) {
     // On the courtyard, since a bank cannot stand anywhere else; the raiders
     // beside it, inside the walls.
     const yt = yard(b, 0), bx = yt.x, by = yt.y;
-    m.cmdBuild('b', bx, by, type);
+    buildNow(m, 'b', bx, by, type);
     const rt = yard(b, 4);
     const raiders = field(m, 'a', 'swordsman', 20, rt.x, rt.y);
     m.cmdAttackArmy('a', raiders.id, 'building', `${bx},${by}`);
@@ -3421,7 +3436,7 @@ function fightOut(m, ours, theirs) {
   // A tower, because it is the one building that may stand on the open ground
   // in front of the gate where this march runs; a bank would have to be inside.
   const bx = b.baseX - 4, by = b.baseY;
-  m.cmdBuild('b', bx, by, 'tower');
+  buildNow(m, 'b', bx, by, 'tower');
   const column = field(m, 'a', 'swordsman', 20, bx - 6, by);
   m.cmdMoveArmy('a', column.id, bx + 4, by);
   let closest = Infinity, battering = 0, t = 0;
@@ -3446,7 +3461,7 @@ function fightOut(m, ours, theirs) {
   b.gold = 999999;
   for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) {
     if (Math.abs(dx) !== 2 && Math.abs(dy) !== 2) continue;
-    m.cmdBuild('b', b.baseX + dx, b.baseY + dy, 'tower');
+    buildNow(m, 'b', b.baseX + dx, b.baseY + dy, 'tower');
   }
   const ring = Object.values(b.buildings).filter(x => x.type === 'tower').length;
   const host = field(m, 'a', 'swordsman', 60, b.baseX - 8, b.baseY);
@@ -3633,7 +3648,7 @@ function fightOut(m, ours, theirs) {
   for (let dx = -6; dx <= 6 && built < 40; dx++) {
     for (let dy = -6; dy <= 6 && built < 40; dy++) {
       const before = Object.keys(p.buildings).length;
-      m.cmdBuild('p', p.baseX + dx, p.baseY + dy, 'bank');
+      buildNow(m, 'p', p.baseX + dx, p.baseY + dy, 'bank');
       if (Object.keys(p.buildings).length > before) built++;
     }
   }
@@ -3641,7 +3656,7 @@ function fightOut(m, ours, theirs) {
   p.outposts.push({ x: 1, y: 1 });
   const before = Object.keys(p.buildings).length;
   for (let dx = -6; dx <= 6; dx++) {
-    for (let dy = -6; dy <= 6; dy++) m.cmdBuild('p', p.baseX + dx, p.baseY + dy, 'bank');
+    for (let dy = -6; dy <= 6; dy++) buildNow(m, 'p', p.baseX + dx, p.baseY + dy, 'bank');
   }
   check('  and taking a camp lets it build exactly that many more',
     Object.keys(p.buildings).length - before === cfg.OUTPOST.buildLimitBonus,
@@ -3898,7 +3913,7 @@ function fightOut(m, ours, theirs) {
   {
     const { m, a, d } = fresh();
     const yt = yard(d, 0), bx = yt.x, by = yt.y;      // on d's courtyard
-    m.cmdBuild('d', bx, by, 'bank');
+    buildNow(m, 'd', bx, by, 'bank');
     const A = park(m, a, 'swordsman', 20, bx - 1, by);
     m.cmdAttackArmy('a', A, 'building', `${bx},${by}`);
     const D = park(m, d, 'swordsman', 20, bx - 1, by + 1);
@@ -4258,6 +4273,68 @@ function fightOut(m, ours, theirs) {
     p.gold - goldBefore < 2 + 10 * cfg.CASTLE.incomePerSec[0] + 0.5,
     `${(p.gold - goldBefore).toFixed(1)} gold from 2 of ore plus ten seconds of keep`);
   check('  and its rubble still holds the tile', m.tileOccupied(seam2.x, seam2.y));
+}
+
+
+// --- buildings are made by people ------------------------------------------
+//
+// buildTimeSec is worker-seconds now. The clock only runs while somebody is
+// standing on the site, so a building is a thing somebody has to come and make
+// rather than a thing you buy. The failure this guards is the quiet one: a site
+// that finishes on its own would look exactly like a working feature.
+{
+  const m = new Match({ seed: 9 });
+  const p = m.addPlayer('p', 'human', 'P');
+  p.draft = null;
+  p.gold = 5000;
+  m.start();
+
+  const bx = p.baseX + 4, by = p.baseY;
+  m.cmdBuild('p', bx, by, 'barracks');
+  const site = p.buildings[`${bx},${by}`];
+  const work = cfg.BUILDING_TYPES.barracks.buildTimeSec;
+  check('a building is placed as a site rather than finished',
+    site.underConstruction && site.remainingSec === work, `${site.remainingSec} worker-seconds`);
+  check('  and the player is told nobody is building it',
+    m.events.some(e => /needs workers/.test(e.text)));
+
+  for (let i = 0; i < 200; i++) m.tick(0.2);
+  check('nobody on the site means it does not go up', site.underConstruction,
+    `${site.remainingSec.toFixed(1)} left after 40s`);
+  check('  and it reports no hands on it', site.builders === 0);
+
+  p.idleUnits.worker = 2;
+  m.cmdDeployUnits('p', { worker: 2 }, p.baseX + 2, p.baseY + 2);
+  const crew = [...m.armies.values()].find(a => a.type === 'worker');
+  crew.x = bx; crew.y = by; crew.order = 'hold';
+  let ticks = 0;
+  while (site.underConstruction && ticks < 600) { m.tick(0.2); ticks++; }
+  check('two workers finish it in half the worker-seconds',
+    Math.abs(ticks * 0.2 - work / 2) < 0.5, `${(ticks * 0.2).toFixed(1)}s of ${work} worker-seconds`);
+  check('  and it is a building afterwards', !site.underConstruction && site.remainingSec === 0);
+
+  // The cap is on the site, so a crowd is not a shortcut.
+  const cx = p.baseX + 6, cy = p.baseY;
+  p.gold = 5000;
+  m.cmdBuild('p', cx, cy, 'bank');
+  const site2 = p.buildings[`${cx},${cy}`];
+  p.idleUnits.worker = 20;
+  m.cmdDeployUnits('p', { worker: 20 }, p.baseX + 2, p.baseY + 2);
+  const mob = [...m.armies.values()].find(a => a.type === 'worker' && armyCount(a) === 20);
+  mob.x = cx; mob.y = cy; mob.order = 'hold';
+  crew.x = p.baseX; crew.y = p.baseY;         // the first two go home
+  m.tick(0.2);
+  check('a site takes only so many hands at once',
+    site2.builders === cfg.BUILD_WORK.maxWorkers,
+    `${site2.builders} of twenty counted, cap is ${cfg.BUILD_WORK.maxWorkers}`);
+
+  // A wall is the exception and stays instant, because they are dragged by the
+  // dozen and walking a crew along your own border is not a decision.
+  p.gold = 5000;
+  m.cmdBuild('p', p.baseX + 1, p.baseY + 3, 'wall');
+  const wall = p.buildings[`${p.baseX + 1},${p.baseY + 3}`];
+  check('a wall still goes up the moment it is paid for',
+    wall && !wall.underConstruction, wall ? 'instant' : 'no wall placed');
 }
 
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');

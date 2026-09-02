@@ -62,6 +62,9 @@
     <div id="hud" class="frame frame-plate">
       <div class="hud-stat"><span class="hud-label">Gold</span><span class="gold" id="gold-val">0</span></div>
       <div class="hud-stat"><span class="hud-label">Income</span><span id="income-val">0</span>/s</div>
+      <!-- Only up while something is being mined, because a permanent "+0"
+           is a number you learn to stop reading. -->
+      <div class="hud-stat hidden" id="ore-income" title="Gold your workers are digging out right now"><span class="hud-label">Mining</span><span class="gold">+<span id="ore-income-val">0</span></span>/s</div>
       <div class="hud-stat"><span class="hud-label">Troops</span><span id="troops-val">0</span></div>
       <!-- The Town Center card's two numbers. They were a paragraph in a panel
            and they are two figures you glance at, so they belong up here with

@@ -4294,6 +4294,58 @@ day the flag was used for anything else. It is with the rest of the per-match
 state now.
 
 
+### Workers build (1 Sep 2026)
+
+Stage two of the economy pass. `buildTimeSec` is **worker-seconds** now, not
+seconds: the construction clock only advances while workers are standing on the
+site, so one worker takes exactly the listed time, four take a quarter of it,
+and none never finishes it at all. The change in `tick` is one multiply, which
+was the whole argument for doing it this way — the timer already existed and
+only ever needed to know who was turning it.
+
+**Buildings used to be instant.** `buildTimeSec` was 0 across the board and a
+building finished the moment it was paid for, so there was no clock to hook and
+the first version of this did nothing at all. The times are new, scaled off cost
+so the expensive things are also the slow ones: 14 worker-seconds for a
+barracks up to 28 for a siege factory. At one worker that is a walk and a wait;
+at the four-worker cap it is three to seven seconds, which is what a crew is
+for.
+
+**A wall stays instant, deliberately.** Walls are dragged a dozen segments at a
+time, and requiring a builder beside each one would turn the best interaction in
+the game into walking a crew along your own border laying bricks. Fifteen gold
+of stacked stone is not the decision this mechanic exists to make interesting.
+
+**A stopped site looks exactly like a slow one**, so placing a building with
+nobody near it says so, once, at the moment you made the decision. `builders` is
+on the wire for the same reason — zero hands on a site is the fact a player
+needs, and a countdown alone would hide it.
+
+**The tests said something worth hearing.** Introducing build times broke eight
+checks in `rules.test.js` and one in `smoke.test.js` — every test that places a
+tower and then expects it to shoot, or three barracks and then expects a queue.
+None of them are about construction, and making each one raise a build crew
+would have been testing construction over and over by accident. So they place
+through a `buildNow` helper that stands the building up, and the tests that ARE
+about construction call `cmdBuild` directly. The count is the useful part: nine
+places assumed a building exists the instant it is bought, which is a fair
+measure of how much this changes.
+
+### Right-clicking a seam (1 Sep 2026)
+
+Reported as there being no right-click-and-mine. There is, and there always was
+— a seam does not block marching, so the group walked over and started digging
+on arrival. What there was not was anything SAYING so, which makes a working
+feature indistinguishable from a broken one.
+
+Mining is presence and there is no separate order to give, so the fix is words
+rather than a mechanic: right-clicking a seam names what the order means, and
+the stat row carries what the seams are paying as its own figure beside the
+standing income. Two numbers rather than one, because the seam half is the half
+that stops when a seam runs dry or a crew is killed, and a single total would
+hide both.
+
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

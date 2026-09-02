@@ -5,7 +5,7 @@
 const {
   MAP, MAPS, DEFAULT_MAP, VISION, OUTPOST, RACES, RACE_ABILITIES, CASTLE, MAX_TEAMS,
   BUILDING_TYPES, UNIT_TYPES,
-  AI_CAMP, ORE, SHRINE, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
+  AI_CAMP, ORE, BUILD_WORK, SHRINE, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
   TERRAIN_CLEAR_COST,
   TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA,
 } = require('./config');
@@ -1721,6 +1721,28 @@ class Match {
     return income * mods.incomeMult;
   }
 
+  // How many of this empire's workers are close enough to be building this.
+  //
+  // Counted per SITE rather than per worker, for the same reason the seams
+  // are: the cap belongs to the place. A crew of twenty on one foundation is
+  // four builders and sixteen people standing about, which is what makes the
+  // next worker better spent on the next building.
+  //
+  // Only this empire's workers, and only living ones — an ally cannot raise
+  // your barracks for you, which keeps a building unambiguously yours.
+  buildersAt(player, plot) {
+    let n = 0;
+    for (const army of this.armies.values()) {
+      if (army.ownerId !== player.id) continue;
+      const def = UNIT_TYPES[army.type];
+      if (!def || !def.worker) continue;
+      if (Math.hypot(army.x - plot.x, army.y - plot.y) > BUILD_WORK.radius) continue;
+      n += armyCount(army);
+      if (n >= BUILD_WORK.maxWorkers) return BUILD_WORK.maxWorkers;
+    }
+    return n;
+  }
+
   // Who is digging, and what it pays them.
   //
   // Walked per SEAM rather than per worker, because the cap is a property of
@@ -2208,6 +2230,12 @@ class Match {
       underConstruction: buildTime > 0, remainingSec: buildTime,
       trainQueue: [],
     });
+    // A site with nobody on it is not slow, it is stopped — and stopped looks
+    // exactly like slow unless something says so. Said once, at the moment the
+    // player made the decision, which is when it is useful.
+    if (buildTime > 0 && this.buildersAt(player, { x, y }) === 0) {
+      this.emit(playerId, `${def.name} needs workers — send some to the site or it will not go up.`);
+    }
   }
 
   // Place a wall segment on each dragged tile. Cost scales per tile; invalid or
@@ -3748,10 +3776,19 @@ class Match {
             this.reclaimBorder(player);
           }
         } else if (plot.underConstruction) {
-          plot.remainingSec -= dt;
-          if (plot.remainingSec <= 0) {
-            plot.underConstruction = false;
-            plot.remainingSec = 0;
+          // Buildings are made by people now. remainingSec is worker-seconds,
+          // so this clock only runs while somebody is standing on the site —
+          // one worker at the old rate, more of them faster, none of them not
+          // at all. It is one multiply, and it is the whole of "workers build".
+          const hands = this.buildersAt(player, plot);
+          plot.builders = hands;
+          if (hands > 0) {
+            plot.remainingSec -= dt * hands;
+            if (plot.remainingSec <= 0) {
+              plot.underConstruction = false;
+              plot.remainingSec = 0;
+              plot.builders = 0;
+            }
           }
         }
         if (plot.trainQueue.length > 0 && !plot.underConstruction) {
@@ -4719,6 +4756,11 @@ class Match {
         // silently ignored race modifiers and every boon. It is not the
         // client's job to know the formula.
         incomePerSec: Math.round(this.incomePerSec(p) * 10) / 10,
+        // What the seams are paying this empire right now, apart from the
+        // standing income. Sent separately because it is the half that stops
+        // when a seam runs dry or a crew is killed, and a single total would
+        // hide both of those happening.
+        oreIncome: Math.round((p.oreIncome || 0) * 10) / 10,
         mods: p.mods,
         training: this.trainingStatus(p),
         outposts: p.outposts,
@@ -4737,7 +4779,12 @@ class Match {
         buildings: Object.values(p.buildings).map(b => ({
           x: b.x, y: b.y, type: b.type, level: b.level || 1,
           hp: Math.max(0, Math.round(b.hp)), maxHp: b.maxHp,
-          underConstruction: b.underConstruction, remainingSec: Math.max(0, Math.ceil(b.remainingSec || 0)),
+          underConstruction: b.underConstruction,
+          remainingSec: Math.max(0, Math.ceil(b.remainingSec || 0)),
+          // How many hands are on it. Zero on a site that is waiting is the
+          // whole reason a player needs telling anything: the building is not
+          // slow, it is not being built.
+          builders: b.underConstruction ? (b.builders || 0) : 0,
           upgrading: !!b.upgrading,
           trainQueueLen: b.trainQueue ? b.trainQueue.length : 0,
           // The compound's pieces say which sprite they are and how many tiles

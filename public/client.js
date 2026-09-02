@@ -3045,7 +3045,20 @@ function onCanvasRightClick(e) {
     }
     if (tgt) { for (const id of ids) send({ type: 'attackArmy', armyId: id, targetType: tgt.type, targetId: tgt.id }); }
     else if (!isMarchable(ix, iy)) log('Troops cannot march onto water or rock.');
-    else { for (const id of ids) send({ type: 'moveArmy', armyId: id, x: ix, y: iy }); }
+    else {
+      for (const id of ids) send({ type: 'moveArmy', armyId: id, x: ix, y: iy });
+      // Say what the order MEANS when the destination is a seam. Mining is
+      // presence — there is no separate command to give — so the only thing
+      // distinguishing "go and mine that" from "go and stand there" is that
+      // somebody says it out loud.
+      const seam = (latestState.ore || []).find(o => o.x === ix && o.y === iy && o.left > 0);
+      if (seam) {
+        const diggers = commanding.reduce((n, a) => n + (a.type === 'worker' ? a.count : 0), 0);
+        log(diggers
+          ? `Sent ${diggers} to the seam — they mine it by standing on it.`
+          : 'That is a gold seam. Send workers to it and they will mine it.');
+      }
+    }
     return;
   }
 
@@ -3785,7 +3798,15 @@ function renderPanel() {
   const castle = me.buildings.find(b => b.type === 'castle');
   renderKeepBar(me);
   renderDefeat(me);
-  document.getElementById('income-val').textContent = me.incomePerSec;
+  // Two numbers, not one. The seam half stops when a seam runs dry or a crew
+  // is killed, and a single total would hide both.
+  const ore = me.oreIncome || 0;
+  setText('income-val', me.incomePerSec);
+  const oreEl = document.getElementById('ore-income');
+  if (oreEl) {
+    oreEl.classList.toggle('hidden', ore <= 0);
+    if (ore > 0) setText('ore-income-val', ore);
+  }
   const marching = latestState.armies
     .filter(a => a.ownerId === myId)
     .reduce((sum, a) => sum + a.count, 0);

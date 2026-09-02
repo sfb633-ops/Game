@@ -240,6 +240,8 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
    troops were always here; works and border came off the Town Center card when
    the panel went. */
 .hud-dim { color: var(--ink); }
+/* Scoped .hidden, like everything else in this sheet. */
+#ore-income.hidden { display: none; }
 /* The right half of the top row: what your empire can hold, as against what
    it has. Sits left of the gear, mirroring the treasury on the far side. */
 #hud-right {

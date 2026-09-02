@@ -386,13 +386,27 @@ const CASTLE = {
   buildLimit:    [10, 15, 20],
 };
 
-// buildTimeSec is 0 across the board: buildings finish instantly on placement
-// (no construction timers).
+// buildTimeSec is WORKER-seconds, not seconds. It used to be zero across the
+// board and buildings finished the instant they were paid for; they are made
+// by people now, so this is how much work a building takes and the clock only
+// runs while somebody is standing on the site. One worker takes exactly this
+// long, four take a quarter of it, none never finish it at all.
+//
+// Scaled off cost, so the expensive things are also the slow things and a
+// Siege Factory is a commitment rather than a purchase. At one worker these
+// run 14 to 28 seconds, which is a walk and a wait; at the four-worker cap
+// they are 3 to 7, which is what a real crew is for.
+//
+// A WALL IS THE EXCEPTION AND STAYS INSTANT. Walls are dragged a dozen
+// segments at a time, and requiring a builder to stand by each one would turn
+// the best interaction in the game into a chore — you would be walking a crew
+// along your own border laying bricks. Fifteen gold of stacked stone is not
+// the decision this mechanic exists to make interesting.
 const BUILDING_TYPES = {
-  bank:     { name: 'Bank',          cost: 150, buildTimeSec: 0, hp: 150, incomePerSec: 2 },
-  barracks: { name: 'Barracks',      cost: 100, buildTimeSec: 0, hp: 150, trains: 'swordsman' },
-  stable:   { name: 'Stable',        cost: 200, buildTimeSec: 0, hp: 150, trains: 'knight' },
-  siege:    { name: 'Siege Factory', cost: 300, buildTimeSec: 0, hp: 150, trains: 'catapult' },
+  bank:     { name: 'Bank',          cost: 150, buildTimeSec: 18, hp: 150, incomePerSec: 2 },
+  barracks: { name: 'Barracks',      cost: 100, buildTimeSec: 14, hp: 150, trains: 'swordsman' },
+  stable:   { name: 'Stable',        cost: 200, buildTimeSec: 22, hp: 150, trains: 'knight' },
+  siege:    { name: 'Siege Factory', cost: 300, buildTimeSec: 28, hp: 150, trains: 'catapult' },
   // The one building that fights on its own account, and it does it entirely
   // from where it stands:
   //   shot*           the archer on top loosing at whatever comes within range,
@@ -412,7 +426,7 @@ const BUILDING_TYPES = {
   //
   // Its hp is its own, too — a tower used to pour its 220 into the garrison's
   // pool and be chewed through *before* the defenders were touched.
-  tower:    { name: 'Archer Tower',  cost: 120, buildTimeSec: 0, hp: 220, defensePower: 15,
+  tower:    { name: 'Archer Tower',  cost: 120, buildTimeSec: 16, hp: 220, defensePower: 15,
               range: 5, shotSec: 3, shotDamage: 12 },
   // Walls are placed by click-and-drag, one building per dragged tile, so the
   // price is per tile. `isWall` is what tells the client to offer the drag tool
@@ -429,6 +443,7 @@ const BUILDING_TYPES = {
   // to break to get in at all. At 120 a wall was a speed bump — one group of
   // knights was through a segment in seconds — which is what pushed everybody
   // towards stacking towers instead.
+  // Instant, deliberately — see the note above BUILDING_TYPES.
   wall:     { name: 'Wall',          cost: 15,  buildTimeSec: 0, hp: 260, defensePower: 4, isWall: true },
 };
 
@@ -593,6 +608,24 @@ const SHRINE = {
 //
 // Every number here is a first pass and expects to move once it has been
 // played. What they are set against: a Bank is 150 gold for 2/s forever.
+// What a worker is worth on a building site.
+//
+// A building's buildTimeSec is now worker-seconds rather than seconds: one
+// worker takes exactly as long as the old timer did, two halve it, and none
+// means it does not go up at all. That last part is the whole change — a
+// building is a thing somebody has to come and make, so a wall on the far
+// side of the map is a walk before it is a wall.
+//
+// Same radius as mining, and for the same reason: nobody should be nudging a
+// group a tile at a time to make it start working.
+const BUILD_WORK = {
+  radius: 2,
+  // More hands help, up to a point. Past this a site is crowded rather than
+  // quick, which is what stops one enormous crew from making every building
+  // instant and makes a second site the better use of the next worker.
+  maxWorkers: 4,
+};
+
 const ORE = {
   // Plenty for four empires, thin for twelve — which is the right way round.
   // A twelve-player map should be short of seams by the midgame.
@@ -863,7 +896,7 @@ const TICK_MS = 200;
 module.exports = {
   MAP, MAPS, DEFAULT_MAP, VISION, BUILD, OUTPOST, RACES, RACE_ABILITIES, CASTLE,
   BUILDING_TYPES, UNIT_TYPES,
-  AI_CAMP, ORE, SHRINE, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
+  AI_CAMP, ORE, BUILD_WORK, SHRINE, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
   TERRAIN_CLEAR_COST,
   TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA, TICK_MS, MAX_TEAMS,
 };
