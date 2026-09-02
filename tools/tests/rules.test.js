@@ -4208,6 +4208,23 @@ function fightOut(m, ours, theirs) {
   check('the keep is what trains workers', m.trainersFor(p, 'worker').length === 1);
   check('  and nothing else does', m.trainersFor(p, 'swordsman').length === 0);
 
+  // trainersFor finding the keep is only half of it. cmdTrain checks what a plot
+  // is allowed to train, and it read BUILDING_TYPES alone — so the order was
+  // found, handed on, and dropped on the floor: no error, no gold spent, nothing
+  // queued, the button simply did nothing. Train one for real.
+  {
+    const before = p.gold = 500;
+    m.cmdTrainUnit('p', 'worker');
+    const keep = Object.values(p.buildings).find(b => b.type === 'castle');
+    check('  and an order to train one actually reaches the queue',
+      keep.trainQueue.length === 1 && p.gold < before,
+      keep.trainQueue.length + ' queued, ' + (before - p.gold) + ' gold spent');
+    for (let i = 0; i < 60; i++) m.tick(0.2);
+    check('    and a worker comes out of it', p.idleUnits.worker >= 1, String(p.idleUnits.worker));
+    m.cmdTrainUnit('p', 'swordsman');
+    check('    while the keep still refuses what it does not make', keep.trainQueue.length === 0);
+  }
+
   crew.x = seam.x; crew.y = seam.y; crew.order = 'hold';
   p.gold = 0;
   for (let i = 0; i < 25; i++) m.tick(0.2);      // five seconds

@@ -2412,11 +2412,20 @@ class Match {
     const plot = player.buildings[tileKey(Math.round(x), Math.round(y))];
     if (!plot || plot.type === null || plot.underConstruction) return;
     const unitDef = defOf(UNIT_TYPES, unitType);
-    const buildingDef = defOf(BUILDING_TYPES, plot.type);
+    // What this plot is allowed to train. The keep is not in BUILDING_TYPES —
+    // it is not a thing you build — so it is named here, exactly as it is in
+    // trainersFor. Fixing only that one was not enough and did not look like a
+    // bug from the outside: cmdTrainUnit found the keep, handed it to cmdTrain,
+    // and cmdTrain dropped the order on the floor. No error, no gold spent,
+    // nothing queued — the button simply did nothing, which is the failure mode
+    // a silent `return` always has.
+    const trains = plot.type === 'castle'
+      ? CASTLE.trains
+      : (defOf(BUILDING_TYPES, plot.type) || {}).trains;
     // Both halves matter. Without the first, a unitType of undefined matched a
     // building whose `trains` was also undefined, and the throw two lines below
     // took the server down.
-    if (!unitDef || !buildingDef || buildingDef.trains !== unitType) return;
+    if (!unitDef || !trains || trains !== unitType) return;
     // One building never holds more than the base queue on its own, and the
     // empire never queues more than its buildings between them have earned.
     if (plot.trainQueue.length >= TRAIN_QUEUE_MAX) return;
