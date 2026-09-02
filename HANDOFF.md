@@ -4206,6 +4206,55 @@ renders of the same seed is a good way to see what a terrain change actually did
 rather than what it was supposed to do.
 
 
+### The map was too big to be a canvas (1 Sep 2026)
+
+Reported as severe lag, with the question of whether it was the machine. It was
+not the machine, and the measurement that settles it is one line:
+
+    the same drawImage, same zoom, same pixels
+      out of the 11616x7776 terrain canvas   538 ms
+      out of a 2048x1280 canvas                3.5 ms
+
+**Chrome accelerates a canvas up to a size and then silently stops.** Past the
+limit every `drawImage` out of it is a software copy. Nothing fails, nothing is
+logged, and there is no flag to read — it just becomes a hundred and fifty times
+slower. A 240x160 map at a 48px tile prerenders to 11616x7776, which is a 361MB
+backing store, and it is well past whatever that limit is.
+
+So the layer is sliced into 2048px chunks once, and each frame draws only the
+two or three the viewport touches. Same pixels, same total memory, but every
+canvas is small enough to stay accelerated: **538ms becomes 3.2ms.**
+
+Cropping the source rectangle instead does nothing — that was measured too, and
+it is the same 500ms. The expense was never the clipping; the browser already
+clips a whole-canvas blit efficiently. It is which memory the pixels live in.
+
+The slicing is in `client.js` rather than in `Sprites.buildTerrainCanvas`,
+because `tools/preview.js` uses that function through the software canvas in
+`tools/canvas-shim.js` — which has no acceleration to lose and no `document` to
+make elements with. The whole-map canvas is still built there, sliced, and then
+dropped.
+
+**And the smoothing from the pass before this one was making it worse.**
+`imageSmoothingQuality = 'high'` asks Chrome for a multi-pass resample: on the
+old canvas it took the blit from 505ms to 833ms. Smoothing on minification is
+still right and is kept — plain bilinear is what a halving needs, and it is what
+the browser does by default.
+
+**Two traps in measuring this, both of which cost time.**
+
+`requestAnimationFrame` is throttled to nothing in a background tab, and a
+browser-automation tab is a background tab. Every attempt to time frames with
+rAF hung for 45 seconds and looked exactly like the freeze being investigated.
+Frame pacing cannot be measured that way from a tool; drive `render()` in a loop
+and take wall-clock over many calls instead.
+
+And canvas timings are worthless without forcing the queue. `performance.now()`
+around a `drawImage` measures command submission, not the work — it read 0.12ms
+for a blit that actually took half a second. A 1x1 `getImageData` afterwards
+forces the flush and makes the number real.
+
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

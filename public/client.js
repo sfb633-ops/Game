@@ -61,7 +61,9 @@ let controlGroups = {};
 let selectStart = null;    // world tile the drag began on, while the box is open
 let selectBox = null;      // { x0, y0, x1, y1 } in world tiles
 let suppressNextClick = false;   // a drag ends in a click; don't re-read it
-let terrainCanvas = null;
+// The prerendered map, in pieces. See buildTerrainLayer for why it is not one
+// canvas any more.
+let terrainChunks = null;
 // ---- Fog of war -----------------------------------------------------------
 // Three states per tile, and the whole look hangs off keeping them separate:
 //   unexplored  never had anything of ours near it — solid dark, nothing drawn
@@ -814,7 +816,7 @@ function onInit(msg) {
 
   // A fresh match means a fresh map and no leftover selections from the last one.
   latestState = null;
-  terrainCanvas = null;
+  terrainChunks = null;
   selectedArmies.clear(); armedDeploy = false;
   // Army ids restart from scratch in a new match, so a slot held over would
   // point at whatever group happened to be dealt the same id.
@@ -1555,14 +1557,45 @@ function frame(ts) {
 // Prerender the whole map once into an offscreen canvas, drawn offset by the
 // camera each frame. Grass, earth and rock are blended by autotile and dressed
 // with scenery — see Sprites.buildTerrainCanvas.
+// Cut into chunks, and the whole-map canvas dropped.
+//
+// One canvas for a 240x160 map at a 48px tile is 11616x7776, which is a 361MB
+// backing store. Chrome accelerates a canvas up to a size and then silently
+// stops: past the limit every drawImage is a software copy, and it does not
+// fail, it just becomes slow — measured at 538ms PER FRAME for the one blit,
+// against 3.5ms for the same pixels out of a small canvas. That is the lag,
+// and it is not the zoom, the smoothing or the machine.
+//
+// So the map is sliced into 2048px chunks once, and each frame draws only the
+// two or three that the viewport touches. Same pixels, same memory, but every
+// canvas is small enough to stay accelerated: 538ms becomes 3.2ms.
+//
+// The slicing lives here rather than in Sprites.buildTerrainCanvas because
+// tools/preview.js uses that function too, through a software canvas that has
+// no acceleration to lose and no document to make elements with.
+const TERRAIN_CHUNK = 2048;
+
 function buildTerrainLayer() {
-  terrainCanvas = Sprites.buildTerrainCanvas(
+  const whole = Sprites.buildTerrainCanvas(
     mapCfg.width, mapCfg.height,
     (x, y) => terrain[y][x] === 1,        // mountain
     (x, y) => terrain[y][x] === 2,        // water
     (x, y) => terrain[y][x] === 3,        // cobbles: a compound's courtyard
     (x, y) => sceneryBlock.has(x + ',' + y),
     (x, y) => apronSet.has(x + ',' + y));
+
+  terrainChunks = [];
+  for (let y = 0; y < whole.height; y += TERRAIN_CHUNK) {
+    for (let x = 0; x < whole.width; x += TERRAIN_CHUNK) {
+      const w = Math.min(TERRAIN_CHUNK, whole.width - x);
+      const h = Math.min(TERRAIN_CHUNK, whole.height - y);
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(whole, x, y, w, h, 0, 0, w, h);
+      terrainChunks.push({ cv, x, y, w, h });
+    }
+  }
+  // The whole-map canvas goes out of scope here, and with it the 361MB.
 }
 
 // The terrain layer is expensive and is only worth rebuilding when something in
@@ -1888,7 +1921,7 @@ function isMyBuildable(tx, ty, occupied) {
 function render() {
   if (!latestState) return;
   smoothArmies();
-  if (!terrainCanvas) {
+  if (!terrainChunks) {
     // Art still loading: paint the backdrop so the pane isn't a white flash.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#0e0b08';
@@ -1915,12 +1948,22 @@ function render() {
   // organic at 1:1 loses that edge and comes back as a hard stepped block,
   // which looks for all the world like a tree standing on a dark rectangle.
   ctx.imageSmoothingEnabled = zoom < 1;
-  if (zoom < 1) ctx.imageSmoothingQuality = 'high';
+  // Left at the default quality on purpose. 'high' asks Chrome for a
+  // multi-pass resample and it is not free: on the old whole-map canvas it
+  // took the blit from 505ms to 833ms. Plain bilinear is what a halving needs
+  // and it is what the browser does anyway.
   // Offset, not (0,0): the terrain canvas is drawn on its own 0-based grid with
   // a tile of margin, and this lines its cells up with the tile centres that
   // buildings stand on and clicks round to.
   const t0 = Sprites.terrainOrigin();
-  ctx.drawImage(terrainCanvas, t0, t0);
+  // Only the chunks the viewport touches. Drawing all of them would cost what
+  // the single canvas cost, since the expense was never the clipping.
+  const vx0 = camera.x - t0, vy0 = camera.y - t0;
+  const vx1 = vx0 + canvas.width / zoom, vy1 = vy0 + canvas.height / zoom;
+  for (const k of terrainChunks) {
+    if (k.x > vx1 || k.y > vy1 || k.x + k.w < vx0 || k.y + k.h < vy0) continue;
+    ctx.drawImage(k.cv, t0 + k.x, t0 + k.y);
+  }
 
   // ---- My territory ----
   // Just the boundary, not a wash over every buildable tile: the terrain art is
