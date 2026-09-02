@@ -633,5 +633,45 @@ for (const shrineWanted of [true, false]) {
     `${hi.race} x${hi.w.toFixed(2)} against ${lo.race} x${lo.w.toFixed(2)} — ${(hi.w / lo.w).toFixed(2)}x`);
 }
 
+
+// --- a seed is the whole world --------------------------------------------
+//
+// Every roll a match makes comes off Match.rng, which is seeded once in the
+// constructor. Before that it was Math.random, and the only way to reproduce a
+// world was for tools/preview.js to REPLACE Math.random for the length of a
+// render — which works once, in one process, and does not survive being ported
+// anywhere. This is the check that nothing has quietly gone back to the global.
+{
+  const worldOf = (m) => JSON.stringify([
+    m.terrain.map(r => r.join('')).join(''),
+    m.spawns.map(s => [s.x, s.y, s.group]),
+    m.aiCamps.map(c => [c.id, c.x, c.y]),
+  ]);
+
+  const a = new Match({ started: false, map: 'wilds', seed: 4242 });
+  const b = new Match({ started: false, map: 'wilds', seed: 4242 });
+  const c = new Match({ started: false, map: 'wilds', seed: 4243 });
+
+  check('one seed gives one world, every time', worldOf(a) === worldOf(b),
+    `${a.terrain.length} rows, ${a.spawns.length} seats, ${a.aiCamps.length} sites`);
+  check('  and a different seed gives a different one', worldOf(a) !== worldOf(c));
+  check('  with the seed kept, so a render can name the map it drew', a.seed === 4242);
+
+  // Two matches made with no seed must not agree, or every game would be the
+  // same map — which is the failure this could plausibly ship with.
+  const r1 = new Match({ started: false, map: 'wilds' });
+  const r2 = new Match({ started: false, map: 'wilds' });
+  check('  while an unseeded match still rolls its own', r1.seed !== r2.seed && worldOf(r1) !== worldOf(r2));
+
+  // The global is not the source any more, so hijacking it must change nothing.
+  const realRandom = Math.random;
+  Math.random = () => 0.5;
+  let hijacked;
+  try { hijacked = worldOf(new Match({ started: false, map: 'wilds', seed: 4242 })); }
+  finally { Math.random = realRandom; }
+  check('  and replacing Math.random no longer moves a seeded world',
+    hijacked === worldOf(a));
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall invariants hold');
 process.exit(failures ? 1 : 0);

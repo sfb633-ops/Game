@@ -381,7 +381,21 @@ class Match {
   // every test and every direct construction means by one. A room that is
   // gathering players in a lobby opts into the hold instead, and calls start()
   // when its host says so. Nothing ticks and nobody is dealt a hand until then.
-  constructor({ started = true, map = DEFAULT_MAP, teams = 0 } = {}) {
+  constructor({ started = true, map = DEFAULT_MAP, teams = 0, seed = null } = {}) {
+    // Every roll this match makes comes from here.
+    //
+    // It used to be Math.random, and the only thing that could reproduce a
+    // world was tools/preview.js reaching up and REPLACING Math.random for the
+    // length of a render. That works exactly once, in one process, for code
+    // that has no other source of randomness — and it does not survive being
+    // ported anywhere, which is the point at which you most want to run one
+    // seed through two engines and diff the result.
+    //
+    // A seed also makes a map a thing you can send someone. "It generated a
+    // lake across the only pass" is a bug report you can act on when the seed
+    // is in it and guesswork when it is not.
+    this.seed = seed == null ? (Math.random() * 0x100000000) >>> 0 : seed >>> 0;
+    this.rng = seededRandom(this.seed);
     this.started = started;
     // A wrong map id is a caller bug, and falling back silently is how it
     // stays one: preview carried an off-by-one in its --map parsing for a day
@@ -561,14 +575,14 @@ class Match {
 
     let laid = 0, guard = 0;
     while (laid < target && guard++ < 20000) {
-      let cx = 2 + Math.floor(Math.random() * (width - 4));
-      let cy = 2 + Math.floor(Math.random() * (height - 4));
-      const lobesHere = 1 + Math.floor(Math.random() * 2);
+      let cx = 2 + Math.floor(this.rng() * (width - 4));
+      let cy = 2 + Math.floor(this.rng() * (height - 4));
+      const lobesHere = 1 + Math.floor(this.rng() * 2);
       for (let k = 0; k < lobesHere && laid < target; k++) {
-        const r = Math.round(minR + Math.random() * (maxR - minR));
+        const r = Math.round(minR + this.rng() * (maxR - minR));
         laid += disc(cx, cy, r);
         // Step about a radius on, so the next lobe leans into this one.
-        const a = Math.random() * Math.PI * 2, step = r * (1 + Math.random() * 0.5);
+        const a = this.rng() * Math.PI * 2, step = r * (1 + this.rng() * 0.5);
         cx = Math.max(2, Math.min(width - 3, Math.round(cx + Math.cos(a) * step)));
         cy = Math.max(2, Math.min(height - 3, Math.round(cy + Math.sin(a) * step)));
       }
@@ -622,17 +636,17 @@ class Match {
       return n;
     };
     for (let i = 0; i < count; i++) {
-      const sx = 4 + Math.floor(Math.random() * (width - 8));
-      const sy = 4 + Math.floor(Math.random() * (height - 8));
+      const sx = 4 + Math.floor(this.rng() * (width - 8));
+      const sy = 4 + Math.floor(this.rng() * (height - 8));
       const range = sizeRange || MAP.lakeSize;
-      const target = range[0] + Math.floor(Math.random() * (range[1] - range[0] + 1));
+      const target = range[0] + Math.floor(this.rng() * (range[1] - range[0] + 1));
       grid[sy][sx] = 1;
       const frontier = [[sx, sy]];
       let filled = 1;
       while (filled < target && frontier.length) {
         // Chew outward from a random point on the edge, so the shape wanders
         // instead of coming out as a disc.
-        const pick = Math.floor(Math.random() * frontier.length);
+        const pick = Math.floor(this.rng() * frontier.length);
         const [x, y] = frontier[pick];
         frontier.splice(pick, 1);
         for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
@@ -641,7 +655,7 @@ class Match {
           if (grid[ny][nx]) continue;
           // Tiles already surrounded by water are far likelier to flood, which
           // keeps the coastline from growing thin tendrils.
-          if (Math.random() > 0.30 + wetNeighbours(nx, ny) * 0.12) continue;
+          if (this.rng() > 0.30 + wetNeighbours(nx, ny) * 0.12) continue;
           grid[ny][nx] = 1;
           frontier.push([nx, ny]);
           if (++filled >= target) break;
@@ -942,8 +956,8 @@ class Match {
     const mx = Math.min(margin, Math.floor((MAP.width - 1) / 2));
     const my = Math.min(margin, Math.floor((MAP.height - 1) / 2));
     for (let attempt = 0; attempt < 3000; attempt++) {
-      const x = mx + Math.floor(Math.random() * (MAP.width - 2 * mx));
-      const y = my + Math.floor(Math.random() * (MAP.height - 2 * my));
+      const x = mx + Math.floor(this.rng() * (MAP.width - 2 * mx));
+      const y = my + Math.floor(this.rng() * (MAP.height - 2 * my));
       if (this.terrain[y][x] !== TILE_LAND) continue;
       let tooClose = false;
       for (const spot of this.usedSpawns) {
@@ -1537,7 +1551,7 @@ class Match {
   rollDraft() {
     const pool = Object.keys(CARDS);
     for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = Math.floor(this.rng() * (i + 1));
       [pool[i], pool[j]] = [pool[j], pool[i]];
     }
     return {
@@ -1574,7 +1588,7 @@ class Match {
   finishDraft(player) {
     const left = player.draft.offered.filter(id => !player.cards.includes(id));
     while (player.cards.length < CARD_DRAFT.pick && left.length) {
-      this.takeCard(player, left.splice(Math.floor(Math.random() * left.length), 1)[0]);
+      this.takeCard(player, left.splice(Math.floor(this.rng() * left.length), 1)[0]);
     }
     player.draft = null;
   }
@@ -4737,12 +4751,13 @@ function shrinkTerrain(terrain) {
 let previewCache = null;
 function mapPreviews() {
   if (previewCache) return previewCache;
-  const realRandom = Math.random;
   const out = {};
-  try {
+  {
     for (const id of Object.keys(MAPS)) {
-      Math.random = seededRandom(PREVIEW_SEED);
-      const sample = new Match({ started: false, map: id });
+      // Same seed every boot, so the picker shows the same shapes to
+      // everybody — and now by asking for it rather than by replacing
+      // Math.random underneath the constructor.
+      const sample = new Match({ started: false, map: id, seed: PREVIEW_SEED });
       out[id] = {
         cols: PREVIEW_COLS,
         rows: PREVIEW_ROWS,
@@ -4758,8 +4773,6 @@ function mapPreviews() {
         })),
       };
     }
-  } finally {
-    Math.random = realRandom;
   }
   previewCache = out;
   return previewCache;

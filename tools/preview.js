@@ -46,17 +46,11 @@ const Sprites = new Function('document', 'Image', 'fetch', 'ArtDefs', 'console',
   spritesSrc + '\nreturn Sprites;')(documentShim, ImageShim, fetchShim, ArtDefs, console);
 
 // --- a real match ----------------------------------------------------------
+// Deterministic runs make it obvious when a change altered the art rather than
+// the map. This used to replace Math.random for the whole process; Match takes
+// a seed itself now, so the world is asked for rather than arranged behind it.
 const seedArg = process.argv.find(a => a.startsWith('--seed='));
-if (seedArg) {
-  // Deterministic runs make it obvious when a change altered the art, not the map.
-  let s = (Number(seedArg.split('=')[1]) || 1) >>> 0;
-  Math.random = () => {
-    s = (s + 0x6D2B79F5) >>> 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+const seed = seedArg ? (Number(seedArg.split('=')[1]) || 1) >>> 0 : null;
 const config = require('../config');
 const { Match } = require('../game');
 
@@ -67,7 +61,12 @@ const mapArg = process.argv.find(a => a.startsWith('--map='));
 // slice(6), not 5: '--map=' is six characters. At 5 the id came through as
 // '=divide', no map matched, and the Match fell back to the default without a
 // word — so every --map render was quietly the same map.
-const match = new Match(mapArg ? { map: mapArg.slice(6) } : {});
+const match = new Match({
+  ...(mapArg ? { map: mapArg.slice(6) } : {}),
+  ...(seed == null ? {} : { seed }),
+});
+// Printed so a render can be reproduced from its own output.
+console.log(`seed ${match.seed}`);
 const races = ['human', 'orc', 'elf', 'undead'];
 races.forEach((race, i) => match.addPlayer(`p${i + 1}`, race));
 
