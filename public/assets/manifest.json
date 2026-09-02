@@ -2814,6 +2814,12 @@
    "h": 64
   }
  },
+ "ore": {
+  "file": "terrain/ore.png",
+  "w": 48,
+  "h": 48,
+  "frames": 23
+ },
  "cards": {
   "prosperity": {
    "file": "cards/prosperity.png",

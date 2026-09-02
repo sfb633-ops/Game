@@ -31,6 +31,9 @@ const DARKAGES = path.join(SRC, 'DarkAgesUi_v1.0', '32x32-Tilesheet.png');
 // The icon sheet. The interface pack has no icons in it at all — it is frames,
 // bars, rules and diamonds — so every icon in this game comes from here.
 const ICON_SHEET = path.join(SRC, 'newuiadds', 'ChatGPT Image Sep 1, 2026, 02_27_57 PM.png');
+// A gold seam being mined out, drawn as 23 stages on a 5x5 grid of 48px cells
+// — which is the game's tile size exactly, so nothing is scaled.
+const ORE_SHEET = path.join(SRC, 'GoldOre', 'larger or rock with gold veins in it (2).png');
 // Purpose-drawn elves, replacing the recoloured MiniWorldSprites ones.
 const ELVES = path.join(SRC, 'Elves', 'elves.png');
 // What a spell looks like when it lands.
@@ -77,7 +80,7 @@ function write(img, ...parts) {
   return parts.join('/');
 }
 
-const manifest = { tileSize: TILE, terrain: {}, buildings: {}, props: {}, units: {}, fx: {}, ui: {}, icons: {}, cards: {} };
+const manifest = { tileSize: TILE, terrain: {}, buildings: {}, props: {}, units: {}, fx: {}, ui: {}, icons: {}, ore: null, cards: {} };
 
 // ---------------------------------------------------------------------------
 // Terrain
@@ -1912,6 +1915,7 @@ function buildUi() {
   }
   buildGear();
   buildIcons();
+  buildOre();
   buildKeepBar();
   buildBanner();
   // Printed because these are the numbers the stylesheet has to repeat, and
@@ -1980,6 +1984,42 @@ function buildIcons() {
     manifest.icons[name] = { file: write(square, 'icons', name + '.png'), w: ICON_PX, h: ICON_PX };
   }
   console.log(`  icons: ${Object.keys(ICONS).length} at ${ICON_PX}px`);
+}
+
+// Gold ore
+// ---------------------------------------------------------------------------
+//
+// One strip, fullest first. The sheet is laid out as a 5x5 grid read in
+// reading order and the last two cells are empty — a seam that has been mined
+// out is not drawn at all, it is gone — so the strip is the 23 that have art
+// in them and nothing else.
+//
+// Laid out horizontally because the client indexes it by how much ore is
+// left, and a strip is one multiply rather than a divide and a modulo. Cells
+// are 48px, which is TILE, so this is the one sheet in the pipeline that is
+// copied rather than scaled.
+const ORE_CELL = 48;
+
+function buildOre() {
+  const sheet = decodePNG(need(ORE_SHEET));
+  const cols = Math.floor(sheet.width / ORE_CELL);
+  const rows = Math.floor(sheet.height / ORE_CELL);
+  const cells = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cut = ops.crop(sheet, c * ORE_CELL, r * ORE_CELL, ORE_CELL, ORE_CELL);
+      // Skip the empty tail of the grid rather than hard-coding a count: if a
+      // stage is ever added to the sheet it comes along on its own.
+      if (ops.bbox(cut)) cells.push(cut);
+    }
+  }
+  const strip = ops.blank(ORE_CELL * cells.length, ORE_CELL);
+  cells.forEach((cell, i) => ops.blit(strip, cell, i * ORE_CELL, 0));
+  manifest.ore = {
+    file: write(strip, 'terrain', 'ore.png'),
+    w: ORE_CELL, h: ORE_CELL, frames: cells.length,
+  };
+  console.log(`  ore: ${cells.length} stages at ${ORE_CELL}px`);
 }
 
 // The town center's health bar, from the Dark Ages UI sheet.
