@@ -4346,6 +4346,62 @@ that stops when a seam runs dry or a crew is killed, and a single total would
 hide both.
 
 
+### The keep stops paying (1 Sep 2026)
+
+`CASTLE.incomePerSec` is `[0, 0, 0]`. Gold is dug out of the ground now, and a
+treasury that filled on its own regardless made every seam optional — you could
+sit inside your walls and still afford an army, which is the exact thing the
+seams were introduced to stop. An empire opens on 150 gold: four workers and
+change, or two workers and a start on a barracks, deliberately not both.
+
+Mining is on the stat row and stays there at zero. It was hidden while nothing
+was being mined, on the grounds that a permanent "+0" is a number you stop
+reading — but the keep pays nothing now, so a zero there is the most important
+thing on the row rather than noise.
+
+**`incomeMult` had to reach the seams.** Prosperity is "+13% income", and once
+the keep paid nothing it was +13% of a bank or of zero. It applies to what comes
+out of the ground now, and the seam is charged what the empire is paid — a rich
+empire exhausts a seam faster rather than getting more out of the same rock,
+because the ground holds what it holds.
+
+**Two tests were passing for the wrong reason, and one of them was a lie.**
+
+`and the plunder was banked without walking it home` asserted that gold went UP
+after taking a camp. A camp pays no gold — that is written at length in
+`config.js` and is the whole of what taking one is worth — so what the check was
+actually measuring was three gold a second of keep income across eight thousand
+ticks. It had never tested plunder at all. It says what it always should have
+now: taking a camp pays nothing.
+
+The other two were the income and Prosperity checks, which divided by an income
+that is now zero and got NaN. They build a bank first, which is the honest fix:
+a multiplier needs something to multiply.
+
+### A wall takes thirty seconds and builds itself (1 Sep 2026)
+
+Two exceptions in one, and they are separate arguments.
+
+**The delay** is the point of the change. An instant wall is one you throw up in
+the middle of a fight, which turns a considered piece of ground into a panic
+button. Thirty seconds means you wall before you need it or not at all.
+
+**Self-building** is why it is thirty PLAIN seconds and not thirty
+worker-seconds. Walls are dragged a dozen segments at a time, and a builder
+beside each one would mean walking a crew along your own border laying bricks.
+`selfBuild` on the type is what says so, the construction clock reads it, and
+the "nobody is building this" warning skips those — telling a player to send
+workers to something that needs none is a lie they cannot act on.
+
+**And the stat row grew into the keep bar again.** Adding Mining to the money
+figures took the left group from 315px to 420 and it reached the bar in the
+middle, exactly as adding Works and Border did before. The room code moved to
+the right-hand group — it is the one figure you read once and never again — and
+the bar's gutters were re-measured for the third time. That the same failure has
+now happened three times is the argument for `browser.test.js` existing: nothing
+static can see it, and every time it has been caught by a box overlapping a box.
+
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

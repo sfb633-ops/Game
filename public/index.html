@@ -62,14 +62,13 @@
     <div id="hud" class="frame frame-plate">
       <div class="hud-stat"><span class="hud-label">Gold</span><span class="gold" id="gold-val">0</span></div>
       <div class="hud-stat"><span class="hud-label">Income</span><span id="income-val">0</span>/s</div>
-      <!-- Only up while something is being mined, because a permanent "+0"
-           is a number you learn to stop reading. -->
-      <div class="hud-stat hidden" id="ore-income" title="Gold your workers are digging out right now"><span class="hud-label">Mining</span><span class="gold">+<span id="ore-income-val">0</span></span>/s</div>
+      <!-- Always up, including at zero: the keep pays nothing, so this is the
+           income, and a zero here is the most important thing on the row. -->
+      <div class="hud-stat" id="ore-income" title="Gold your workers are digging out of seams right now. The keep pays nothing on its own — this and your banks are the whole economy."><span class="hud-label">Mining</span><span class="gold">+<span id="ore-income-val">0</span></span>/s</div>
       <div class="hud-stat"><span class="hud-label">Troops</span><span id="troops-val">0</span></div>
       <!-- The Town Center card's two numbers. They were a paragraph in a panel
            and they are two figures you glance at, so they belong up here with
            the rest of the figures you glance at. -->
-      <div class="hud-stat"><span class="hud-label">Code</span><span class="gold" id="room-code">—</span></div>
     </div>
 
     <!-- The one number on screen that decides whether you still have an empire.
@@ -111,6 +110,10 @@
          figures that reached the keep bar in the middle of the screen, so
          the row is balanced around it instead. -->
     <div id="hud-right" class="frame frame-plate">
+      <!-- The room code moved over here when Mining joined the money figures
+           on the left: five stats there ran to 420px and reached the keep bar in
+           the middle. This is the one you read once and never again. -->
+      <div class="hud-stat"><span class="hud-label">Code</span><span class="gold" id="room-code">—</span></div>
       <div class="hud-stat" id="works-stat" title=""><span class="hud-label">Buildings</span><span id="works-val">0</span><span class="hud-dim">/<span id="works-cap">0</span></span></div>
     </div>
     <div id="exit-wrap">

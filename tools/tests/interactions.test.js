@@ -26,6 +26,12 @@ function fresh(raceA, raceB) {
 // ---- every card changes the number it names, and only that -----------------
 {
   const { m, a } = fresh('human', 'orc');
+  // The keep pays nothing now, so a multiplier on income needs something that
+  // pays before it can be measured at all.
+  a.gold = 9999;
+  m.cmdBuild('a', a.baseX + 3, a.baseY + 3, 'bank');
+  const bank = a.buildings[(a.baseX + 3) + ',' + (a.baseY + 3)];
+  if (bank) { bank.underConstruction = false; bank.remainingSec = 0; }
   const income0 = m.incomePerSec(a);
   m.takeCard(a, 'prosperity');
   check('prosperity multiplies income by exactly its card value',

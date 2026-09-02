@@ -345,7 +345,14 @@ const CASTLE = {
   // slightly harder, which is what "a tower is a weapon, not a wall" means when
   // you follow it all the way through.
   hp:            [1000, 1650, 2650],
-  incomePerSec:  [3, 5, 7],
+  // The keep pays nothing. Gold is dug out of the ground now, and a treasury
+  // that filled on its own regardless made every seam optional — you could
+  // sit inside your walls and still afford an army, which is the exact thing
+  // the seams were introduced to stop.
+  //
+  // Kept as an array of zeroes rather than deleted so the shape of a level is
+  // still visible and putting a trickle back is a number rather than a patch.
+  incomePerSec:  [0, 0, 0],
   upgradeCost:   [0, 250, 550],     // cost to reach this level from the previous
   upgradeTimeSec:[0, 38, 77],
   // Territory radius per level: levelling the town center widens the border,
@@ -397,11 +404,18 @@ const CASTLE = {
 // run 14 to 28 seconds, which is a walk and a wait; at the four-worker cap
 // they are 3 to 7, which is what a real crew is for.
 //
-// A WALL IS THE EXCEPTION AND STAYS INSTANT. Walls are dragged a dozen
-// segments at a time, and requiring a builder to stand by each one would turn
-// the best interaction in the game into a chore — you would be walking a crew
-// along your own border laying bricks. Fifteen gold of stacked stone is not
-// the decision this mechanic exists to make interesting.
+// A WALL IS THE EXCEPTION, AND IT IS A DIFFERENT KIND OF EXCEPTION. It takes
+// thirty seconds, and they are plain seconds: a wall raises itself and no
+// worker has to stand by it. Both halves matter.
+//
+// The delay is the point — an instant wall is one you throw up in the middle
+// of a fight, which turns a considered piece of ground into a panic button.
+// Thirty seconds means you wall before you need it or not at all.
+//
+// Self-building is the point too. Walls are dragged a dozen segments at a
+// time, and a builder beside each one would mean walking a crew along your
+// own border laying bricks. Fifteen gold of stacked stone is not the
+// decision this mechanic exists to make interesting; the delay is.
 const BUILDING_TYPES = {
   bank:     { name: 'Bank',          cost: 150, buildTimeSec: 18, hp: 150, incomePerSec: 2 },
   barracks: { name: 'Barracks',      cost: 100, buildTimeSec: 14, hp: 150, trains: 'swordsman' },
@@ -443,8 +457,8 @@ const BUILDING_TYPES = {
   // to break to get in at all. At 120 a wall was a speed bump — one group of
   // knights was through a segment in seconds — which is what pushed everybody
   // towards stacking towers instead.
-  // Instant, deliberately — see the note above BUILDING_TYPES.
-  wall:     { name: 'Wall',          cost: 15,  buildTimeSec: 0, hp: 260, defensePower: 4, isWall: true },
+  // Thirty plain seconds and raises itself — see the note above.
+  wall:     { name: 'Wall',          cost: 15,  buildTimeSec: 30, hp: 260, defensePower: 4, isWall: true, selfBuild: true },
 };
 
 // attack is damage per second of a fight, and hp is what each individual

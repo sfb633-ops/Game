@@ -1511,7 +1511,10 @@ class Match {
       id, race, name: name || id, baseX: spot.x, baseY: spot.y,
       // null in a free-for-all. Every alliance rule keys off this.
       team: this.teamCount ? seat.group : null,
-      gold: 200,
+      // Enough to open with: four workers and change, or two workers and a
+      // start on a barracks. It is deliberately not enough to do both, since
+      // the first decision of a match should be a decision.
+      gold: 150,
       alive: true,
       buildings,
       idleUnits: emptyUnits(),
@@ -1780,7 +1783,16 @@ class Match {
         const player = this.players.get(ownerId);
         if (!player || !player.alive) continue;
         // Never pay out more than is in the ground.
-        const gold = Math.min(share * ORE.perWorkerPerSec * dt, o.amount - paid);
+        // incomeMult counts here too. It is a multiplier on what an empire
+        // earns, and once the keep pays nothing, a boon that only touched the
+        // keep and the banks was a boon that did almost nothing — Prosperity
+        // would have read "+13% of zero" for the whole opening.
+        //
+        // The seam is charged what the empire is paid, so a rich empire
+        // exhausts a seam faster rather than getting more out of the same
+        // rock. The ground holds what it holds.
+        const rate = share * ORE.perWorkerPerSec * player.mods.incomeMult;
+        const gold = Math.min(rate * dt, o.amount - paid);
         if (gold <= 0) continue;
         player.gold += gold;
         player.oreIncome = (player.oreIncome || 0) + gold / dt;
@@ -2233,7 +2245,9 @@ class Match {
     // A site with nobody on it is not slow, it is stopped — and stopped looks
     // exactly like slow unless something says so. Said once, at the moment the
     // player made the decision, which is when it is useful.
-    if (buildTime > 0 && this.buildersAt(player, { x, y }) === 0) {
+    // Not for walls: they raise themselves, so there is nobody to send and
+    // saying otherwise would be a lie the player cannot act on.
+    if (buildTime > 0 && !def.selfBuild && this.buildersAt(player, { x, y }) === 0) {
       this.emit(playerId, `${def.name} needs workers — send some to the site or it will not go up.`);
     }
   }
@@ -3780,8 +3794,13 @@ class Match {
           // so this clock only runs while somebody is standing on the site —
           // one worker at the old rate, more of them faster, none of them not
           // at all. It is one multiply, and it is the whole of "workers build".
-          const hands = this.buildersAt(player, plot);
-          plot.builders = hands;
+          // A self-building thing keeps its own time and needs nobody: its
+          // remainingSec is plain seconds rather than worker-seconds. That is
+          // walls, and the reasoning is above BUILDING_TYPES in config.
+          const def = BUILDING_TYPES[plot.type];
+          const selfBuild = !!(def && def.selfBuild);
+          const hands = selfBuild ? 1 : this.buildersAt(player, plot);
+          plot.builders = selfBuild ? 0 : hands;
           if (hands > 0) {
             plot.remainingSec -= dt * hands;
             if (plot.remainingSec <= 0) {

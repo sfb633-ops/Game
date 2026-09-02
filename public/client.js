@@ -3802,11 +3802,11 @@ function renderPanel() {
   // is killed, and a single total would hide both.
   const ore = me.oreIncome || 0;
   setText('income-val', me.incomePerSec);
-  const oreEl = document.getElementById('ore-income');
-  if (oreEl) {
-    oreEl.classList.toggle('hidden', ore <= 0);
-    if (ore > 0) setText('ore-income-val', ore);
-  }
+  // Always up, including at zero. It was hidden while nothing was being mined,
+  // on the grounds that a permanent "+0" is a number you stop reading — but
+  // the keep pays nothing now, so mining IS the income, and a zero there is
+  // the most important thing on the row rather than noise.
+  setText('ore-income-val', ore);
   const marching = latestState.armies
     .filter(a => a.ownerId === myId)
     .reduce((sum, a) => sum + a.count, 0);

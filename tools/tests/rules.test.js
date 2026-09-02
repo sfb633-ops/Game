@@ -197,8 +197,11 @@ for (const how of ['army', 'direct']) {
   p.draft = null;
   m.takeCard(p, 'prosperity');                     // and a boon shifts them again
   m.takeCard(p, 'barteringTactics');
+  // The keep pays nothing now, so there has to be something that does before
+  // a multiplier on income can be seen at all.
+  buildNow(m, 'p', yard(p).x, yard(p).y, 'bank');
   const ser = m.serialize().players[0];
-  const raw = cfg.CASTLE.incomePerSec[0];
+  const raw = cfg.BUILDING_TYPES.bank.incomePerSec;
   check('serialized income reflects race and boons',
     Math.abs(ser.incomePerSec - m.incomePerSec(p)) < 0.06 && Math.abs(ser.incomePerSec - raw) > 0.01,
     `raw ${raw} vs sent ${ser.incomePerSec}`);
@@ -222,6 +225,10 @@ for (const how of ['army', 'direct']) {
   const border = cfg.CARDS.profoundInfluence.mods.borderBonus;
   const discount = cfg.CARDS.barteringTactics.mods.costMult;
   m.takeCard(a, 'prosperity');
+  // Both need something that actually pays, or this is a ratio of zeroes. The
+  // keep pays nothing now, so a bank each.
+  buildNow(m, 'a', yard(a, 3).x, yard(a, 3).y, 'bank');
+  buildNow(m, 'b', yard(b, 3).x, yard(b, 3).y, 'bank');
   check(`Prosperity is the income it claims (x${income})`,
     Math.abs(m.incomePerSec(a) / m.incomePerSec(b) - income) < 1e-9,
     `x${(m.incomePerSec(a) / m.incomePerSec(b)).toFixed(3)}`);
@@ -859,8 +866,14 @@ function farTile(m, p, want) {
     camp.defeated && a.order === 'hold' &&
     Math.hypot(a.x - camp.x, a.y - camp.y) < 1.5,
     `${a.order} at ${Math.round(a.x)},${Math.round(a.y)} vs camp ${camp.x},${camp.y}`);
-  check('and the plunder was banked without walking it home',
-    p.gold > goldBefore, `${Math.round(goldBefore)} -> ${Math.round(p.gold)}`);
+  // A camp pays NO gold, which is the whole of what taking one is worth —
+  // ground, not income, and config.js says so at length. This check used to
+  // assert gold went UP after taking one and passed anyway, because the keep
+  // paid 3/s in the background and eight thousand ticks is a long time. It
+  // was measuring passive income and calling it plunder. Now that the keep
+  // pays nothing the check says what it always should have.
+  check('and taking a camp paid no gold, because ground is the prize',
+    Math.abs(p.gold - goldBefore) < 0.01, `${Math.round(goldBefore)} -> ${Math.round(p.gold)}`);
   for (let t = 0; t < 900; t++) m.tick(0.2);
   check('it does not drift off afterwards',
     m.armies.has(a.id) && a.order === 'hold' && p.idleUnits.swordsman === 0);
@@ -4328,13 +4341,27 @@ function fightOut(m, ours, theirs) {
     site2.builders === cfg.BUILD_WORK.maxWorkers,
     `${site2.builders} of twenty counted, cap is ${cfg.BUILD_WORK.maxWorkers}`);
 
-  // A wall is the exception and stays instant, because they are dragged by the
-  // dozen and walking a crew along your own border is not a decision.
+  // A wall is the exception twice over: thirty PLAIN seconds, and it raises
+  // itself. The delay is so an instant wall cannot be thrown up mid-fight as a
+  // panic button; the self-building is so a dozen dragged segments do not mean
+  // walking a crew along your own border laying bricks.
   p.gold = 5000;
   m.cmdBuild('p', p.baseX + 1, p.baseY + 3, 'wall');
   const wall = p.buildings[`${p.baseX + 1},${p.baseY + 3}`];
-  check('a wall still goes up the moment it is paid for',
-    wall && !wall.underConstruction, wall ? 'instant' : 'no wall placed');
+  check('a wall is a site rather than instant',
+    wall && wall.underConstruction && wall.remainingSec === cfg.BUILDING_TYPES.wall.buildTimeSec,
+    wall ? `${wall.remainingSec}s` : 'no wall placed');
+
+  // Nobody within a mile of it, and it goes up anyway.
+  for (const army of m.armies.values()) { army.x = p.baseX - 30; army.y = p.baseY - 30; }
+  for (let i = 0; i < 100; i++) m.tick(0.2);              // 20 of the 30
+  check('  and it raises itself, with nobody standing by it',
+    wall.underConstruction && wall.remainingSec < 11 && wall.remainingSec > 9,
+    `${wall.remainingSec.toFixed(1)}s left after 20`);
+  for (let i = 0; i < 60; i++) m.tick(0.2);
+  check('  and is standing at thirty', !wall.underConstruction);
+  check('  having never asked for workers',
+    !m.events.some(e => /Wall needs workers/.test(e.text)));
 }
 
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');

@@ -346,13 +346,15 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
      silently handed the bar an extra 336 and it grew from 228 to 564 and put
      itself under the stat row. What it has to clear today is the treasury on
      the left, which finishes at 325, and the works/border pair on the right,
-     which starts at about 1025 of 1264 — so 335 either side of centre, and 670
-     is the pair of them. Up to 760, which is where it stops growing on a wide
+     which starts at about 1025 of 1264. The left figure moved again when the
+     Mining stat joined the money on that side: the treasury row now finishes
+     at 366, so 380 either side of centre and 760 is the pair of them
+     . Up to 760, which is where it stops growing on a wide
      screen. On a narrow one it gives up length rather than moving down, which
      is the trade that keeps it at the top where it belongs. */
   position: absolute; top: 22px; left: 50%;
   transform: translateX(-50%);
-  width: min(760px, calc(100% - 680px));
+  width: min(760px, calc(100% - 760px));
   z-index: 4;             /* under #conn-notice, which owns the top edge */
   pointer-events: none;
 }
