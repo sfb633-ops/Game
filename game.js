@@ -3574,8 +3574,48 @@ class Match {
     this.bankPlunder(army);
     army.order = 'move';
     army.breach = null;
-    army.destX = Math.round(x); army.destY = Math.round(y);
+    const spot = this.standOffFrom(army, Math.round(x), Math.round(y));
+    army.destX = spot.x; army.destY = spot.y;
     army.targetType = null; army.targetId = null;
+  }
+
+  // Where to actually stand when the tile you were sent to has something on it.
+  //
+  // Your own buildings do not block your own movement — routeBlocked only
+  // stops an army on somebody ELSE'S stonework — so an order onto your own
+  // building walked the group into it and left them standing on top of the
+  // thing. That is worst on a site being built: the crew you sent covers the
+  // building and its progress bar, and since nothing has to be stood on to be
+  // built or mined, standing on it buys nothing at all.
+  //
+  // So a move onto occupied ground lands on the nearest free tile beside it.
+  // The ring is walked nearest-first, which keeps the group on the side it
+  // approached from rather than teleporting the destination across the
+  // building.
+  standOffFrom(army, x, y) {
+    // Only YOUR OWN stonework, and that is the whole scope of this.
+    //
+    // Somebody else's already blocks the route, so there is nothing to stand
+    // off from — and an enemy KEEP has to stay reachable or an assault cannot
+    // arrive. routeBlocked lets an army onto a castle tile for exactly that
+    // reason, and diverting the order a tile short would have broken every
+    // storming of a keep in the game.
+    const found = this.buildingIndex.get(tileKey(x, y));
+    if (!found || !this.allied(army.ownerId, found.owner.id)) return { x, y };
+    let best = null;
+    for (let oy = -1; oy <= 1; oy++) {
+      for (let ox = -1; ox <= 1; ox++) {
+        if (!ox && !oy) continue;
+        const nx = x + ox, ny = y + oy;
+        if (!this.validMoveTile(nx, ny)) continue;
+        const near = this.buildingIndex.get(tileKey(nx, ny));
+        if (near && this.allied(army.ownerId, near.owner.id)) continue;
+        const d = Math.hypot(nx - army.x, ny - army.y);
+        if (!best || d < best.d) best = { x: nx, y: ny, d };
+      }
+    }
+    // Ringed in by its own works: stand on it rather than refuse the order.
+    return best ? { x: best.x, y: best.y } : { x, y };
   }
 
   cmdAttackArmy(playerId, armyId, targetType, targetId) {

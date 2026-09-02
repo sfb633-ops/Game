@@ -2115,6 +2115,9 @@ function render() {
   drawDamageBars(ts);
   for (const a of latestState.armies) drawArmyBadge(a, ts);
   drawDemolishBadge(ts);
+  // After the armies, so a crew standing beside a site cannot cover the one
+  // thing that says whether they are working it.
+  drawConstructionBars(ts);
 
   // ---- Transient effects, above everything ----
   effects = effects.filter(fx => {
@@ -2237,27 +2240,11 @@ function drawPlayerBuilding(b, p, ts, hasWall) {
     }
   }
   drawBuilding(b, px, py, color, hasWall, p.race, null);
-  if (b.underConstruction || b.upgrading) {
-    // A progress bar rather than a number on a black square.
-    //
-    // The number was drawn in white 10px monospace on a flat black tile, once
-    // per segment — so a dragged wall came out as a row of identical "22"s
-    // stamped across the map, which is a debug readout rather than a game.
-    // What a player needs from a site is how far along it is and whether it is
-    // moving at all, and a bar says both at a glance and at any zoom.
-    const total = b.type && buildingTypes[b.type] ? buildingTypes[b.type].buildTimeSec : 0;
-    const left = Math.max(0, b.remainingSec || 0);
-    const done = total > 0 ? Math.max(0, Math.min(1, 1 - left / total)) : 0;
-    const w = ts * 0.7, h = 4, bx = px - w / 2, by = py + ts * 0.28;
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(bx - 1, by - 1, w + 2, h + 2);
-    // Amber while somebody is working it, grey while nothing is happening —
-    // which is the difference between slow and stopped, and the one thing a
-    // countdown could never show.
-    const working = b.builders > 0 || b.upgrading || (buildingTypes[b.type] || {}).selfBuild;
-    ctx.fillStyle = working ? '#dcc47c' : '#7b6144';
-    ctx.fillRect(bx, by, Math.max(1, w * done), h);
-  }
+  // The progress bar is NOT drawn here. It is collected and drawn after the
+  // whole scene — see constructionBars — because a crew standing beside a site
+  // is drawn after the site and would otherwise cover the one thing telling
+  // you whether they are working it.
+  if (b.underConstruction || b.upgrading) constructionBars.push({ b, px, py });
   if (b.type === 'castle') {
     if (p.alive) drawHpBar(px - ts / 2, py - ts * 1.15, ts, b.hp, b.maxHp, color);
     else {
@@ -2301,6 +2288,26 @@ function drawArmy(a, ts) {
 
 // Troops draw weapons as they close on what they were sent to attack, and keep
 // swinging for as long as the fight runs on the server.
+// Sites gathered during the scene, drawn once it is finished.
+const constructionBars = [];
+
+function drawConstructionBars(ts) {
+  for (const { b, px, py } of constructionBars) {
+    const total = b.type && buildingTypes[b.type] ? buildingTypes[b.type].buildTimeSec : 0;
+    const left = Math.max(0, b.remainingSec || 0);
+    const done = total > 0 ? Math.max(0, Math.min(1, 1 - left / total)) : 0;
+    const w = ts * 0.7, h = 4, bx = px - w / 2, by = py + ts * 0.28;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(bx - 1, by - 1, w + 2, h + 2);
+    // Amber while somebody is working it, grey while nothing is happening —
+    // the difference between slow and stopped, which a countdown never showed.
+    const working = b.builders > 0 || b.upgrading || (buildingTypes[b.type] || {}).selfBuild;
+    ctx.fillStyle = working ? '#dcc47c' : '#7b6144';
+    ctx.fillRect(bx, by, Math.max(1, w * done), h);
+  }
+  constructionBars.length = 0;
+}
+
 function armyAnim(a, moving) {
   // A worker at a seam or on a building site swings. The pack gives a farmer
   // an 'attack' animation — five frames of a working bob — and idle is a

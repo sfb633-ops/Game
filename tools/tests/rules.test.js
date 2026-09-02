@@ -4364,5 +4364,52 @@ function fightOut(m, ours, theirs) {
     !m.events.some(e => /Wall needs workers/.test(e.text)));
 }
 
+
+// --- an order onto your own building stands beside it ----------------------
+//
+// routeBlocked only stops an army on somebody ELSE'S stonework, so your own
+// buildings never blocked your own movement and a group sent to one walked into
+// it and stood on top. On a building site that is the crew you sent covering
+// both the building and its progress bar — and since nothing has to be stood on
+// to be built or mined, standing on it buys nothing.
+{
+  const m = new Match({ seed: 9 });
+  const p = m.addPlayer('p', 'human', 'P');
+  p.draft = null;
+  p.gold = 5000;
+  m.start();
+
+  const bx = p.baseX + 4, by = p.baseY;
+  m.cmdBuild('p', bx, by, 'barracks');
+  p.idleUnits.worker = 3;
+  m.cmdDeployUnits('p', { worker: 3 }, p.baseX + 2, p.baseY + 2);
+  const crew = [...m.armies.values()].find(a => a.type === 'worker');
+
+  m.cmdMoveArmy('p', crew.id, bx, by);
+  check('an order onto your own building lands beside it, not on it',
+    !(crew.destX === bx && crew.destY === by), `${crew.destX},${crew.destY} vs site ${bx},${by}`);
+  check('  and only one tile off, so it is still the place you pointed at',
+    Math.max(Math.abs(crew.destX - bx), Math.abs(crew.destY - by)) === 1);
+
+  for (let i = 0; i < 400 &&
+    (Math.abs(crew.x - crew.destX) > 0.1 || Math.abs(crew.y - crew.destY) > 0.1); i++) m.tick(0.2);
+  check('  they settle rather than drifting onto it',
+    Math.abs(crew.x - crew.destX) < 0.1 && Math.abs(crew.y - crew.destY) < 0.1,
+    `${crew.x.toFixed(1)},${crew.y.toFixed(1)}`);
+
+  m.tick(0.2);
+  const site = p.buildings[`${bx},${by}`];
+  check('  and standing beside it still builds it',
+    site.builders === 3, `${site.builders} builders`);
+  check('  and reports them as working, which is what animates them',
+    m.serialize().armies.find(a => a.id === crew.id).working === true);
+
+  // Open ground is untouched: only occupied tiles get moved off.
+  const ox = p.baseX + 8, oy = p.baseY + 8;
+  m.cmdMoveArmy('p', crew.id, ox, oy);
+  check('an order onto empty ground is left exactly where it was given',
+    crew.destX === ox && crew.destY === oy, `${crew.destX},${crew.destY}`);
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');
 process.exit(failures ? 1 : 0);
