@@ -718,7 +718,7 @@ const CONTROLS = [
   ['Drag', 'Select everything in the box'],
   ['Shift + click', 'Add to the selection, or take one out'],
   ['Right-click', 'March there, attack it, or join another of your groups'],
-  ['X', 'Set how many to split off the selected group'],
+  ['X', 'Open or close the split window for the selected group'],
   ['R', 'Recall the selected groups'],
   ['Q', 'Use your race ability'],
   ['Shift + 1-9', 'Put the selection in a control group'],
@@ -2238,10 +2238,25 @@ function drawPlayerBuilding(b, p, ts, hasWall) {
   }
   drawBuilding(b, px, py, color, hasWall, p.race, null);
   if (b.underConstruction || b.upgrading) {
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    ctx.fillRect(px - ts / 2, py - ts / 2, ts, ts);
-    ctx.fillStyle = '#fff'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
-    ctx.fillText(Math.ceil(b.remainingSec), px, py + 4);
+    // A progress bar rather than a number on a black square.
+    //
+    // The number was drawn in white 10px monospace on a flat black tile, once
+    // per segment — so a dragged wall came out as a row of identical "22"s
+    // stamped across the map, which is a debug readout rather than a game.
+    // What a player needs from a site is how far along it is and whether it is
+    // moving at all, and a bar says both at a glance and at any zoom.
+    const total = b.type && buildingTypes[b.type] ? buildingTypes[b.type].buildTimeSec : 0;
+    const left = Math.max(0, b.remainingSec || 0);
+    const done = total > 0 ? Math.max(0, Math.min(1, 1 - left / total)) : 0;
+    const w = ts * 0.7, h = 4, bx = px - w / 2, by = py + ts * 0.28;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(bx - 1, by - 1, w + 2, h + 2);
+    // Amber while somebody is working it, grey while nothing is happening —
+    // which is the difference between slow and stopped, and the one thing a
+    // countdown could never show.
+    const working = b.builders > 0 || b.upgrading || (buildingTypes[b.type] || {}).selfBuild;
+    ctx.fillStyle = working ? '#dcc47c' : '#7b6144';
+    ctx.fillRect(bx, by, Math.max(1, w * done), h);
   }
   if (b.type === 'castle') {
     if (p.alive) drawHpBar(px - ts / 2, py - ts * 1.15, ts, b.hp, b.maxHp, color);
@@ -2287,6 +2302,11 @@ function drawArmy(a, ts) {
 // Troops draw weapons as they close on what they were sent to attack, and keep
 // swinging for as long as the fight runs on the server.
 function armyAnim(a, moving) {
+  // A worker at a seam or on a building site swings. The pack gives a farmer
+  // an 'attack' animation — five frames of a working bob — and idle is a
+  // single frame, so without this a crew that is visibly earning gold stands
+  // perfectly still while it does it.
+  if (a.working && !moving) return 'attack';
   if (a.breach) return 'attack';           // stopped at a wall, swinging at it
   if (a.order === 'fight') return 'attack';
   if (a.order === 'attack' && a.destX != null &&
@@ -3091,6 +3111,7 @@ function onKeyDown(e) {
     // thing on screen, so it is the last of the two to close and the first of
     // the rest.
     if (gameMenuOpen()) { showGameMenu(false); return; }
+    if (splitOpen) { splitOpen = false; renderGroupBar(); return; }
     if (armedBuild) { armBuild(null); return; }
     if (armedSpell) { armSpell(null); return; }
     if (armedAbility) { armAbility(false); return; }
@@ -3143,13 +3164,28 @@ function onKeyDown(e) {
 // SELECTION changes, which is the one time a remembered number is meaningless.
 let splitWant = 1;
 let splitSig = '';
+// Whether the split window is open.
+//
+// It used to be up whenever anything was selected, which meant it appeared
+// the moment troops were deployed and sat over the map for the rest of the
+// game. Splitting is something you do occasionally; selecting is something
+// you do constantly, and a panel that follows the constant thing is a panel
+// that is always there. X opens it, X closes it, and losing the selection
+// closes it because there is nothing left for it to be about.
+let splitOpen = false;
 
 function renderGroupBar() {
   const bar = document.getElementById('group-bar');
   if (!bar) return;
   const groups = selectedList();
-  if (!groups.length) { bar.classList.add('hidden'); splitSig = ''; return; }
-  bar.classList.remove('hidden');
+  if (!groups.length) {
+    bar.classList.add('hidden');
+    splitSig = '';
+    splitOpen = false;
+    return;
+  }
+  bar.classList.toggle('hidden', !splitOpen);
+  if (!splitOpen) return;
 
   const total = groups.reduce((n, a) => n + (a.count || 0), 0);
   // The smallest group is the ceiling: the same count goes to all of them, and
@@ -3190,9 +3226,15 @@ function renderGroupBar() {
 // split, and saying so is more use than doing nothing.
 function focusSplit() {
   const groups = selectedList();
-  if (!groups.length) { log('Select a group first — X then sets how many to split off.'); return; }
+  if (!groups.length) { log('Select a group first — X then asks how many to split off.'); return; }
+  // A toggle: X opens the window, X closes it again. Escape closes it too,
+  // like everything else on this map.
+  if (splitOpen) { splitOpen = false; renderGroupBar(); return; }
+  splitOpen = true;
+  renderGroupBar();
   const slider = document.getElementById('split-count');
-  if (!slider || slider.disabled) {
+  if (!slider) return;
+  if (slider.disabled) {
     log('That group is too small to split — it takes two to leave one behind.');
     return;
   }
@@ -3218,6 +3260,10 @@ function splitSelectedByCount() {
     sent++;
   }
   if (!sent) log('Nothing to split — a group needs at least two soldiers.');
+  // Done with it. Leaving the window up after a split invites a second one
+  // nobody asked for, and the selection has changed under it anyway.
+  splitOpen = false;
+  renderGroupBar();
 }
 
 {
@@ -3228,6 +3274,8 @@ function splitSelectedByCount() {
     renderGroupBar();
   });
   if (btn) btn.addEventListener('click', splitSelectedByCount);
+  const close = document.getElementById('split-close');
+  if (close) close.addEventListener('click', () => { splitOpen = false; renderGroupBar(); });
 }
 
 let lastGroupKey = null, lastGroupAt = 0;

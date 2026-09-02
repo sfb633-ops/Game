@@ -619,6 +619,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 #group-bar .slider-row label { flex: 0 0 auto; }
 #group-bar input[type="range"] { width: 150px; flex: 0 0 150px; }
 #group-bar output { flex: 0 0 2.2rem; text-align: right; }
+#split-close { padding: 0 0.5rem; min-height: 28px; }
 
 @media (max-width: 1180px) {
   #build-bar { left: 50%; transform: translateX(-50%); }

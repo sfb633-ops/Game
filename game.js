@@ -1740,6 +1740,7 @@ class Match {
       const def = UNIT_TYPES[army.type];
       if (!def || !def.worker) continue;
       if (Math.hypot(army.x - plot.x, army.y - plot.y) > BUILD_WORK.radius) continue;
+      army.working = true;
       n += armyCount(army);
       if (n >= BUILD_WORK.maxWorkers) return BUILD_WORK.maxWorkers;
     }
@@ -1769,6 +1770,7 @@ class Match {
         const n = armyCount(army);
         if (n <= 0) continue;
         crew.set(army.ownerId, (crew.get(army.ownerId) || 0) + n);
+        army.working = true;
       }
       if (!crew.size) continue;
       // The cap is on the seam, so it is shared out in proportion when two
@@ -3754,6 +3756,10 @@ class Match {
     // without this the exchange would land twice a tick. Cleared here and
     // written by stepArmyBattle, which resolves a pair once whichever of the
     // two the loop reaches first.
+    // Who is working this tick. Set by stepOre and by the construction pass,
+    // read only by the client to pick an animation — a worker standing on a
+    // seam is doing something and looked frozen, because idle is one frame.
+    for (const army of this.armies.values()) army.working = false;
     this.resolvedPairs.clear();
     // ...and nobody is shoved into position more than once a tick — see
     // squareUp.
@@ -4821,6 +4827,10 @@ class Match {
       // second. Add it here the day something renders it.
       armies: Array.from(this.armies.values()).map(a => ({
         id: a.id, ownerId: a.ownerId, race: a.race, x: a.x, y: a.y, order: a.order,
+        // Mining a seam or raising a building. Only ever true of workers, and
+        // only so the client can animate them: idle is a single frame, so a
+        // crew at work stood perfectly still.
+        working: !!a.working,
         type: a.type, count: armyCount(a), mustered: a.mustered, wounded: armyWounded(a),
         hp: Math.max(0, Math.round(armyHp(a))), maxHp: Math.round(armyMaxHp(a)),
         destX: a.destX, destY: a.destY,

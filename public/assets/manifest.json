@@ -871,16 +871,16 @@
     "tower": {
      "file": "buildings/cyan/tower.png",
      "w": 127,
-     "h": 346,
+     "h": 298,
      "frames": 1,
      "fps": 6,
      "anchorX": 64,
-     "anchorY": 346,
+     "anchorY": 298,
      "footW": 60,
      "shadow": {
       "file": "buildings/cyan/tower_shadow.png",
-      "w": 245,
-      "h": 69,
+      "w": 228,
+      "h": 60,
       "anchorX": 64,
       "anchorY": 0
      },
@@ -1138,16 +1138,16 @@
     "tower": {
      "file": "buildings/red/tower.png",
      "w": 127,
-     "h": 346,
+     "h": 298,
      "frames": 1,
      "fps": 6,
      "anchorX": 64,
-     "anchorY": 346,
+     "anchorY": 298,
      "footW": 60,
      "shadow": {
       "file": "buildings/red/tower_shadow.png",
-      "w": 245,
-      "h": 69,
+      "w": 228,
+      "h": 60,
       "anchorX": 64,
       "anchorY": 0
      },
@@ -1405,16 +1405,16 @@
     "tower": {
      "file": "buildings/lime/tower.png",
      "w": 127,
-     "h": 346,
+     "h": 298,
      "frames": 1,
      "fps": 6,
      "anchorX": 64,
-     "anchorY": 346,
+     "anchorY": 298,
      "footW": 60,
      "shadow": {
       "file": "buildings/lime/tower_shadow.png",
-      "w": 245,
-      "h": 69,
+      "w": 228,
+      "h": 60,
       "anchorX": 64,
       "anchorY": 0
      },
@@ -1672,16 +1672,16 @@
     "tower": {
      "file": "buildings/purple/tower.png",
      "w": 127,
-     "h": 346,
+     "h": 298,
      "frames": 1,
      "fps": 6,
      "anchorX": 64,
-     "anchorY": 346,
+     "anchorY": 298,
      "footW": 60,
      "shadow": {
       "file": "buildings/purple/tower_shadow.png",
-      "w": 245,
-      "h": 69,
+      "w": 228,
+      "h": 60,
       "anchorX": 64,
       "anchorY": 0
      },

@@ -2413,7 +2413,13 @@ function timberBand(img, box, from) {
 // which is the "roof on posts" that would let an archer stand under a roof
 // and be seen. It has a bell hanging in it. Worth returning to if the archer
 // comes back.
-const WINLU_TOWER_ROWS = [2, 3, 6];   // plain shaft, plain shaft, rounded base
+// One shaft, not two. Three rows of drum under a 228px cone came to 346 tall,
+// which is SEVEN TILES and taller than the keep it is meant to stand beside —
+// the castle is 337. A defensive outbuilding that dwarfs the thing it defends
+// reads as the castle. Dropping a course takes it to about six tiles and puts
+// it back under the keep, and it costs nothing: every pixel is still 1:1, the
+// tower is simply shorter.
+const WINLU_TOWER_ROWS = [3, 6];      // plain shaft, rounded base
 const CONE_SRC = { file: '!$Big_Decoration.png', x: 9, y: 37, w: 127, h: 228 };
 const CONE_SET = 26;                  // how far the eave comes down over the drum
 
