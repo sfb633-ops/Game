@@ -635,6 +635,12 @@ wss.on('connection', (ws) => {
       case 'moveArmy':
         match.cmdMoveArmy(playerId, msg.armyId, msg.x, msg.y);
         break;
+      case 'storeInBank':
+        match.cmdStoreInBank(playerId, msg.armyId, msg.x, msg.y);
+        break;
+      case 'releaseFromBank':
+        match.cmdReleaseFromBank(playerId, msg.x, msg.y);
+        break;
       case 'attackArmy':
         match.cmdAttackArmy(playerId, msg.armyId, msg.targetType, msg.targetId);
         break;

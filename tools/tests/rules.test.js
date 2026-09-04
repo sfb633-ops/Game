@@ -12,12 +12,16 @@ const { Match, armyCount, armyHp, armyMaxHp, armyWounded } = require('../../game
 // raise a build crew first. That is not what those tests are about, and making
 // each one simulate a crew would be testing construction over and over by
 // accident. The tests that ARE about construction call cmdBuild directly.
+// Returns the PLOT. It used to return cmdBuild's result, which is undefined —
+// harmless while nothing read it, and a trap the moment something did: a bank
+// has to be staffed as well as built now, and `bank.stored = 2` on undefined
+// is where that would have been found.
 function buildNow(m, playerId, x, y, type) {
-  const out = m.cmdBuild(playerId, x, y, type);
+  m.cmdBuild(playerId, x, y, type);
   const player = m.players.get(playerId);
   const plot = player && player.buildings[`${Math.round(x)},${Math.round(y)}`];
   if (plot && plot.underConstruction) { plot.underConstruction = false; plot.remainingSec = 0; }
-  return out;
+  return plot;
 }
 
 // Enough of an image reader for the sprite checks below: one cell out of a
@@ -198,10 +202,12 @@ for (const how of ['army', 'direct']) {
   m.takeCard(p, 'prosperity');                     // and a boon shifts them again
   m.takeCard(p, 'barteringTactics');
   // The keep pays nothing now, so there has to be something that does before
-  // a multiplier on income can be seen at all.
-  buildNow(m, 'p', yard(p).x, yard(p).y, 'bank');
+  // a multiplier on income can be seen at all. A bank pays for its tenants
+  // rather than for existing, so it has to be staffed as well as built.
+  const bank = buildNow(m, 'p', yard(p).x, yard(p).y, 'bank');
+  bank.stored = cfg.BUILDING_TYPES.bank.holds;
   const ser = m.serialize().players[0];
-  const raw = cfg.BUILDING_TYPES.bank.incomePerSec;
+  const raw = cfg.BUILDING_TYPES.bank.holds * cfg.BUILDING_TYPES.bank.incomePerWorker;
   check('serialized income reflects race and boons',
     Math.abs(ser.incomePerSec - m.incomePerSec(p)) < 0.06 && Math.abs(ser.incomePerSec - raw) > 0.01,
     `raw ${raw} vs sent ${ser.incomePerSec}`);
@@ -226,9 +232,12 @@ for (const how of ['army', 'direct']) {
   const discount = cfg.CARDS.barteringTactics.mods.costMult;
   m.takeCard(a, 'prosperity');
   // Both need something that actually pays, or this is a ratio of zeroes. The
-  // keep pays nothing now, so a bank each.
-  buildNow(m, 'a', yard(a, 3).x, yard(a, 3).y, 'bank');
-  buildNow(m, 'b', yard(b, 3).x, yard(b, 3).y, 'bank');
+  // keep pays nothing now, so a bank each — staffed, because an empty one pays
+  // nothing either.
+  for (const [id, who] of [['a', a], ['b', b]]) {
+    const bk = buildNow(m, id, yard(who, 3).x, yard(who, 3).y, 'bank');
+    bk.stored = cfg.BUILDING_TYPES.bank.holds;
+  }
   check(`Prosperity is the income it claims (x${income})`,
     Math.abs(m.incomePerSec(a) / m.incomePerSec(b) - income) < 1e-9,
     `x${(m.incomePerSec(a) / m.incomePerSec(b)).toFixed(3)}`);
@@ -3284,7 +3293,12 @@ function fightOut(m, ours, theirs) {
   // the barracks queue is the other ceiling. Whichever binds first is the
   // answer, and which one that is differs by race — which is the point.
   const fielded = (r, sec = 420, barracks = 2) => Math.floor(Math.min(
-    (cfg.CASTLE.incomePerSec[1] + 2 * cfg.BUILDING_TYPES.bank.incomePerSec) * r.incomeMult * sec / (u.cost * r.costMult),
+    // Two banks, staffed. A bank pays for its tenants now rather than for
+    // existing, so the figure is holds x incomePerWorker per bank — the whole
+    // point being that an empty one pays nothing.
+    (cfg.CASTLE.incomePerSec[1]
+      + 2 * cfg.BUILDING_TYPES.bank.holds * cfg.BUILDING_TYPES.bank.incomePerWorker
+    ) * r.incomeMult * sec / (u.cost * r.costMult),
     barracks * sec / (u.trainTimeSec * r.buildTimeMult)));
   const ids = Object.keys(cfg.RACES);
   let worst = 0, worstAt = '';
@@ -4470,6 +4484,51 @@ function fightOut(m, ours, theirs) {
   m.cmdMoveArmy('p', crew.id, ox, oy);
   check('an order onto empty ground is left exactly where it was given',
     crew.destX === ox && crew.destY === oy, `${crew.destX},${crew.destY}`);
+}
+
+// --- a bank pays for who is in it -----------------------------------------
+//
+// The bank used to pay a flat rate for existing. It holds villagers now and
+// pays per head, which makes it a place that can be staffed, emptied and lost
+// — so what is pinned here is what a player would notice going wrong: that an
+// empty one is worthless, that it will not take more than it holds, that
+// soldiers cannot be filed in a vault, and that a seam still beats it.
+{
+  const BANK = cfg.BUILDING_TYPES.bank;
+  const m = twoSides();
+  const a = m.players.get('a');
+  a.gold = 999999;
+  const bank = buildNow(m, 'a', yard(a, 1).x, yard(a, 1).y, 'bank');
+  check('an empty bank pays nothing', m.incomePerSec(a) === 0, `income ${m.incomePerSec(a)}`);
+
+  const crew = field(m, 'a', 'worker', 4, bank.x + 2, bank.y);
+  m.cmdStoreInBank('a', crew.id, bank.x, bank.y);
+  for (let t = 0; t < 400; t++) m.tick(0.2);
+  check('  and takes only as many villagers as it holds',
+    bank.stored === BANK.holds, `stored ${bank.stored} of ${BANK.holds}`);
+  check('  leaving the rest of the crew outside',
+    m.armies.has(crew.id) && crew.roster.length === 4 - BANK.holds,
+    `${m.armies.has(crew.id) ? crew.roster.length : 0} still out`);
+  check('  and pays per head for the ones inside',
+    Math.abs(m.incomePerSec(a) - BANK.holds * BANK.incomePerWorker) < 1e-9,
+    `${m.incomePerSec(a)}/s`);
+
+  // The number that keeps the economy pointed at the map: staffing a bank must
+  // not beat walking out to a rock, or nobody would ever leave the compound.
+  const banked = BANK.holds * BANK.incomePerWorker;
+  const mined = cfg.ORE.maxWorkers * cfg.ORE.perWorkerPerSec;
+  check('a worked seam still out-earns a full bank', mined > banked,
+    `${mined.toFixed(1)}/s mining vs ${banked.toFixed(1)}/s banked`);
+
+  const soldiers = field(m, 'a', 'swordsman', 2, bank.x + 2, bank.y);
+  m.cmdStoreInBank('a', soldiers.id, bank.x, bank.y);
+  for (let t = 0; t < 200; t++) m.tick(0.2);
+  check('  and only villagers may work one', bank.stored === BANK.holds,
+    `stored ${bank.stored}`);
+
+  m.cmdReleaseFromBank('a', bank.x, bank.y);
+  check('releasing empties the bank back onto the map',
+    bank.stored === 0 && m.incomePerSec(a) === 0, `stored ${bank.stored}`);
 }
 
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');

@@ -68,7 +68,9 @@ function fresh(raceA, raceB) {
   a.gold = 9999;
   m.cmdBuild('a', a.baseX + 3, a.baseY + 3, 'bank');
   const bank = a.buildings[(a.baseX + 3) + ',' + (a.baseY + 3)];
-  if (bank) { bank.underConstruction = false; bank.remainingSec = 0; }
+  // Staffed as well as finished: a bank pays for its tenants now, so an empty
+  // one leaves this measuring a multiplier against zero.
+  if (bank) { bank.underConstruction = false; bank.remainingSec = 0; bank.stored = cfg.BUILDING_TYPES.bank.holds; }
   const income0 = m.incomePerSec(a);
   m.takeCard(a, 'prosperity');
   check('prosperity multiplies income by exactly its card value',

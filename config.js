@@ -417,7 +417,20 @@ const CASTLE = {
 // own border laying bricks. Fifteen gold of stacked stone is not the
 // decision this mechanic exists to make interesting; the delay is.
 const BUILDING_TYPES = {
-  bank:     { name: 'Bank',          cost: 150, buildTimeSec: 18, hp: 150, incomePerSec: 2 },
+  // A bank pays nothing on its own. What it pays for is the villagers put
+  // inside it: each one is BANK_PER_WORKER a second, for as long as they stay.
+  //
+  // holds is 2 and the number is load-bearing. A seam is 1.2 a second a head
+  // and caps at four, so a worked seam is 4.8; two in a bank is 4.0. The bank
+  // has to lose that comparison or nobody would ever walk out to a rock — it
+  // is safe, it is behind your walls, it never runs dry, and it is a building
+  // slot rather than a march. Paying MORE for all of that as well would end
+  // the economy this game is built on, where gold comes out of the ground.
+  //
+  // Three would be 6.0 and would win outright. Two is the largest number that
+  // still loses.
+  bank:     { name: 'Bank',          cost: 150, buildTimeSec: 18, hp: 150,
+              holds: 2, incomePerWorker: 2 },
   barracks: { name: 'Barracks',      cost: 100, buildTimeSec: 14, hp: 150, trains: 'swordsman' },
   stable:   { name: 'Stable',        cost: 200, buildTimeSec: 22, hp: 150, trains: 'knight' },
   siege:    { name: 'Siege Factory', cost: 300, buildTimeSec: 28, hp: 150, trains: 'catapult' },

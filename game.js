@@ -1795,9 +1795,39 @@ class Match {
     const castle = this.getCastle(player);
     income += CASTLE.incomePerSec[castle.level - 1];
     for (const b of Object.values(player.buildings)) {
-      if (b.type === 'bank' && !b.underConstruction) income += BUILDING_TYPES.bank.incomePerSec;
+      // A bank pays for its tenants and nothing for itself, so an empty one is
+      // a hole in the ground you spent 150g on until you staff it.
+      if (b.type === 'bank' && !b.underConstruction) {
+        income += (b.stored || 0) * BUILDING_TYPES.bank.incomePerWorker;
+      }
     }
     return income * mods.incomeMult;
+  }
+
+  // Room left in a bank. Not a bank, under construction, or full: nothing.
+  bankSpace(plot) {
+    if (!plot || plot.type !== 'bank' || plot.underConstruction) return 0;
+    return Math.max(0, BUILDING_TYPES.bank.holds - (plot.stored || 0));
+  }
+
+  // Villagers into a bank, and out again.
+  //
+  // A worker inside a bank is off the map: it is not in an army, it cannot be
+  // killed, and it cannot mine. That is the trade the 2-a-second buys, and it
+  // is why the count has to be visible on the building — income you cannot see
+  // the source of is income the player cannot reason about.
+  storeWorkers(player, plot, army) {
+    const space = this.bankSpace(plot);
+    if (space <= 0) return 0;
+    const def = UNIT_TYPES[army.type];
+    if (!def || !def.worker) return 0;
+    const taken = Math.min(space, armyCount(army));
+    if (taken <= 0) return 0;
+    army.roster.splice(0, taken);
+    army.mustered -= taken;
+    plot.stored = (plot.stored || 0) + taken;
+    if (armyCount(army) === 0) this.armies.delete(army.id);
+    return taken;
   }
 
   // How many of this empire's workers are close enough to be building this.
@@ -2165,6 +2195,11 @@ class Match {
   // saying so. `wallVersion` is that announcement: an army compares it against
   // the version its route was planned under and replans when they differ.
   placeBuilding(player, building) {
+    // Starts at zero, not at undefined — the same rule woundCarry is held to.
+    // Every reader copes with the gap today via `|| 0`, and a field that is
+    // sometimes a number and sometimes not is a trap for whoever drops one of
+    // those. Banks only: nothing else has tenants.
+    if (building.type === 'bank' && building.stored == null) building.stored = 0;
     player.buildings[tileKey(building.x, building.y)] = building;
     this.indexBuilding(player, building);
     // Every building is something to walk round now, so every building changes
@@ -2177,6 +2212,19 @@ class Match {
   // `demolished` is set when the owner pulled it down themselves, which leaves
   // clear ground — rubble is what a fight leaves behind.
   razeBuilding(player, building, demolished) {
+    // The staff of a bank go with the building. Pull it down yourself and they
+    // walk out; have it stormed and they are lost with it. That asymmetry is
+    // the point of garrisoning being a real decision — two villagers parked
+    // somewhere safe are two villagers you can lose if it stops being safe.
+    if (building.stored) {
+      const n = building.stored;
+      building.stored = 0;
+      if (demolished) {
+        this.spawnArmies(player, { worker: n }, 'move', { x: building.x, y: building.y });
+      } else {
+        this.emit(player.id, `${n} villager${n === 1 ? '' : 's'} lost with the bank.`);
+      }
+    }
     delete player.buildings[tileKey(building.x, building.y)];
     this.unindexBuilding(building);
     if (building.type !== 'castle') this.wallVersion++;
@@ -3655,6 +3703,49 @@ class Match {
     army.targetType = null; army.targetId = null;
   }
 
+  // Send a worker group to move into one of your banks.
+  //
+  // A separate order from 'move' rather than "walked next to a bank, so in you
+  // go": workers cross their own ground constantly, and a crew that vanished
+  // into the treasury because its route home clipped the corner of one would be
+  // the worst kind of bug — silent, and it costs you the workers.
+  cmdStoreInBank(playerId, armyId, x, y) {
+    const army = this.ownArmy(playerId, armyId);
+    if (!army) return;
+    const def = UNIT_TYPES[army.type];
+    if (!def || !def.worker) { this.emit(playerId, 'Only villagers can work a bank.'); return; }
+    x = finiteOr(x); y = finiteOr(y);
+    if (x === null || y === null) return;
+    const player = this.players.get(playerId);
+    const plot = player && player.buildings[tileKey(Math.round(x), Math.round(y))];
+    if (!plot || plot.type !== 'bank') return;
+    if (plot.underConstruction) { this.emit(playerId, 'That bank is not finished.'); return; }
+    if (this.bankSpace(plot) <= 0) {
+      this.emit(playerId, `That bank is full — it holds ${BUILDING_TYPES.bank.holds}.`);
+      return;
+    }
+    this.bankPlunder(army);
+    army.order = 'store';
+    army.breach = null;
+    army.storeX = Math.round(x); army.storeY = Math.round(y);
+    const spot = this.standOffFrom(army, army.storeX, army.storeY);
+    army.destX = spot.x; army.destY = spot.y;
+    army.targetType = null; army.targetId = null;
+  }
+
+  // Turn the tenants of a bank back out onto the map.
+  cmdReleaseFromBank(playerId, x, y) {
+    const player = this.players.get(playerId);
+    if (!player) return;
+    const plot = player.buildings[tileKey(Math.round(x), Math.round(y))];
+    if (!plot || plot.type !== 'bank' || !plot.stored) return;
+    const n = plot.stored;
+    plot.stored = 0;
+    this.spawnArmies(player, { worker: n }, 'move', this.standOffFrom(
+      { ownerId: playerId, x: plot.x, y: plot.y }, plot.x, plot.y));
+    this.emit(playerId, `${n} villager${n === 1 ? '' : 's'} back out of the bank.`);
+  }
+
   // Where to actually stand when the tile you were sent to has something on it.
   //
   // Your own buildings do not block your own movement — routeBlocked only
@@ -4105,6 +4196,17 @@ class Match {
           // Reincarnation.
           if (owner) owner.idleUnits[army.type] = (owner.idleUnits[army.type] || 0) + armyCount(army);
           this.armies.delete(army.id);
+        } else if (army.order === 'store') {
+          const owner = this.players.get(army.ownerId);
+          const plot = owner && owner.buildings[tileKey(army.storeX, army.storeY)];
+          const taken = plot ? this.storeWorkers(owner, plot, army) : 0;
+          if (taken) {
+            this.emit(army.ownerId,
+              `${taken} villager${taken === 1 ? '' : 's'} into the bank — ${plot.stored}/${BUILDING_TYPES.bank.holds}.`);
+          }
+          // Whatever would not fit stops here rather than queueing for a place
+          // that is not coming.
+          if (this.armies.has(army.id)) { army.x = army.destX; army.y = army.destY; army.order = 'hold'; }
         } else if (army.order === 'merge') {
           // Standing on the rounded tile of a group that is still walking is
           // not arriving. Only joining it ends a merge (above); until then the
@@ -4954,6 +5056,10 @@ class Match {
         draft: p.draft ? { offered: p.draft.offered, remainingSec: Math.max(0, p.draft.remainingSec) } : null,
         buildings: Object.values(p.buildings).map(b => ({
           x: b.x, y: b.y, type: b.type, level: b.level || 1,
+          // Who is inside. Only banks have tenants, and the client draws the
+          // count on the building — see the note on storeWorkers for why it has
+          // to be visible rather than folded into one income figure.
+          stored: b.stored || 0,
           hp: Math.max(0, Math.round(b.hp)), maxHp: b.maxHp,
           underConstruction: b.underConstruction,
           remainingSec: Math.max(0, Math.ceil(b.remainingSec || 0)),
