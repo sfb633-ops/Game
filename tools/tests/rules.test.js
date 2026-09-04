@@ -50,7 +50,7 @@ function sendAt(m, playerId, units, targetType, targetId) {
   const p = m.players.get(playerId);
   const before = new Set(m.armies.keys());
   const mp = m.musterPoint(p);
-  m.cmdDeployUnits(playerId, units, mp.x, mp.y);
+  deployAll(m, playerId, units, mp.x, mp.y);
   for (const id of m.armies.keys()) {
     if (!before.has(id)) m.cmdAttackArmy(playerId, id, targetType, targetId);
   }
@@ -74,6 +74,84 @@ function armySpeedOf(army) {
 }
 let seed = 7 >>> 0;
 Math.random = () => { seed = (seed + 0x6D2B79F5) >>> 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+
+// --- staging troops for a test --------------------------------------------
+//
+// There is no player.idleUnits any more: soldiers wait in the building that
+// trained them. These two put a scenario together the way the old pool did —
+// `stock` says "this empire has N of these standing at home", `deployFrom`
+// sends them out — so the cases below stay about fighting and marching rather
+// than about where a barracks is.
+//
+// The trainer is raised if the empire has not got one. Placed straight through
+// placeBuilding, finished, and free: a test that wants ten swordsmen should not
+// have to buy a barracks and wait fourteen seconds for it first.
+function trainerOf(m, player, type) {
+  for (const b of Object.values(player.buildings)) {
+    if (m.trainsType(b.type) === type) return b;
+  }
+  const btype = Object.keys(cfg.BUILDING_TYPES).find(k => cfg.BUILDING_TYPES[k].trains === type);
+  if (!btype) return null;
+  for (let r = 2; r <= 14; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const x = player.baseX + dx, y = player.baseY + dy;
+        if (!m.canBuildAt(player, x, y)) continue;
+        const def = cfg.BUILDING_TYPES[btype];
+        return m.placeBuilding(player, {
+          x, y, type: btype, maxHp: def.hp, hp: def.hp,
+          underConstruction: false, remainingSec: 0, trainQueue: [], ready: 0,
+          // Staging, not spending: builtin keeps it off buildingsUsed, so a
+          // case about the building LIMIT is not quietly charged for the
+          // barracks its troops had to come out of.
+          builtin: true,
+        });
+      }
+    }
+  }
+  return null;
+}
+function stock(m, player, type, n) {
+  const b = trainerOf(m, player, type);
+  if (b) b.ready = n;
+  return b;
+}
+function stockAll(m, player, units) {
+  for (const t in units) stock(m, player, t, units[t]);
+}
+function deployFrom(m, playerId, type, n, x, y) {
+  const player = m.players.get(playerId);
+  const b = trainerOf(m, player, type);
+  // Nothing TRAINS a golem or a colossus — they walk out of a shrine — so the
+  // ones no building makes are raised the way the game raises them.
+  if (!b) { m.spawnArmy(player, type, n, 'move', { x, y }); return; }
+  if ((b.ready || 0) < n) b.ready = n;
+  m.cmdDeployFrom(playerId, b.x, b.y, n, x, y);
+}
+
+// A finished bank on free ground near the keep, for cases that need somewhere
+// to put villagers.
+function buildBank(m, player) {
+  for (let r = 2; r <= 14; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const x = player.baseX + dx, y = player.baseY + dy;
+        if (!m.canBuildAt(player, x, y)) continue;
+        const def = cfg.BUILDING_TYPES.bank;
+        return m.placeBuilding(player, {
+          x, y, type: 'bank', maxHp: def.hp, hp: def.hp,
+          underConstruction: false, remainingSec: 0, trainQueue: [], stored: 0,
+          builtin: true,
+        });
+      }
+    }
+  }
+  return null;
+}
+
+function deployAll(m, playerId, units, x, y) {
+  for (const t in units) if (units[t] > 0) deployFrom(m, playerId, t, units[t], x, y);
+}
 
 let failures = 0;
 const check = (label, ok, detail) => {
@@ -130,7 +208,7 @@ for (const how of ['army', 'direct']) {
 
   if (how === 'army') {
     m.getCastle(doomed).hp = 1;
-    killer.idleUnits.swordsman = 60;
+    stock(m, killer, 'swordsman', 60);
     sendAt(m, 'k', { swordsman: 60 }, 'player', doomed.id);
     for (let i = 0; i < 8000 && doomed.alive; i++) m.tick(0.2);
   } else {
@@ -185,7 +263,7 @@ for (const how of ['army', 'direct']) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.swordsman = 3;
+  stock(m, p, 'swordsman', 3);
   p.woundCarry = 25;
   const hurt = m.homeDefense(p).hp;
   for (let i = 0; i < 100; i++) m.tick(0.2);          // 20 quiet seconds
@@ -280,8 +358,8 @@ for (const how of ['army', 'direct']) {
   check('the tower is standing', !!tower && !tower.underConstruction);
 
   // A raiding party marching past, just inside range but not attacking anyone.
-  raider.idleUnits.swordsman = 10;
-  m.cmdDeployUnits('r', { swordsman: 10 }, yard(raider, 0).x, yard(raider, 0).y);
+  stock(m, raider, 'swordsman', 10);
+  deployFrom(m, 'r', 'swordsman', 10, yard(raider, 0).x, yard(raider, 0).y);
   const army = [...m.armies.values()][0];
   army.x = tx + 3; army.y = ty; army.order = 'hold';
   const startHp = armyHp(army);
@@ -367,7 +445,7 @@ function walledMatch(gap) {
 
 function marchAt(setup, units) {
   const { m, attacker, defender } = setup;
-  attacker.idleUnits.swordsman = units + 20;
+  stock(m, attacker, 'swordsman', units + 20);
   sendAt(m, 'a', { swordsman: units }, 'player', 'd');
   const id = [...m.armies.values()][0].id;
   const wallCount = () => Object.values(defender.buildings).filter(b => b.type === 'wall').length;
@@ -411,7 +489,7 @@ function marchAt(setup, units) {
 // soaked by a wall on the far side of the empire.
 {
   const { m, attacker, defender } = walledMatch(false);
-  attacker.idleUnits.swordsman = 60;
+  stock(m, attacker, 'swordsman', 60);
   sendAt(m, 'a', { swordsman: 40 }, 'player', 'd');
   const id = [...m.armies.values()][0].id;
   let hit = null;
@@ -438,7 +516,7 @@ function marchAt(setup, units) {
   // Asserted by emptying the garrison: whatever stonework is standing, an empire
   // with nobody home has nothing in the pool. That survives the fields of the
   // pool being renamed, which the old check on `.structures` did not.
-  defender.idleUnits = {};
+  stockAll(m, defender, {});
   const bare = m.homeDefense(defender);
   check('an empire with no garrison has no defence pool, whatever it has built',
     bare.power === 0 && bare.hp === 0,
@@ -455,7 +533,7 @@ function marchAt(setup, units) {
 // owner's troops inside it.
 {
   const { m, attacker, defender } = walledMatch(false);
-  defender.idleUnits.swordsman = 30;
+  stock(m, defender, 'swordsman', 30);
   sendAt(m, 'd', { swordsman: 20 }, 'player', 'a');
   const id = [...m.armies.values()][0].id;
   let out = false;
@@ -491,7 +569,7 @@ function abilityMatch(myRace, theirRace) {
     if (!ab) { allHave = false; continue; }
     const { m, me } = abilityMatch(race, 'human');
     // Reincarnation needs something to raise, so give it a wounded army.
-    me.idleUnits.swordsman = 10;
+    stock(m, me, 'swordsman', 10);
     sendAt(m, 'me', { swordsman: 10 }, 'camp', m.aiCamps[0].id);
     const army = [...m.armies.values()][0];
     m.damageArmy(army, armyMaxHp(army) * 0.5);
@@ -557,7 +635,7 @@ function abilityMatch(myRace, theirRace) {
 // raises nobody who never marched out.
 {
   const { m, me } = abilityMatch('undead', 'human');
-  me.idleUnits.swordsman = 20;
+  stock(m, me, 'swordsman', 20);
   sendAt(m, 'me', { swordsman: 20 }, 'camp', m.aiCamps[0].id);
   const army = [...m.armies.values()][0];
   m.damageArmy(army, armyMaxHp(army) * 0.6);
@@ -580,7 +658,7 @@ function abilityMatch(myRace, theirRace) {
 // Out of range is out of range, and a cast that raises nothing costs nothing.
 {
   const { m, me } = abilityMatch('undead', 'human');
-  me.idleUnits.swordsman = 20;
+  stock(m, me, 'swordsman', 20);
   sendAt(m, 'me', { swordsman: 20 }, 'camp', m.aiCamps[0].id);
   const army = [...m.armies.values()][0];
   m.damageArmy(army, armyMaxHp(army) * 0.6);
@@ -732,7 +810,7 @@ function openTiles(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null; p.gold = 99999;
-  p.idleUnits.swordsman = 6; p.idleUnits.knight = 4; p.idleUnits.catapult = 2;
+  stock(m, p, 'swordsman', 6); stock(m, p, 'knight', 4); stock(m, p, 'catapult', 2);
   sendAt(m, 'p', { swordsman: 6, knight: 4, catapult: 2 }, 'camp', m.aiCamps[0].id);
   const armies = [...m.armies.values()];
   check('a mixed send raises one army per kind of soldier',
@@ -754,7 +832,7 @@ function openTiles(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.swordsman = 6;
+  stock(m, p, 'swordsman', 6);
   sendAt(m, 'p', { swordsman: 6 }, 'camp', m.aiCamps[0].id);
   const a = [...m.armies.values()][0];
   const soldier = cfg.UNIT_TYPES.swordsman.hp;
@@ -789,18 +867,22 @@ function openTiles(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.swordsman = 8;
-  m.cmdDeployUnits('p', { swordsman: 8 }, yard(p, 2).x, yard(p, 2).y);
+  stock(m, p, 'swordsman', 8);
+  deployFrom(m, 'p', 'swordsman', 8, yard(p, 2).x, yard(p, 2).y);
   const a = [...m.armies.values()][0];
   m.damageArmy(a, cfg.UNIT_TYPES.swordsman.hp * 2.5);
   const survivors = armyCount(a);
   check('the group is short two and carrying a wound',
     survivors === 6 && armyWounded(a) === 1, `${survivors} left`);
-  m.cmdRecallArmy('p', a.id);
-  for (let t = 0; t < 600 && m.armies.size; t++) m.tick(0.2);
-  check('survivors rejoin the garrison',
-    p.idleUnits.swordsman === survivors, `${p.idleUnits.swordsman} idle`);
-  check('and the dead do not', p.idleUnits.swordsman === 6);
+  // There is no way home any more. Marching back used to fold survivors into
+  // the empire's pool and heal them whole; troops wait in the building that
+  // made them now and there is no pool to rejoin, so a group that has left is
+  // out until it dies. The wound stays on it.
+  for (let t = 0; t < 600; t++) m.tick(0.2);
+  check('a group that has marched out stays out',
+    m.armies.has(a.id) && armyCount(a) === survivors, `${armyCount(a)} still in the field`);
+  check('  and nothing has quietly rejoined the garrison',
+    m.garrisonUnits(p).swordsman === 0, `${m.garrisonUnits(p).swordsman} at home`);
 }
 
 // What goes on the wire is what the client draws, and no more.
@@ -808,7 +890,7 @@ function openTiles(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.knight = 5;
+  stock(m, p, 'knight', 5);
   sendAt(m, 'p', { knight: 5 }, 'camp', m.aiCamps[0].id);
   const a = [...m.armies.values()][0];
   m.damageArmy(a, cfg.UNIT_TYPES.knight.hp * 1.5);
@@ -837,9 +919,9 @@ function farTile(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.swordsman = 10;
+  stock(m, p, 'swordsman', 10);
   const far = farTile(m, p, 30);
-  m.cmdDeployUnits('p', { swordsman: 10 }, yard(p, 2).x, yard(p, 2).y);
+  deployFrom(m, 'p', 'swordsman', 10, yard(p, 2).x, yard(p, 2).y);
   const a = [...m.armies.values()][0];
   check('a group musters inside your own ground', !!a);
   m.cmdMoveArmy('p', a.id, far.x, far.y);
@@ -855,7 +937,7 @@ function farTile(m, p, want) {
     m.armies.has(a.id) && a.order === 'hold' &&
     Math.round(a.x) === far.x && Math.round(a.y) === far.y, `${a.order}`);
   check('nobody wandered home on their own',
-    p.idleUnits.swordsman === 0, `${p.idleUnits.swordsman} back in the keep`);
+    m.garrisonUnits(p).swordsman === 0, `${m.garrisonUnits(p).swordsman} back in the keep`);
 }
 
 // A group that has finished a fight holds the ground it fought on, rather than
@@ -865,7 +947,7 @@ function farTile(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.swordsman = 20;
+  stock(m, p, 'swordsman', 20);
   const camp = m.aiCamps.find(c => !c.defeated);
   const goldBefore = p.gold;
   sendAt(m, 'p', { swordsman: 20 }, 'camp', camp.id);
@@ -885,13 +967,13 @@ function farTile(m, p, want) {
     Math.abs(p.gold - goldBefore) < 0.01, `${Math.round(goldBefore)} -> ${Math.round(p.gold)}`);
   for (let t = 0; t < 900; t++) m.tick(0.2);
   check('it does not drift off afterwards',
-    m.armies.has(a.id) && a.order === 'hold' && p.idleUnits.swordsman === 0);
+    m.armies.has(a.id) && a.order === 'hold' && m.garrisonUnits(p).swordsman === 0);
 
-  // Marching home is now an order of its own, and it still works.
-  m.cmdRecallArmy('p', a.id);
-  for (let t = 0; t < 8000 && m.armies.has(a.id); t++) m.tick(0.2);
-  check('Recall is the way home, and the survivors rejoin the garrison',
-    !m.armies.has(a.id) && p.idleUnits.swordsman > 0, `${p.idleUnits.swordsman} home`);
+  // And there is no recall to bring it back: taking ground is a commitment.
+  for (let t = 0; t < 8000; t++) m.tick(0.2);
+  check('there is no way home, so it holds the ground it took',
+    m.armies.has(a.id) && m.garrisonUnits(p).swordsman === 0,
+    m.armies.has(a.id) ? 'still holding' : 'the group vanished');
 }
 
 // Held groups take new orders: somewhere else to stand, or something to hit.
@@ -899,9 +981,9 @@ function farTile(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.swordsman = 12;
+  stock(m, p, 'swordsman', 12);
   const first = farTile(m, p, 20);
-  m.cmdDeployUnits('p', { swordsman: 12 }, yard(p, 2).x, yard(p, 2).y);
+  deployFrom(m, 'p', 'swordsman', 12, yard(p, 2).x, yard(p, 2).y);
   const a = [...m.armies.values()][0];
   m.cmdMoveArmy('p', a.id, first.x, first.y);
   for (let t = 0; t < 4000 && a.order !== 'hold'; t++) m.tick(0.2);
@@ -931,12 +1013,12 @@ function farTile(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.swordsman = 14;
+  stock(m, p, 'swordsman', 14);
   const soldier = cfg.UNIT_TYPES.swordsman.hp;
-  m.cmdDeployUnits('p', { swordsman: 8 }, yard(p, 5).x, yard(p, 5).y);
+  deployFrom(m, 'p', 'swordsman', 8, yard(p, 5).x, yard(p, 5).y);
   const a = [...m.armies.values()][0];
   m.damageArmy(a, soldier * 2.5);                 // 6 left, one of them wounded
-  m.cmdDeployUnits('p', { swordsman: 6 }, yard(p, 4).x, yard(p, 4).y);
+  deployFrom(m, 'p', 'swordsman', 6, yard(p, 4).x, yard(p, 4).y);
   const b = [...m.armies.values()][1];
 
   m.cmdMergeArmy('p', b.id, a.id);
@@ -960,9 +1042,9 @@ function farTile(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.swordsman = 5; p.idleUnits.knight = 4;
-  m.cmdDeployUnits('p', { swordsman: 5 }, yard(p, 5).x, yard(p, 5).y);
-  m.cmdDeployUnits('p', { knight: 4 }, yard(p, 4).x, yard(p, 4).y);
+  stock(m, p, 'swordsman', 5); stock(m, p, 'knight', 4);
+  deployFrom(m, 'p', 'swordsman', 5, yard(p, 5).x, yard(p, 5).y);
+  deployFrom(m, 'p', 'knight', 4, yard(p, 4).x, yard(p, 4).y);
   const sw = [...m.armies.values()].find(x => x.type === 'swordsman');
   const kn = [...m.armies.values()].find(x => x.type === 'knight');
   m.events.length = 0;
@@ -979,9 +1061,9 @@ function farTile(m, p, want) {
   const p = m.addPlayer('p', 'human', 'P');
   const q = m.addPlayer('q', 'human', 'Q');
   p.draft = q.draft = null;
-  p.idleUnits.swordsman = 5; q.idleUnits.swordsman = 5;
-  m.cmdDeployUnits('p', { swordsman: 5 }, yard(p, 5).x, yard(p, 5).y);
-  m.cmdDeployUnits('q', { swordsman: 5 }, yard(q, 5).x, yard(q, 5).y);
+  stock(m, p, 'swordsman', 5); stock(m, q, 'swordsman', 5);
+  deployFrom(m, 'p', 'swordsman', 5, yard(p, 5).x, yard(p, 5).y);
+  deployFrom(m, 'q', 'swordsman', 5, yard(q, 5).x, yard(q, 5).y);
   const mine = [...m.armies.values()].find(x => x.ownerId === 'p');
   const theirs = [...m.armies.values()].find(x => x.ownerId === 'q');
   m.cmdMergeArmy('p', mine.id, theirs.id);
@@ -999,9 +1081,9 @@ function farTile(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.swordsman = 10;
-  m.cmdDeployUnits('p', { swordsman: 5 }, yard(p, 5).x, yard(p, 5).y);
-  m.cmdDeployUnits('p', { swordsman: 5 }, yard(p, 4).x, yard(p, 4).y);
+  stock(m, p, 'swordsman', 10);
+  deployFrom(m, 'p', 'swordsman', 5, yard(p, 5).x, yard(p, 5).y);
+  deployFrom(m, 'p', 'swordsman', 5, yard(p, 4).x, yard(p, 4).y);
   const a = [...m.armies.values()][0], b = [...m.armies.values()][1];
   // Both were raised at the keep and are standing on each other until they
   // march, and a merge ordered now would finish on the first tick. Let them
@@ -1026,9 +1108,9 @@ function farTile(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.swordsman = 20;
+  stock(m, p, 'swordsman', 20);
   const soldier = cfg.UNIT_TYPES.swordsman.hp;
-  m.cmdDeployUnits('p', { swordsman: 20 }, yard(p, 2).x, yard(p, 2).y);
+  deployFrom(m, 'p', 'swordsman', 20, yard(p, 2).x, yard(p, 2).y);
   const a = [...m.armies.values()][0];
   m.damageArmy(a, soldier * 1.5);                 // 19 left, one of them wounded
   const livingBefore = armyCount(a), hpBefore = armyHp(a), musteredBefore = a.mustered;
@@ -1067,8 +1149,8 @@ function farTile(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.swordsman = 12;
-  m.cmdDeployUnits('p', { swordsman: 12 }, yard(p, 2).x, yard(p, 2).y);
+  stock(m, p, 'swordsman', 12);
+  deployFrom(m, 'p', 'swordsman', 12, yard(p, 2).x, yard(p, 2).y);
   const a = [...m.armies.values()][0];
   m.damageArmy(a, cfg.UNIT_TYPES.swordsman.hp * 2.5);
   const roster = a.roster.slice().sort((x, y) => x - y).join(',');
@@ -1087,8 +1169,8 @@ function farTile(m, p, want) {
   const p = m.addPlayer('p', 'human', 'P');
   const q = m.addPlayer('q', 'human', 'Q');
   p.draft = q.draft = null;
-  p.idleUnits.swordsman = 10;
-  m.cmdDeployUnits('p', { swordsman: 10 }, yard(p, 2).x, yard(p, 2).y);
+  stock(m, p, 'swordsman', 10);
+  deployFrom(m, 'p', 'swordsman', 10, yard(p, 2).x, yard(p, 2).y);
   const a = [...m.armies.values()][0];
 
   check('a count of nobody is refused', m.cmdSplitArmy('p', a.id, 0) === null);
@@ -1134,8 +1216,10 @@ function farTile(m, p, want) {
   p.draft = null;
   check('there is no raise-and-attack command left',
     typeof m.cmdSendArmy === 'undefined');
-  check('deploying is', typeof m.cmdDeployUnits === 'function' &&
+  check('deploying is still two steps', typeof m.cmdDeployFrom === 'function' &&
     typeof m.cmdAttackArmy === 'function');
+  check('  and the empire-wide pool is gone with its command',
+    typeof m.cmdDeployUnits === 'undefined' && typeof m.cmdRecallArmy === 'undefined');
 }
 
 // Deploying into your own ground, including an outpost you have taken, which is
@@ -1144,7 +1228,7 @@ function farTile(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.swordsman = 30;
+  stock(m, p, 'swordsman', 30);
   const camp = m.aiCamps.find(c => !c.defeated);
   sendAt(m, 'p', { swordsman: 20 }, 'camp', camp.id);
   const raiders = [...m.armies.values()][0];
@@ -1154,7 +1238,7 @@ function farTile(m, p, want) {
 
   // Now put a fresh garrison into that outpost.
   const out = p.outposts[0];
-  m.cmdDeployUnits('p', { swordsman: 10 }, out.x, out.y);
+  deployFrom(m, 'p', 'swordsman', 10, out.x, out.y);
   const relief = [...m.armies.values()].find(a => a.id !== raiders.id);
   check('a second group can be deployed to the outpost', !!relief);
   for (let t = 0; t < 8000 && relief.order !== 'hold'; t++) m.tick(0.2);
@@ -1162,8 +1246,8 @@ function farTile(m, p, want) {
     relief.order === 'hold' && Math.hypot(relief.x - out.x, relief.y - out.y) < 1.5,
     `${relief.order} at ${Math.round(relief.x)},${Math.round(relief.y)}`);
   check('deploying into your own border works the same way', (() => {
-    p.idleUnits.swordsman += 5;
-    m.cmdDeployUnits('p', { swordsman: 5 }, yard(p, 2).x, yard(p, 2).y);
+    stock(m, p, 'swordsman', (m.garrisonUnits(p).swordsman || 0) + (5));
+    deployFrom(m, 'p', 'swordsman', 5, yard(p, 2).x, yard(p, 2).y);
     return [...m.armies.values()].length === 3;
   })());
 }
@@ -1176,7 +1260,7 @@ function farTile(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.catapult = 4;
+  stock(m, p, 'catapult', 4);
   const camp = m.aiCamps.find(c => !c.defeated);
   sendAt(m, 'p', { catapult: 4 }, 'camp', camp.id);
   const a = [...m.armies.values()][0];
@@ -1205,7 +1289,7 @@ function farTile(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.swordsman = 20;
+  stock(m, p, 'swordsman', 20);
   const camp = m.aiCamps.find(c => !c.defeated);
   sendAt(m, 'p', { swordsman: 20 }, 'camp', camp.id);
   const a = [...m.armies.values()][0];
@@ -1223,18 +1307,18 @@ function farTile(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.swordsman = 40;
+  stock(m, p, 'swordsman', 40);
   const far = farTile(m, p, 25);
 
   m.events.length = 0;
-  m.cmdDeployUnits('p', { swordsman: 5 }, far.x, far.y);
+  deployFrom(m, 'p', 'swordsman', 5, far.x, far.y);
   check('troops cannot be deployed outside your territory',
-    m.armies.size === 0 && p.idleUnits.swordsman === 40, `${m.armies.size} armies`);
+    m.armies.size === 0 && m.garrisonUnits(p).swordsman === 40, `${m.armies.size} armies`);
   check('and the refusal says so',
     m.events.some(e => e.playerId === 'p' && /inside your own territory/.test(e.text)),
     (m.events[0] || {}).text);
 
-  m.cmdDeployUnits('p', { swordsman: 5 }, yard(p, 2).x, yard(p, 2).y);
+  deployFrom(m, 'p', 'swordsman', 5, yard(p, 2).x, yard(p, 2).y);
   check('inside your border they muster fine', m.armies.size === 1);
 
   // ...and once they are on their feet, the map is open to them.
@@ -1252,7 +1336,7 @@ function farTile(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.swordsman = 40;
+  stock(m, p, 'swordsman', 40);
   const camp = m.aiCamps.find(c => !c.defeated);
   sendAt(m, 'p', { swordsman: 20 }, 'camp', camp.id);
   const raiders = [...m.armies.values()][0];
@@ -1262,7 +1346,7 @@ function farTile(m, p, want) {
   check('a captured outpost is outside the home border',
     Math.hypot(out.x - p.baseX, out.y - p.baseY) > m.buildRadius(p),
     `${Math.round(Math.hypot(out.x - p.baseX, out.y - p.baseY))} tiles from home`);
-  m.cmdDeployUnits('p', { swordsman: 10 }, out.x, out.y);
+  deployFrom(m, 'p', 'swordsman', 10, out.x, out.y);
   check('but troops can still be mustered into it', m.armies.size === 2);
 }
 
@@ -1271,7 +1355,7 @@ function farTile(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.catapult = 4; p.idleUnits.swordsman = 20;
+  stock(m, p, 'catapult', 4); stock(m, p, 'swordsman', 20);
   const camp = m.aiCamps.find(c => !c.defeated);
 
   sendAt(m, 'p', { catapult: 4 }, 'camp', camp.id);
@@ -1302,7 +1386,7 @@ function farTile(m, p, want) {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
   p.draft = null;
-  p.idleUnits.swordsman = 20;
+  stock(m, p, 'swordsman', 20);
   const camp = m.aiCamps.find(c => !c.defeated);
   sendAt(m, 'p', { swordsman: 20 }, 'camp', camp.id);
   const a = [...m.armies.values()][0];
@@ -1385,9 +1469,9 @@ function facingOff(aCount, bCount) {
   const a = m.addPlayer('a', 'human', 'A'), b = m.addPlayer('b', 'human', 'B');
   m.start();
   a.draft = b.draft = null;
-  a.idleUnits.swordsman = aCount; b.idleUnits.swordsman = bCount;
-  m.cmdDeployUnits('a', { swordsman: aCount }, yard(a, 0).x, yard(a, 0).y);
-  m.cmdDeployUnits('b', { swordsman: bCount }, yard(b, 0).x, yard(b, 0).y);
+  stock(m, a, 'swordsman', aCount); stock(m, b, 'swordsman', bCount);
+  deployFrom(m, 'a', 'swordsman', aCount, yard(a, 0).x, yard(a, 0).y);
+  deployFrom(m, 'b', 'swordsman', bCount, yard(b, 0).x, yard(b, 0).y);
   const A = [...m.armies.values()].find(x => x.ownerId === 'a');
   const B = [...m.armies.values()].find(x => x.ownerId === 'b');
   A.x = 50; A.y = 40; A.order = 'hold';
@@ -1460,9 +1544,9 @@ function facingOff(aCount, bCount) {
   const m = new Match({ started: false });
   const p = m.addPlayer('p', 'human', 'P');
   m.start(); p.draft = null;
-  p.idleUnits.swordsman = 10;
-  m.cmdDeployUnits('p', { swordsman: 5 }, yard(p, 2).x, yard(p, 2).y);
-  m.cmdDeployUnits('p', { swordsman: 5 }, yard(p, 4).x, yard(p, 4).y);
+  stock(m, p, 'swordsman', 10);
+  deployFrom(m, 'p', 'swordsman', 5, yard(p, 2).x, yard(p, 2).y);
+  deployFrom(m, 'p', 'swordsman', 5, yard(p, 4).x, yard(p, 4).y);
   const [x, y] = [...m.armies.values()];
   m.cmdAttackArmy('p', x.id, 'army', y.id);
   check('you cannot order your own groups to attack each other',
@@ -1690,9 +1774,9 @@ function facingOff(aCount, bCount) {
   const m = new Match({ started: false });
   const p = m.addPlayer('p', 'human', 'P');
   m.start(); p.draft = null;
-  p.idleUnits.swordsman = 5;
+  stock(m, p, 'swordsman', 5);
   m.drainExplored('p');
-  m.cmdDeployUnits('p', { swordsman: 5 }, yard(p, 2).x, yard(p, 2).y);
+  deployFrom(m, 'p', 'swordsman', 5, yard(p, 2).x, yard(p, 2).y);
   const army = [...m.armies.values()][0];
   let dest = null;
   for (let d = 40; d > 10 && !dest; d--) {
@@ -1722,9 +1806,9 @@ function facingOff(aCount, bCount) {
   const m = new Match({ started: false });
   const a = m.addPlayer('a', 'human', 'A'), b = m.addPlayer('b', 'orc', 'B');
   m.start(); a.draft = b.draft = null;
-  a.idleUnits.swordsman = 5; b.idleUnits.swordsman = 5;
-  m.cmdDeployUnits('a', { swordsman: 5 }, yard(a, 2).x, yard(a, 2).y);
-  m.cmdDeployUnits('b', { swordsman: 5 }, yard(b, 2).x, yard(b, 2).y);
+  stock(m, a, 'swordsman', 5); stock(m, b, 'swordsman', 5);
+  deployFrom(m, 'a', 'swordsman', 5, yard(a, 2).x, yard(a, 2).y);
+  deployFrom(m, 'b', 'swordsman', 5, yard(b, 2).x, yard(b, 2).y);
   const all = m.serialize().armies;
   check('both groups exist on the server', all.length === 2);
   check('but each empire is only shown its own while they are apart',
@@ -1885,9 +1969,9 @@ function facingOff(aCount, bCount) {
   const m = new Match({ started: false, map: 'openfield' });
   const a = m.addPlayer('a', 'human', 'A'), b = m.addPlayer('b', 'human', 'B');
   m.start(); a.draft = b.draft = null;
-  a.idleUnits.swordsman = 20; b.idleUnits.swordsman = 20;
-  m.cmdDeployUnits('a', { swordsman: 20 }, yard(a, 0).x, yard(a, 0).y);
-  m.cmdDeployUnits('b', { swordsman: 20 }, yard(b, 0).x, yard(b, 0).y);
+  stock(m, a, 'swordsman', 20); stock(m, b, 'swordsman', 20);
+  deployFrom(m, 'a', 'swordsman', 20, yard(a, 0).x, yard(a, 0).y);
+  deployFrom(m, 'b', 'swordsman', 20, yard(b, 0).x, yard(b, 0).y);
   const A = [...m.armies.values()].find(x => x.ownerId === 'a');
   const B = [...m.armies.values()].find(x => x.ownerId === 'b');
   // Somewhere with room on every side, so the stance is not cramped by terrain.
@@ -1932,9 +2016,9 @@ function facingOff(aCount, bCount) {
     const m = new Match({ started: false, map: id });
     const p = m.addPlayer('p', 'human', 'P');
     m.start(); p.draft = null;
-    p.idleUnits.swordsman = 20;
+    stock(m, p, 'swordsman', 20);
     const camp = m.aiCamps.find(c => !c.defeated);
-    m.cmdDeployUnits('p', { swordsman: 20 }, yard(p, 0).x, yard(p, 0).y);
+    deployFrom(m, 'p', 'swordsman', 20, yard(p, 0).x, yard(p, 0).y);
     const army = [...m.armies.values()][0];
     m.cmdAttackArmy('p', army.id, 'camp', camp.id);
     for (let t = 0; t < 14000 && army.order !== 'fight'; t++) m.tick(0.2);
@@ -1967,18 +2051,21 @@ function clearLane(m, x0, x1, y0, y1) {
   const m = new Match({ started: false, map: 'openfield' });
   const p = m.addPlayer('p', 'human', 'P');
   m.start(); p.draft = null;
-  p.idleUnits.swordsman = 10;
+  // Workers, because the gate is the KEEP's and troops come out of the
+  // building that trained them now — a swordsman leaving a barracks on the far
+  // side of the compound has nothing to do with the portcullis.
+  stock(m, p, 'worker', 10);
   m.effects.length = 0;
-  m.cmdDeployUnits('p', { swordsman: 10 }, p.baseX, p.baseY + 2);
+  deployFrom(m, 'p', 'worker', 10, p.baseX, p.baseY + 2);
   const gates = m.effects.filter(e => e.kind === 'gate');
-  check('deploying troops opens the keep gate',
+  check('deploying from the keep opens its gate',
     gates.length === 1 && gates[0].x === p.baseX && gates[0].y === p.baseY,
     gates.length ? `(${gates[0].x},${gates[0].y}) against a seat at (${p.baseX},${p.baseY})` : 'no effect');
 
   // A deploy that is refused must not open it.
   m.effects.length = 0;
-  p.idleUnits.swordsman = 10;
-  m.cmdDeployUnits('p', { swordsman: 10 }, 5, 5);
+  stock(m, p, 'swordsman', 10);
+  deployFrom(m, 'p', 'swordsman', 10, 5, 5);
   check('  and a deploy outside your territory does not',
     m.effects.filter(e => e.kind === 'gate').length === 0,
     `${m.effects.filter(e => e.kind === 'gate').length} gates`);
@@ -1995,9 +2082,9 @@ function clearLane(m, x0, x1, y0, y1) {
   const a = m.addPlayer('a', 'human', 'A');
   const b = m.addPlayer('b', 'human', 'B');
   m.start(); a.draft = null; b.draft = null;
-  a.idleUnits.swordsman = 10; b.idleUnits.swordsman = 10;
-  m.cmdDeployUnits('a', { swordsman: 10 }, yard(a, 0).x, yard(a, 0).y);
-  m.cmdDeployUnits('b', { swordsman: 10 }, yard(b, 0).x, yard(b, 0).y);
+  stock(m, a, 'swordsman', 10); stock(m, b, 'swordsman', 10);
+  deployFrom(m, 'a', 'swordsman', 10, yard(a, 0).x, yard(a, 0).y);
+  deployFrom(m, 'b', 'swordsman', 10, yard(b, 0).x, yard(b, 0).y);
   const [A, B] = [...m.armies.values()];
   A.x = 60; A.y = 60; B.x = 60.4; B.y = 60;
   clearLane(m, 58, 102, 58, 62);            // no lake on the corridor: this is not a routing test
@@ -2015,9 +2102,9 @@ function clearLane(m, x0, x1, y0, y1) {
   const c = m2.addPlayer('c', 'human', 'C');
   const d = m2.addPlayer('d', 'human', 'D');
   m2.start(); c.draft = null; d.draft = null;
-  c.idleUnits.swordsman = 10; d.idleUnits.swordsman = 10;
-  m2.cmdDeployUnits('c', { swordsman: 10 }, yard(c, 0).x, yard(c, 0).y);
-  m2.cmdDeployUnits('d', { swordsman: 10 }, yard(d, 0).x, yard(d, 0).y);
+  stock(m2, c, 'swordsman', 10); stock(m2, d, 'swordsman', 10);
+  deployFrom(m2, 'c', 'swordsman', 10, yard(c, 0).x, yard(c, 0).y);
+  deployFrom(m2, 'd', 'swordsman', 10, yard(d, 0).x, yard(d, 0).y);
   const [C, D] = [...m2.armies.values()];
   C.x = 60; C.y = 60; D.x = 60.4; D.y = 60;
   m2.holdPosition(D);
@@ -2055,9 +2142,9 @@ function clearLane(m, x0, x1, y0, y1) {
   const a = m.addPlayer('a', 'human', 'A');
   const b = m.addPlayer('b', 'human', 'B');
   m.start(); a.draft = null; b.draft = null;
-  a.idleUnits.swordsman = 1; b.idleUnits.swordsman = 30;
-  m.cmdDeployUnits('a', { swordsman: 1 }, yard(a, 0).x, yard(a, 0).y);
-  m.cmdDeployUnits('b', { swordsman: 30 }, yard(b, 0).x, yard(b, 0).y);
+  stock(m, a, 'swordsman', 1); stock(m, b, 'swordsman', 30);
+  deployFrom(m, 'a', 'swordsman', 1, yard(a, 0).x, yard(a, 0).y);
+  deployFrom(m, 'b', 'swordsman', 30, yard(b, 0).x, yard(b, 0).y);
   const [A, B] = [...m.armies.values()];
   A.x = 60; A.y = 60; B.x = 60.4; B.y = 60;
   m.holdPosition(B);
@@ -2103,8 +2190,8 @@ function clearLane(m, x0, x1, y0, y1) {
   const m = new Match({ started: false, map: 'lakelands' });
   const p = m.addPlayer('p', 'human', 'P');
   m.start(); p.draft = null;
-  p.idleUnits.swordsman = 10;
-  m.cmdDeployUnits('p', { swordsman: 10 }, yard(p, 0).x, yard(p, 0).y);
+  stock(m, p, 'swordsman', 10);
+  deployFrom(m, 'p', 'swordsman', 10, yard(p, 0).x, yard(p, 0).y);
   const army = [...m.armies.values()][0];
   const T = m.terrain, W = T[0].length, H = T.length;
   const sx = army.x, sy = army.y;
@@ -2181,8 +2268,8 @@ function clearLane(m, x0, x1, y0, y1) {
   const m = new Match({ started: false, map: 'openfield' });
   const p = m.addPlayer('p', 'human', 'P');
   m.start(); p.draft = null;
-  p.idleUnits.swordsman = 10;
-  m.cmdDeployUnits('p', { swordsman: 10 }, yard(p, 0).x, yard(p, 0).y);
+  stock(m, p, 'swordsman', 10);
+  deployFrom(m, 'p', 'swordsman', 10, yard(p, 0).x, yard(p, 0).y);
   const army = [...m.armies.values()][0];
   // Moat the group in: a ring of water with no gap, well clear of its own tile.
   const cx = Math.round(army.x), cy = Math.round(army.y);
@@ -2231,8 +2318,8 @@ function clearLane(m, x0, x1, y0, y1) {
   const walled = Object.values(b.buildings).filter(x => x.type === 'wall').length;
   check('the defender is sealed in', walled > 30, `${walled} segments`);
 
-  a.idleUnits.swordsman = 40;
-  m.cmdDeployUnits('a', { swordsman: 40 }, yard(a, 0).x, yard(a, 0).y);
+  stock(m, a, 'swordsman', 40);
+  deployFrom(m, 'a', 'swordsman', 40, yard(a, 0).x, yard(a, 0).y);
   const army = [...m.armies.values()][0];
   m.cmdAttackArmy('a', army.id, 'player', 'b');
 
@@ -2262,9 +2349,9 @@ function clearLane(m, x0, x1, y0, y1) {
     const m = new Match({ started: false, map: 'openfield' });
     const p1 = m.addPlayer('p1', 'human', 'P1'), p2 = m.addPlayer('p2', 'human', 'P2');
     m.start(); p1.draft = null; p2.draft = null;
-    p1.idleUnits[typeA] = nA; p2.idleUnits[typeB] = nB;
-    m.cmdDeployUnits('p1', { [typeA]: nA }, yard(p1, 0).x, yard(p1, 0).y);
-    m.cmdDeployUnits('p2', { [typeB]: nB }, yard(p2, 0).x, yard(p2, 0).y);
+    stock(m, p1, typeA, nA); stock(m, p2, typeB, nB);
+    deployFrom(m, 'p1', typeA, nA, yard(p1, 0).x, yard(p1, 0).y);
+    deployFrom(m, 'p2', typeB, nB, yard(p2, 0).x, yard(p2, 0).y);
     const [A, B] = [...m.armies.values()];
     A.x = 60; A.y = 60; B.x = 62; B.y = 60;
     m.cmdAttackArmy('p1', A.id, 'army', B.id);
@@ -2286,11 +2373,11 @@ function clearLane(m, x0, x1, y0, y1) {
   const m2 = new Match();
   const d = m2.addPlayer('d', 'human', 'D');
   d.draft = null;
-  d.idleUnits = { swordsman: 10, knight: 10, catapult: 10 };
+  stockAll(m2, d, { swordsman: 10, knight: 10, catapult: 10 });
   m2.applyDefenderLosses(d, m2.homeDefense(d), 120);
   check('a garrison loses its cheapest troops first, not its ballistae',
-    d.idleUnits.catapult === 10 && d.idleUnits.swordsman < 10,
-    JSON.stringify(d.idleUnits));
+    m2.garrisonUnits(d).catapult === 10 && m2.garrisonUnits(d).swordsman < 10,
+    JSON.stringify(m2.garrisonUnits(d)));
 }
 
 // --- teams ----------------------------------------------------------------
@@ -2346,8 +2433,8 @@ function clearLane(m, x0, x1, y0, y1) {
   check('and allied is symmetric and excludes the enemy',
     m.allied('a', 'b') && m.allied('b', 'a') && !m.allied('a', 'e'));
 
-  a.idleUnits.swordsman = 5;
-  m.cmdDeployUnits('a', { swordsman: 5 }, yard(a, 0).x, yard(a, 0).y);
+  stock(m, a, 'swordsman', 5);
+  deployFrom(m, 'a', 'swordsman', 5, yard(a, 0).x, yard(a, 0).y);
   const army = [...m.armies.values()][0];
   m.cmdAttackArmy('a', army.id, 'player', 'b');
   check('an order aimed at an ally is refused', army.order !== 'attack', army.order);
@@ -2372,8 +2459,8 @@ function clearLane(m, x0, x1, y0, y1) {
   // at it. Shared vision is not only shared ground: what the side can see, the
   // side can see, and a teammate walking into a raid should put that raid on
   // everybody's minimap and not just on theirs.
-  e.idleUnits.swordsman = 5;
-  m.cmdDeployUnits('e', { swordsman: 5 }, yard(e, 0).x, yard(e, 0).y);
+  stock(m, e, 'swordsman', 5);
+  deployFrom(m, 'e', 'swordsman', 5, yard(e, 0).x, yard(e, 0).y);
   const foe = [...m.armies.values()].find(x => x.ownerId === 'e');
   check('an enemy group nowhere near either ally is shown to neither',
     !m.visibleArmiesFor('a', m.serialize().armies).some(x => x.ownerId === 'e') &&
@@ -2422,8 +2509,8 @@ function clearLane(m, x0, x1, y0, y1) {
   m.start(); a.draft = b.draft = null;
   check('with no teams nobody is allied', !m.allied('a', 'b') && m.allied('a', 'a'));
   check('and no player carries a side', a.team === null && b.team === null);
-  a.idleUnits.swordsman = 5;
-  m.cmdDeployUnits('a', { swordsman: 5 }, yard(a, 0).x, yard(a, 0).y);
+  stock(m, a, 'swordsman', 5);
+  deployFrom(m, 'a', 'swordsman', 5, yard(a, 0).x, yard(a, 0).y);
   const army = [...m.armies.values()][0];
   m.cmdAttackArmy('a', army.id, 'player', 'b');
   check('and anyone may be attacked', army.order === 'attack');
@@ -2441,9 +2528,9 @@ function clearLane(m, x0, x1, y0, y1) {
     const m = new Match({ started: false, map: 'openfield' });
     const a = m.addPlayer('a', 'human', 'A'), d = m.addPlayer('d', 'human', 'D');
     m.start(); a.draft = null; d.draft = null;
-    d.idleUnits = { swordsman: 6, knight: 0, catapult: 0 };
-    a.idleUnits.knight = groups * perGroup;
-    for (let g = 0; g < groups; g++) m.cmdDeployUnits('a', { knight: perGroup }, yard(a, 0).x, yard(a, 0).y);
+    stockAll(m, d, { swordsman: 6, knight: 0, catapult: 0 });
+    stock(m, a, 'knight', groups * perGroup);
+    for (let g = 0; g < groups; g++) deployFrom(m, 'a', 'knight', perGroup, yard(a, 0).x, yard(a, 0).y);
     for (const ar of m.armies.values()) {
       ar.x = d.baseX + 2; ar.y = d.baseY;
       m.cmdAttackArmy('a', ar.id, 'player', 'd');
@@ -2468,7 +2555,7 @@ function clearLane(m, x0, x1, y0, y1) {
   const m = new Match({ started: false, map: 'openfield' });
   const a = m.addPlayer('a', 'human', 'A'), d = m.addPlayer('d', 'human', 'D');
   m.start(); a.draft = null; d.draft = null;
-  d.idleUnits = { swordsman: 1, knight: 0, catapult: 0 };
+  stockAll(m, d, { swordsman: 1, knight: 0, catapult: 0 });
   d.woundCarry = 25;                       // one swordsman, all but dead
   const pool = m.homeDefense(d);
   const left = m.applyDefenderLosses(d, pool, 500);
@@ -2488,9 +2575,9 @@ function clearLane(m, x0, x1, y0, y1) {
     const m = new Match({ started: false, map: 'openfield' });
     const p1 = m.addPlayer('p1', 'human', 'P1'), p2 = m.addPlayer('p2', 'human', 'P2');
     m.start(); p1.draft = null; p2.draft = null;
-    p1.idleUnits.knight = nK; p2.idleUnits.swordsman = nS;
-    m.cmdDeployUnits('p1', { knight: nK }, yard(p1, 0).x, yard(p1, 0).y);
-    m.cmdDeployUnits('p2', { swordsman: nS }, yard(p2, 0).x, yard(p2, 0).y);
+    stock(m, p1, 'knight', nK); stock(m, p2, 'swordsman', nS);
+    deployFrom(m, 'p1', 'knight', nK, yard(p1, 0).x, yard(p1, 0).y);
+    deployFrom(m, 'p2', 'swordsman', nS, yard(p2, 0).x, yard(p2, 0).y);
     const [A, B] = [...m.armies.values()];
     A.x = 60; A.y = 60; B.x = 62; B.y = 60;
     m.cmdAttackArmy('p1', A.id, 'army', B.id);
@@ -2523,7 +2610,7 @@ function clearLane(m, x0, x1, y0, y1) {
     const m = new Match({ started: false, map: 'openfield' });
     const a = m.addPlayer('a', 'human', 'A'), d = m.addPlayer('d', 'human', 'D');
     m.start(); a.draft = null; d.draft = null; a.gold = d.gold = 999999;
-    d.idleUnits = { swordsman: 0, knight: 0, catapult: 0 };
+    stockAll(m, d, { swordsman: 0, knight: 0, catapult: 0 });
     let placed = 0;
     for (let r = 2; r <= 6 && placed < nTowers; r++) {
       for (let ang = 0; ang < 360 && placed < nTowers; ang += 25) {
@@ -2535,8 +2622,8 @@ function clearLane(m, x0, x1, y0, y1) {
       }
     }
     for (const b of Object.values(d.buildings)) b.underConstruction = false;
-    a.idleUnits.swordsman = 40;
-    m.cmdDeployUnits('a', { swordsman: 40 }, yard(a, 0).x, yard(a, 0).y);
+    stock(m, a, 'swordsman', 40);
+    deployFrom(m, 'a', 'swordsman', 40, yard(a, 0).x, yard(a, 0).y);
     const army = [...m.armies.values()][0];
     m.cmdAttackArmy('a', army.id, 'player', 'd');
     let t = 0;
@@ -2597,8 +2684,8 @@ function clearLane(m, x0, x1, y0, y1) {
   m.cmdBuildWall('d', ring);
   const standing = Object.values(d.buildings).filter(b => b.type === 'wall').length;
   check('the wall goes up', standing > 50, `${standing} segments`);
-  a.idleUnits.swordsman = 20;
-  m.cmdDeployUnits('a', { swordsman: 20 }, yard(a, 0).x, yard(a, 0).y);
+  stock(m, a, 'swordsman', 20);
+  deployFrom(m, 'a', 'swordsman', 20, yard(a, 0).x, yard(a, 0).y);
   const army = [...m.armies.values()][0];
   m.cmdAttackArmy('a', army.id, 'player', 'd');
   let firstDown = -1, t = 0;
@@ -2645,17 +2732,17 @@ function clearLane(m, x0, x1, y0, y1) {
   {
     const { m, a, d } = fresh(0);
     a.spells.curseOfSickness = 1;
-    d.idleUnits = { swordsman: 12, knight: 4, catapult: 2 };
+    stockAll(m, d, { swordsman: 12, knight: 4, catapult: 2 });
     buildNow(m, 'd', yard(d, 0).x, yard(d, 0).y, 'bank');
     const bank = d.buildings[`${yard(d, 0).x},${yard(d, 0).y}`];
     const castleHp = m.getCastle(d).hp;
     m.cmdCastSpell('a', 'curseOfSickness', d.baseX, d.baseY);
-    const lost = 12 - d.idleUnits.swordsman;
+    const lost = 12 - m.garrisonUnits(d).swordsman;
     check('Curse of Sickness cuts down a garrison', lost > 0, `${lost} swordsmen`);
     check('  and leaves their buildings alone', bank.hp === bank.maxHp && m.getCastle(d).hp === castleHp);
     // Nothing to wither means nothing spent.
     a.spells.curseOfSickness = 1;
-    d.idleUnits = { swordsman: 0, knight: 0, catapult: 0 };
+    stockAll(m, d, { swordsman: 0, knight: 0, catapult: 0 });
     m.cmdCastSpell('a', 'curseOfSickness', d.baseX, d.baseY);
     check('  and is refused against an empty keep', a.spells.curseOfSickness === 1);
   }
@@ -2687,8 +2774,8 @@ function clearLane(m, x0, x1, y0, y1) {
   {
     const { m, a, d } = fresh(0);
     a.spells.entangle = 1;
-    d.idleUnits.swordsman = 5;
-    m.cmdDeployUnits('d', { swordsman: 5 }, yard(d, 0).x, yard(d, 0).y);
+    stock(m, d, 'swordsman', 5);
+    deployFrom(m, 'd', 'swordsman', 5, yard(d, 0).x, yard(d, 0).y);
     const theirs = [...m.armies.values()].find(x => x.ownerId === 'd');
     const base = cfg.UNIT_TYPES.swordsman.speed;
 
@@ -2720,23 +2807,27 @@ function clearLane(m, x0, x1, y0, y1) {
       `moved ${Math.hypot(theirs.x - stood.x, theirs.y - stood.y).toFixed(1)} tiles after thawing`);
   }
 
-  // The 'return' branch of the same bug, on its own, because losing an army to
-  // an enemy spell that is supposed to slow it down is the one a player would
-  // report as troops vanishing.
+  // The other half of the same bug. It used to be about the 'return' order —
+  // a frozen group marching home was deleted and banked into the garrison from
+  // wherever it stood, which a player reports as troops vanishing. There is no
+  // return order now, so the case is pointed at 'store', which is the remaining
+  // order that takes a group off the map when it arrives.
   {
     const { m, a, d } = fresh(0);
     a.spells.entangle = 1;
-    d.idleUnits.swordsman = 6;
-    m.cmdDeployUnits('d', { swordsman: 6 }, yard(d, 0).x, yard(d, 0).y);
+    d.gold = 999999;
+    const vault = trainerOf(m, d, 'swordsman') && buildBank(m, d);
+    stock(m, d, 'worker', 6);
+    deployFrom(m, 'd', 'worker', 6, yard(d, 0).x, yard(d, 0).y);
     const theirs = [...m.armies.values()].find(x => x.ownerId === 'd');
     theirs.x = d.baseX - 30; theirs.y = d.baseY;
-    m.cmdRecallArmy('d', theirs.id);
+    m.cmdStoreInBank('d', theirs.id, vault.x, vault.y);
     m.cmdCastSpell('a', 'entangle', Math.round(theirs.x), Math.round(theirs.y));
-    const garrison = d.idleUnits.swordsman;
+    const stored = vault.stored;
     for (let t = 0; t < 20; t++) m.tick(0.2);
-    check('a frozen group marching home is not teleported into the garrison',
-      m.armies.has(theirs.id) && d.idleUnits.swordsman === garrison,
-      m.armies.has(theirs.id) ? `${d.idleUnits.swordsman} at home` : 'the group was banked');
+    check('a frozen group on its way to a bank is not teleported into it',
+      m.armies.has(theirs.id) && vault.stored === stored,
+      m.armies.has(theirs.id) ? `${vault.stored} inside` : 'the group was banked');
   }
 
   // Every spell that touches another empire spares an ally, and refunds the
@@ -2748,10 +2839,10 @@ function clearLane(m, x0, x1, y0, y1) {
     m.addPlayer('e', 'orc', 'E', 1);
     m.start();
     for (const p of m.players.values()) { p.draft = null; p.gold = 999999; }
-    b.idleUnits = { swordsman: 10, knight: 0, catapult: 0 };
+    stockAll(m, b, { swordsman: 10, knight: 0, catapult: 0 });
     a.spells.curseOfSickness = 1;
     m.cmdCastSpell('a', 'curseOfSickness', b.baseX, b.baseY);
-    check('Curse of Sickness spares a teammate', b.idleUnits.swordsman === 10 && a.spells.curseOfSickness === 1);
+    check('Curse of Sickness spares a teammate', m.garrisonUnits(b).swordsman === 10 && a.spells.curseOfSickness === 1);
 
     const tiles = [];
     for (let i = -1; i <= 1; i++) tiles.push({ x: b.baseX + i, y: b.baseY + 3 });
@@ -2761,8 +2852,8 @@ function clearLane(m, x0, x1, y0, y1) {
     const intact = Object.values(b.buildings).every(x => x.hp === x.maxHp);
     check('Sabotage Defenses spares a teammate\'s walls', intact && a.spells.sabotageDefenses === 1);
 
-    b.idleUnits.swordsman = 5;
-    m.cmdDeployUnits('b', { swordsman: 5 }, yard(b, 0).x, yard(b, 0).y);
+    stock(m, b, 'swordsman', 5);
+    deployFrom(m, 'b', 'swordsman', 5, yard(b, 0).x, yard(b, 0).y);
     const ally = [...m.armies.values()].find(x => x.ownerId === 'b');
     a.spells.entangle = 1;
     m.cmdCastSpell('a', 'entangle', Math.round(ally.x), Math.round(ally.y));
@@ -2930,8 +3021,8 @@ function clearLane(m, x0, x1, y0, y1) {
     Object.values(shrine.garrison).reduce((a, b) => a + b, 0) > 10,
     JSON.stringify(shrine.garrison));
 
-  p.idleUnits.swordsman = 40;
-  m.cmdDeployUnits('p', { swordsman: 40 }, yard(p, 0).x, yard(p, 0).y);
+  stock(m, p, 'swordsman', 40);
+  deployFrom(m, 'p', 'swordsman', 40, yard(p, 0).x, yard(p, 0).y);
   const army = [...m.armies.values()].find(a => a.ownerId === 'p');
   m.cmdAttackArmy('p', army.id, 'camp', shrine.id);
   let t = 0;
@@ -2976,10 +3067,10 @@ function clearLane(m, x0, x1, y0, y1) {
     const m = new Match({ started: false, map: 'openfield' });
     const a = m.addPlayer('a', 'human', 'A'), b = m.addPlayer('b', 'human', 'B');
     m.start(); a.draft = null; b.draft = null;
-    for (const [t, n] of Object.entries(prize)) a.idleUnits[t] = n;
-    for (const [t, n] of Object.entries(foes)) b.idleUnits[t] = n;
-    m.cmdDeployUnits('a', prize, yard(a, 0).x, yard(a, 0).y);
-    m.cmdDeployUnits('b', foes, yard(b, 0).x, yard(b, 0).y);
+    for (const [t, n] of Object.entries(prize)) stock(m, a, t, n);
+    for (const [t, n] of Object.entries(foes)) stock(m, b, t, n);
+    deployAll(m, 'a', prize, yard(a, 0).x, yard(a, 0).y);
+    deployAll(m, 'b', foes, yard(b, 0).x, yard(b, 0).y);
     const A = [...m.armies.values()].filter(x => x.ownerId === 'a');
     const B = [...m.armies.values()].filter(x => x.ownerId === 'b');
     A.forEach((x, i) => { x.x = 60; x.y = 60 + i * 0.6; });
@@ -3112,9 +3203,9 @@ function clearLane(m, x0, x1, y0, y1) {
 // one block or as several.
 function field(m, playerId, type, n, x, y) {
   const p = m.players.get(playerId);
-  p.idleUnits[type] = (p.idleUnits[type] || 0) + n;
+  stock(m, p, type, (m.garrisonUnits(p)[type] || 0) + (n));
   const before = new Set(m.armies.keys());
-  m.cmdDeployUnits(playerId, { [type]: n }, yard(p, 0).x, yard(p, 0).y);
+  deployFrom(m, playerId, type, n, yard(p, 0).x, yard(p, 0).y);
   const army = [...m.armies.values()].find(a => !before.has(a.id));
   army.x = x; army.y = y; army.destX = x; army.destY = y; army.order = 'hold';
   return army;
@@ -3323,7 +3414,7 @@ function fightOut(m, ours, theirs) {
 
 // --- losing means losing --------------------------------------------------
 //
-// Every order but cmdDeployUnits took an army id and an owner id and never
+// Every order but the deploy took an army id and an owner id and never
 // asked whether that owner was still in the game, so a player whose town centre
 // had been levelled went on marching, merging and besieging with whatever had
 // been in the field when it fell. Reported from a playtest as "base was
@@ -3343,7 +3434,7 @@ function fightOut(m, ours, theirs) {
   const ghost = m.armies.get(ghostId);
   m.cmdMoveArmy('a', ghost.id, 40, 40);
   m.cmdAttackArmy('a', ghost.id, 'player', 'b');
-  m.cmdRecallArmy('a', ghost.id);
+  m.cmdMergeArmy('a', ghost.id, ghost.id);
   check('  and gives no orders either',
     ghost.order === 'hold' && ghost.targetType === null,
     `order '${ghost.order}' target ${ghost.targetType}`);
@@ -3599,8 +3690,8 @@ function fightOut(m, ours, theirs) {
   m.eliminate(a, 'fallen');
   m.drainExplored('a');
   // Send the survivor somewhere new.
-  b.idleUnits.swordsman = 5;
-  m.cmdDeployUnits('b', { swordsman: 5 }, yard(b, 0).x, yard(b, 0).y);
+  stock(m, b, 'swordsman', 5);
+  deployFrom(m, 'b', 'swordsman', 5, yard(b, 0).x, yard(b, 0).y);
   const army = [...m.armies.values()].find(x => x.ownerId === 'b');
   m.cmdMoveArmy('b', army.id, Math.round(cfg.MAP.width / 2), Math.round(cfg.MAP.height / 2));
   for (let t = 0; t < 400; t++) m.tick(0.2);
@@ -3646,8 +3737,8 @@ function fightOut(m, ours, theirs) {
 
   // The real path: send troops, take a camp, get the slots.
   const camp = m.aiCamps.find(c => !c.shrine);
-  p.idleUnits.swordsman = 30;
-  m.cmdDeployUnits('p', { swordsman: 30 }, yard(p, 0).x, yard(p, 0).y);
+  stock(m, p, 'swordsman', 30);
+  deployFrom(m, 'p', 'swordsman', 30, yard(p, 0).x, yard(p, 0).y);
   const army = [...m.armies.values()].find(a => a.ownerId === 'p');
   army.x = camp.x - 3; army.y = camp.y;
   m.cmdAttackArmy('p', army.id, 'camp', camp.id);
@@ -4265,8 +4356,8 @@ function fightOut(m, ours, theirs) {
 
   // Standing near it is the whole verb — there is nothing to carry back.
   const seam = m.ore[0];
-  p.idleUnits.worker = 4;
-  m.cmdDeployUnits('p', { worker: 4 }, p.baseX + 2, p.baseY + 2);
+  stock(m, p, 'worker', 4);
+  deployFrom(m, 'p', 'worker', 4, p.baseX + 2, p.baseY + 2);
   const crew = [...m.armies.values()][0];
   check('the keep is what trains workers', m.trainersFor(p, 'worker').length === 1);
   check('  and nothing else does', m.trainersFor(p, 'swordsman').length === 0);
@@ -4283,7 +4374,7 @@ function fightOut(m, ours, theirs) {
       keep.trainQueue.length === 1 && p.gold < before,
       keep.trainQueue.length + ' queued, ' + (before - p.gold) + ' gold spent');
     for (let i = 0; i < 60; i++) m.tick(0.2);
-    check('    and a worker comes out of it', p.idleUnits.worker >= 1, String(p.idleUnits.worker));
+    check('    and a worker comes out of it', m.garrisonUnits(p).worker >= 1, String(m.garrisonUnits(p).worker));
     m.cmdTrainUnit('p', 'swordsman');
     check('    while the keep still refuses what it does not make', keep.trainQueue.length === 0);
   }
@@ -4301,8 +4392,8 @@ function fightOut(m, ours, theirs) {
 
   // The cap is a property of the rock, not of the empire digging it.
   const seam2 = m.ore[1];
-  p.idleUnits.worker = 20;
-  m.cmdDeployUnits('p', { worker: 20 }, p.baseX + 2, p.baseY + 2);
+  stock(m, p, 'worker', 20);
+  deployFrom(m, 'p', 'worker', 20, p.baseX + 2, p.baseY + 2);
   const bigCrew = [...m.armies.values()].find(a => armyCount(a) === 20);
   bigCrew.x = seam2.x; bigCrew.y = seam2.y; bigCrew.order = 'hold';
   crew.x = p.baseX; crew.y = p.baseY;            // the first lot go home
@@ -4333,11 +4424,11 @@ function fightOut(m, ours, theirs) {
     const target = mineNear.ore
       .map(o => ({ o, d: Math.hypot(o.x - q.baseX, o.y - q.baseY) }))
       .sort((a, b) => a.d - b.d)[0].o;
-    q.idleUnits.worker = 8;
-    mineNear.cmdDeployUnits('q', { worker: 4 }, q.baseX + 1, q.baseY + 1);
+    stock(mineNear, q, 'worker', 8);
+    deployFrom(mineNear, 'q', 'worker', 4, q.baseX + 1, q.baseY + 1);
     const atIt = [...mineNear.armies.values()][0];
     mineNear.cmdMoveArmy('q', atIt.id, target.x, target.y);
-    mineNear.cmdDeployUnits('q', { worker: 4 }, q.baseX - 1, q.baseY + 1);
+    deployFrom(mineNear, 'q', 'worker', 4, q.baseX - 1, q.baseY + 1);
     const off = [...mineNear.armies.values()].find(a => a.id !== atIt.id);
     // Two tiles clear: what used to mine and must not.
     mineNear.cmdMoveArmy('q', off.id, target.x, target.y - 2);
@@ -4391,8 +4482,8 @@ function fightOut(m, ours, theirs) {
     `${site.remainingSec.toFixed(1)} left after 40s`);
   check('  and it reports no hands on it', site.builders === 0);
 
-  p.idleUnits.worker = 2;
-  m.cmdDeployUnits('p', { worker: 2 }, p.baseX + 2, p.baseY + 2);
+  stock(m, p, 'worker', 2);
+  deployFrom(m, 'p', 'worker', 2, p.baseX + 2, p.baseY + 2);
   const crew = [...m.armies.values()].find(a => a.type === 'worker');
   crew.x = bx; crew.y = by; crew.order = 'hold';
   let ticks = 0;
@@ -4406,8 +4497,8 @@ function fightOut(m, ours, theirs) {
   p.gold = 5000;
   m.cmdBuild('p', cx, cy, 'bank');
   const site2 = p.buildings[`${cx},${cy}`];
-  p.idleUnits.worker = 20;
-  m.cmdDeployUnits('p', { worker: 20 }, p.baseX + 2, p.baseY + 2);
+  stock(m, p, 'worker', 20);
+  deployFrom(m, 'p', 'worker', 20, p.baseX + 2, p.baseY + 2);
   const mob = [...m.armies.values()].find(a => a.type === 'worker' && armyCount(a) === 20);
   mob.x = cx; mob.y = cy; mob.order = 'hold';
   crew.x = p.baseX; crew.y = p.baseY;         // the first two go home
@@ -4456,8 +4547,8 @@ function fightOut(m, ours, theirs) {
 
   const bx = p.baseX + 4, by = p.baseY;
   m.cmdBuild('p', bx, by, 'barracks');
-  p.idleUnits.worker = 3;
-  m.cmdDeployUnits('p', { worker: 3 }, p.baseX + 2, p.baseY + 2);
+  stock(m, p, 'worker', 3);
+  deployFrom(m, 'p', 'worker', 3, p.baseX + 2, p.baseY + 2);
   const crew = [...m.armies.values()].find(a => a.type === 'worker');
 
   m.cmdMoveArmy('p', crew.id, bx, by);

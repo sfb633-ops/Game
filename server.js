@@ -629,8 +629,8 @@ wss.on('connection', (ws) => {
       case 'trainUnit':
         match.cmdTrainUnit(playerId, msg.unitType);
         break;
-      case 'deployUnits':
-        match.cmdDeployUnits(playerId, msg.units, msg.x, msg.y);
+      case 'deployFrom':
+        match.cmdDeployFrom(playerId, msg.bx, msg.by, msg.count, msg.x, msg.y);
         break;
       case 'moveArmy':
         match.cmdMoveArmy(playerId, msg.armyId, msg.x, msg.y);
@@ -649,9 +649,6 @@ wss.on('connection', (ws) => {
         break;
       case 'splitArmy':
         match.cmdSplitArmy(playerId, msg.armyId, msg.count);
-        break;
-      case 'recallArmy':
-        match.cmdRecallArmy(playerId, msg.armyId);
         break;
       case 'pickCard':
         match.cmdPickCard(playerId, msg.cardId);

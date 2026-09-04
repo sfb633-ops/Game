@@ -785,7 +785,7 @@ const CONTROLS = [
   ['Shift + click', 'Add to the selection, or take one out'],
   ['Right-click', 'March there, attack it, or join another of your groups'],
   ['X', 'Open or close the split window for the selected group'],
-  ['R', 'Recall the selected groups'],
+
   ['Q', 'Use your race ability'],
   ['Shift + 1-9', 'Put the selection in a control group'],
   ['1-9', 'Select that control group; twice takes the camera there'],
@@ -1370,6 +1370,27 @@ function armDeploy(on) {
   render(); renderPanel();
 }
 
+// Which of my buildings makes this kind of soldier, and which of those has the
+// most of them standing in it.
+//
+// The keep is not in buildingTypes — it is the thing you start with rather than
+// a thing you build — so it is named here the way the server names it.
+function trainsWhat(type) {
+  if (type === 'castle') return castleCfg && castleCfg.trains;
+  return (buildingTypes && buildingTypes[type] || {}).trains;
+}
+function fullestTrainer(unitType) {
+  const me = myPlayer();
+  if (!me) return null;
+  let best = null;
+  for (const b of me.buildings) {
+    if (b.underConstruction || trainsWhat(b.type) !== unitType) continue;
+    if (!(b.ready > 0)) continue;
+    if (!best || b.ready > best.ready) best = b;
+  }
+  return best;
+}
+
 // Send the staged troops to a tile and clear the staging row. Returns whether
 // the order went out, so a click on water can leave the deployment armed to try
 // again rather than silently throwing the selection away.
@@ -1381,7 +1402,17 @@ function deployStagedAt(ix, iy) {
     log('Troops can only be deployed inside your own territory — send them on from there.');
     return false;
   }
-  send({ type: 'deployUnits', units, x: ix, y: iy });
+  // One message per kind, each naming the building those troops are standing
+  // in. There is no empire-wide pool to draw on any more — see garrisonUnits
+  // on the server — so the client has to say which barracks it is emptying.
+  //
+  // Interim: it picks the fullest building that makes each kind. The building's
+  // own popup is where this belongs, and this row goes when that lands.
+  for (const type in units) {
+    const from = fullestTrainer(type);
+    if (!from) { log('Nothing of that kind is waiting anywhere.'); continue; }
+    send({ type: 'deployFrom', bx: from.x, by: from.y, count: units[type], x: ix, y: iy });
+  }
   document.querySelectorAll('#unit-inputs input').forEach(inp => { inp.value = 0; });
   updateDeployButton();
   // Counts move as soldiers fall, so the slider's ceiling has to move with
@@ -3192,7 +3223,9 @@ function onKeyDown(e) {
     if (armedClear) { armClear(false); return; }
   }
   if (k === 'q') { useAbility(); return; }
-  if (k === 'r') { for (const a of selectedList()) send({ type: 'recallArmy', armyId: a.id }); return; }
+  // R was Recall — march home, heal, rejoin the pool. There is no pool and no
+  // way home now: a group that has left is out until it dies, and healing is
+  // the Maester's Guild's job.
   // Halve every selected group. Halving rather than a typed number because it
   // is the only split that needs no second input and it composes: half, half
   // again is a quarter. The server takes a count, so a precise split is one

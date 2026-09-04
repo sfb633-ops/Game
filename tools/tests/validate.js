@@ -17,8 +17,11 @@ module.exports = function validate(m, G) {
     if (!Number.isFinite(p.gold)) say(`${p.id} gold is not a number: ${p.gold}`);
     if (!(p.woundCarry >= 0)) say(`${p.id} woundCarry is ${p.woundCarry}`);
 
-    for (const [type, n] of Object.entries(p.idleUnits)) {
-      if (!(n >= 0)) say(`${p.id} has ${n} idle ${type}`);
+    // This walks the LIVE match, not a serialized copy, and there is no pool
+    // on the player any more — soldiers wait in the building that trained
+    // them. Same invariant, read off the buildings.
+    for (const [type, n] of Object.entries(m.garrisonUnits(p))) {
+      if (!(n >= 0)) say(`${p.id} has ${n} waiting ${type}`);
       if (!Number.isInteger(n)) say(`${p.id} has a fractional ${type}: ${n}`);
     }
 
@@ -95,7 +98,7 @@ module.exports = function validate(m, G) {
     if (a.targetType && !['army', 'camp', 'player', 'building'].includes(a.targetType)) {
       say(`${id} is attacking a "${a.targetType}"`);
     }
-    if (!['move', 'attack', 'fight', 'return', 'hold', 'merge'].includes(a.order)) {
+    if (!['move', 'attack', 'fight', 'store', 'hold', 'merge'].includes(a.order)) {
       say(`${id} has order "${a.order}"`);
     }
   }

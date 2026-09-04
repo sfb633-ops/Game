@@ -4,6 +4,79 @@
 const { Match, armyCount } = require('../../game.js');
 const cfg = require('../../config.js');
 
+// --- staging troops for a test --------------------------------------------
+//
+// There is no player.idleUnits any more: soldiers wait in the building that
+// trained them. These two put a scenario together the way the old pool did —
+// `stock` says "this empire has N of these standing at home", `deployFrom`
+// sends them out — so the cases below stay about fighting and marching rather
+// than about where a barracks is.
+//
+// The trainer is raised if the empire has not got one. Placed straight through
+// placeBuilding, finished, and free: a test that wants ten swordsmen should not
+// have to buy a barracks and wait fourteen seconds for it first.
+function trainerOf(m, player, type) {
+  for (const b of Object.values(player.buildings)) {
+    if (m.trainsType(b.type) === type) return b;
+  }
+  const btype = Object.keys(cfg.BUILDING_TYPES).find(k => cfg.BUILDING_TYPES[k].trains === type);
+  if (!btype) return null;
+  for (let r = 2; r <= 14; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const x = player.baseX + dx, y = player.baseY + dy;
+        if (!m.canBuildAt(player, x, y)) continue;
+        const def = cfg.BUILDING_TYPES[btype];
+        return m.placeBuilding(player, {
+          x, y, type: btype, maxHp: def.hp, hp: def.hp,
+          underConstruction: false, remainingSec: 0, trainQueue: [], ready: 0,
+        });
+      }
+    }
+  }
+  return null;
+}
+function stock(m, player, type, n) {
+  const b = trainerOf(m, player, type);
+  if (b) b.ready = n;
+  return b;
+}
+function stockAll(m, player, units) {
+  for (const t in units) stock(m, player, t, units[t]);
+}
+function deployFrom(m, playerId, type, n, x, y) {
+  const player = m.players.get(playerId);
+  const b = trainerOf(m, player, type);
+  // Nothing TRAINS a golem or a colossus — they walk out of a shrine — so the
+  // ones no building makes are raised the way the game raises them.
+  if (!b) { m.spawnArmy(player, type, n, "move", { x, y }); return; }
+  if ((b.ready || 0) < n) b.ready = n;
+  m.cmdDeployFrom(playerId, b.x, b.y, n, x, y);
+}
+
+function deployAll(m, playerId, units, x, y) {
+  for (const t in units) if (units[t] > 0) deployFrom(m, playerId, t, units[t], x, y);
+}
+
+// A finished bank on free ground near the keep, for cases that need somewhere
+// to put villagers.
+function buildBank(m, player) {
+  for (let r = 2; r <= 14; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const x = player.baseX + dx, y = player.baseY + dy;
+        if (!m.canBuildAt(player, x, y)) continue;
+        const def = cfg.BUILDING_TYPES.bank;
+        return m.placeBuilding(player, {
+          x, y, type: 'bank', maxHp: def.hp, hp: def.hp,
+          underConstruction: false, remainingSec: 0, trainQueue: [], stored: 0,
+        });
+      }
+    }
+  }
+  return null;
+}
+
 let fails = 0;
 const bad = (msg) => { console.log('  FAIL ' + msg); fails++; };
 
@@ -46,11 +119,11 @@ function run(seed, teams, mapId) {
         case 0: m.cmdBuild(id, coord(), coord(), pick(Object.keys(cfg.BUILDING_TYPES).concat(['castle', 'nope']))); break;
         case 1: m.cmdBuildWall(id, [{ x: coord(), y: coord() }, { x: coord(), y: coord() }]); break;
         case 2: m.cmdTrainUnit(id, pick(Object.keys(cfg.UNIT_TYPES).concat(['nope']))); break;
-        case 3: p.idleUnits.swordsman += 3; m.cmdDeployUnits(id, { swordsman: 2 }, coord(), coord()); break;
+        case 3: stock(m, p, 'swordsman', (m.garrisonUnits(p).swordsman || 0) + (3)); deployFrom(m, id, 'swordsman', 2, coord(), coord()); break;
         case 4: if (armies.length) m.cmdMoveArmy(id, pick(armies).id, coord(), coord()); break;
         case 5: if (armies.length) m.cmdAttackArmy(id, pick(armies).id, pick(['player', 'camp', 'army', 'nope']), pick(ids.concat(m.aiCamps.map(c => c.id)).concat(armies.map(a => a.id)))); break;
         case 6: if (armies.length) m.cmdMergeArmy(id, pick(armies).id, pick(armies).id); break;
-        case 7: if (armies.length) m.cmdRecallArmy(id, pick(armies).id); break;
+        case 7: if (armies.length) m.cmdMergeArmy(id, pick(armies).id, pick(armies).id); break;
         case 8: m.cmdCastSpell(id, pick(Object.keys(cfg.CARDS).concat(['nope'])), coord(), coord()); break;
         case 9: m.cmdUseAbility(id, coord(), coord()); break;
         case 10: m.cmdUpgradeCastle(id); break;
@@ -65,9 +138,9 @@ function run(seed, teams, mapId) {
     for (const p of m.players.values()) {
       if (!Number.isFinite(p.gold)) { bad(`gold not finite (${p.gold}) seed ${seed}`); return; }
       if (p.gold < -0.001) { bad(`negative gold ${p.gold} seed ${seed}`); return; }
-      for (const t in p.idleUnits) {
-        if (!Number.isInteger(p.idleUnits[t]) || p.idleUnits[t] < 0) {
-          bad(`idleUnits.${t} = ${p.idleUnits[t]} seed ${seed}`); return;
+      for (const t in m.garrisonUnits(p)) {
+        if (!Number.isInteger(m.garrisonUnits(p)[t]) || m.garrisonUnits(p)[t] < 0) {
+          bad(`idleUnits.${t} = ${m.garrisonUnits(p)[t]} seed ${seed}`); return;
         }
       }
       for (const b of Object.values(p.buildings)) {

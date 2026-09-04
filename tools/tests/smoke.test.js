@@ -37,10 +37,83 @@ function sendAt(m, playerId, units, targetType, targetId) {
   const before = new Set(m.armies.keys());
   // Troops muster inside the walls, on the courtyard floor.
   const mp = m.musterPoint(p);
-  m.cmdDeployUnits(playerId, units, mp.x, mp.y);
+  deployAll(m, playerId, units, mp.x, mp.y);
   for (const id of m.armies.keys()) {
     if (!before.has(id)) m.cmdAttackArmy(playerId, id, targetType, targetId);
   }
+}
+
+// --- staging troops for a test --------------------------------------------
+//
+// There is no player.idleUnits any more: soldiers wait in the building that
+// trained them. These two put a scenario together the way the old pool did —
+// `stock` says "this empire has N of these standing at home", `deployFrom`
+// sends them out — so the cases below stay about fighting and marching rather
+// than about where a barracks is.
+//
+// The trainer is raised if the empire has not got one. Placed straight through
+// placeBuilding, finished, and free: a test that wants ten swordsmen should not
+// have to buy a barracks and wait fourteen seconds for it first.
+function trainerOf(m, player, type) {
+  for (const b of Object.values(player.buildings)) {
+    if (m.trainsType(b.type) === type) return b;
+  }
+  const btype = Object.keys(cfg.BUILDING_TYPES).find(k => cfg.BUILDING_TYPES[k].trains === type);
+  if (!btype) return null;
+  for (let r = 2; r <= 14; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const x = player.baseX + dx, y = player.baseY + dy;
+        if (!m.canBuildAt(player, x, y)) continue;
+        const def = cfg.BUILDING_TYPES[btype];
+        return m.placeBuilding(player, {
+          x, y, type: btype, maxHp: def.hp, hp: def.hp,
+          underConstruction: false, remainingSec: 0, trainQueue: [], ready: 0,
+        });
+      }
+    }
+  }
+  return null;
+}
+function stock(m, player, type, n) {
+  const b = trainerOf(m, player, type);
+  if (b) b.ready = n;
+  return b;
+}
+function stockAll(m, player, units) {
+  for (const t in units) stock(m, player, t, units[t]);
+}
+function deployFrom(m, playerId, type, n, x, y) {
+  const player = m.players.get(playerId);
+  const b = trainerOf(m, player, type);
+  // Nothing TRAINS a golem or a colossus — they walk out of a shrine — so the
+  // ones no building makes are raised the way the game raises them.
+  if (!b) { m.spawnArmy(player, type, n, "move", { x, y }); return; }
+  if ((b.ready || 0) < n) b.ready = n;
+  m.cmdDeployFrom(playerId, b.x, b.y, n, x, y);
+}
+
+function deployAll(m, playerId, units, x, y) {
+  for (const t in units) if (units[t] > 0) deployFrom(m, playerId, t, units[t], x, y);
+}
+
+// A finished bank on free ground near the keep, for cases that need somewhere
+// to put villagers.
+function buildBank(m, player) {
+  for (let r = 2; r <= 14; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const x = player.baseX + dx, y = player.baseY + dy;
+        if (!m.canBuildAt(player, x, y)) continue;
+        const def = cfg.BUILDING_TYPES.bank;
+        return m.placeBuilding(player, {
+          x, y, type: 'bank', maxHp: def.hp, hp: def.hp,
+          underConstruction: false, remainingSec: 0, trainQueue: [], stored: 0,
+        });
+      }
+    }
+  }
+  return null;
 }
 
 let fails = 0;
@@ -107,10 +180,10 @@ let ticks = 0;
 const seenEffects = new Set();
 for (let t = 0; t < 1800; t++) {           // 6 minutes at 5Hz
   if (t === 300) m.cmdUpgradeCastle('a');
-  if (t === 400) { a.idleUnits.swordsman += 40; sendAt(m, 'a', { swordsman: 20 }, 'player', 'b'); }
-  if (t === 500) { b.idleUnits.knight += 20; sendAt(m, 'b', { knight: 10 }, 'player', 'a'); }
+  if (t === 400) { stock(m, a, 'swordsman', (m.garrisonUnits(a).swordsman || 0) + (40)); sendAt(m, 'a', { swordsman: 20 }, 'player', 'b'); }
+  if (t === 500) { stock(m, b, 'knight', (m.garrisonUnits(b).knight || 0) + (20)); sendAt(m, 'b', { knight: 10 }, 'player', 'a'); }
   if (t === 700 && m.aiCamps.length) {
-    a.idleUnits.swordsman += 30;
+    stock(m, a, 'swordsman', (m.garrisonUnits(a).swordsman || 0) + (30));
     sendAt(m, 'a', { swordsman: 25 }, 'camp', m.aiCamps[0].id);
   }
   if (t === 900) m.cmdCastSpell('a', 'meteor', b.baseX, b.baseY);
@@ -123,9 +196,9 @@ for (let t = 0; t < 1800; t++) {           // 6 minutes at 5Hz
   for (const p of [a, b]) {
     if (!Number.isFinite(p.gold)) bad(`gold went non-finite for ${p.id} at tick ${t}`);
     if (p.gold < 0) bad(`negative gold for ${p.id} at tick ${t}`);
-    for (const k in p.idleUnits) {
-      if (!Number.isInteger(p.idleUnits[k]) || p.idleUnits[k] < 0) {
-        bad(`idleUnits.${k}=${p.idleUnits[k]} for ${p.id} at tick ${t}`);
+    for (const k in m.garrisonUnits(p)) {
+      if (!Number.isInteger(m.garrisonUnits(p)[k]) || m.garrisonUnits(p)[k] < 0) {
+        bad(`idleUnits.${k}=${m.garrisonUnits(p)[k]} for ${p.id} at tick ${t}`);
       }
     }
     for (const key in p.buildings) {

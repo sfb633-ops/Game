@@ -9,6 +9,79 @@
 const cfg = require('../../config.js');
 const { Match } = require('../../game.js');
 
+// --- staging troops for a test --------------------------------------------
+//
+// There is no player.idleUnits any more: soldiers wait in the building that
+// trained them. These two put a scenario together the way the old pool did —
+// `stock` says "this empire has N of these standing at home", `deployFrom`
+// sends them out — so the cases below stay about fighting and marching rather
+// than about where a barracks is.
+//
+// The trainer is raised if the empire has not got one. Placed straight through
+// placeBuilding, finished, and free: a test that wants ten swordsmen should not
+// have to buy a barracks and wait fourteen seconds for it first.
+function trainerOf(m, player, type) {
+  for (const b of Object.values(player.buildings)) {
+    if (m.trainsType(b.type) === type) return b;
+  }
+  const btype = Object.keys(cfg.BUILDING_TYPES).find(k => cfg.BUILDING_TYPES[k].trains === type);
+  if (!btype) return null;
+  for (let r = 2; r <= 14; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const x = player.baseX + dx, y = player.baseY + dy;
+        if (!m.canBuildAt(player, x, y)) continue;
+        const def = cfg.BUILDING_TYPES[btype];
+        return m.placeBuilding(player, {
+          x, y, type: btype, maxHp: def.hp, hp: def.hp,
+          underConstruction: false, remainingSec: 0, trainQueue: [], ready: 0,
+        });
+      }
+    }
+  }
+  return null;
+}
+function stock(m, player, type, n) {
+  const b = trainerOf(m, player, type);
+  if (b) b.ready = n;
+  return b;
+}
+function stockAll(m, player, units) {
+  for (const t in units) stock(m, player, t, units[t]);
+}
+function deployFrom(m, playerId, type, n, x, y) {
+  const player = m.players.get(playerId);
+  const b = trainerOf(m, player, type);
+  // Nothing TRAINS a golem or a colossus — they walk out of a shrine — so the
+  // ones no building makes are raised the way the game raises them.
+  if (!b) { m.spawnArmy(player, type, n, "move", { x, y }); return; }
+  if ((b.ready || 0) < n) b.ready = n;
+  m.cmdDeployFrom(playerId, b.x, b.y, n, x, y);
+}
+
+function deployAll(m, playerId, units, x, y) {
+  for (const t in units) if (units[t] > 0) deployFrom(m, playerId, t, units[t], x, y);
+}
+
+// A finished bank on free ground near the keep, for cases that need somewhere
+// to put villagers.
+function buildBank(m, player) {
+  for (let r = 2; r <= 14; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const x = player.baseX + dx, y = player.baseY + dy;
+        if (!m.canBuildAt(player, x, y)) continue;
+        const def = cfg.BUILDING_TYPES.bank;
+        return m.placeBuilding(player, {
+          x, y, type: 'bank', maxHp: def.hp, hp: def.hp,
+          underConstruction: false, remainingSec: 0, trainQueue: [], stored: 0,
+        });
+      }
+    }
+  }
+  return null;
+}
+
 let fails = 0;
 const check = (name, ok, detail) => {
   console.log((ok ? '  ok   ' : ' FAIL  ') + name + (detail ? ' — ' + detail : ''));
@@ -85,8 +158,8 @@ function fresh(raceA, raceB) {
     gold0 + ' -> ' + a.gold);
 
   m.takeCard(a, 'ironhide');
-  a.idleUnits.swordsman = 5;
-  m.cmdDeployUnits('a', { swordsman: 5 }, a.baseX, a.baseY + 3);
+  stock(m, a, 'swordsman', 5);
+  deployFrom(m, 'a', 'swordsman', 5, a.baseX, a.baseY + 3);
   const armyA = [...m.armies.values()].find(x => x.ownerId === 'a');
   check('ironhide raises mustered unit hp by its card value',
     Math.abs(armyA.unitMaxHp - cfg.UNIT_TYPES.swordsman.hp * CARD('ironhide').mods.hpMult) < 1e-9,
@@ -139,9 +212,9 @@ function CARD(id) { return cfg.CARDS[id]; }
 // ---- elf evasion shows up in a real trade ----------------------------------
 {
   const { m, a, b } = fresh('elf', 'human');
-  a.idleUnits.swordsman = 10; b.idleUnits.swordsman = 10;
-  m.cmdDeployUnits('a', { swordsman: 10 }, a.baseX, a.baseY + 3);
-  m.cmdDeployUnits('b', { swordsman: 10 }, b.baseX, b.baseY + 3);
+  stock(m, a, 'swordsman', 10); stock(m, b, 'swordsman', 10);
+  deployFrom(m, 'a', 'swordsman', 10, a.baseX, a.baseY + 3);
+  deployFrom(m, 'b', 'swordsman', 10, b.baseX, b.baseY + 3);
   const [A, B] = [...m.armies.values()];
   A.x = 60; A.y = 60; B.x = 61; B.y = 60;
   a.ability = { cooldownRemaining: 0, activeRemaining: 0 };
@@ -159,8 +232,8 @@ function CARD(id) { return cfg.CARDS[id]; }
 {
   const { m, a, b } = fresh('human', 'human');
   m.takeCard(a, 'entangle');
-  b.idleUnits.swordsman = 5;
-  m.cmdDeployUnits('b', { swordsman: 5 }, b.baseX, b.baseY + 3);
+  stock(m, b, 'swordsman', 5);
+  deployFrom(m, 'b', 'swordsman', 5, b.baseX, b.baseY + 3);
   const B = [...m.armies.values()][0];
   B.x = 60; B.y = 60;
   m.cmdMoveArmy('b', B.id, ...marchTo(m, 100, 60));

@@ -1584,6 +1584,9 @@ class Match {
       x: spot.x, y: spot.y, type: 'castle', level: 1,
       hp: CASTLE.hp[0], maxHp: CASTLE.hp[0],
       underConstruction: false, remainingSec: 0, upgrading: false, trainQueue: [],
+      // The keep is raised here rather than through placeBuilding, so it has to
+      // be given the villagers-waiting-inside count itself.
+      ready: 0,
     };
     const player = {
       id, race, name: name || id, baseX: spot.x, baseY: spot.y,
@@ -1595,7 +1598,8 @@ class Match {
       gold: 150,
       alive: true,
       buildings,
-      idleUnits: emptyUnits(),
+      // No idleUnits any more. Soldiers wait in the building that trained them
+      // — see garrisonUnits — so there is no empire-wide pool to keep here.
       // Starts at zero, not at undefined. Everything that touches it copes
       // with the gap — `(player.woundCarry || 0)` — but a field that is
       // sometimes a number and sometimes not is a trap laid for the next
@@ -1804,6 +1808,58 @@ class Match {
     return income * mods.incomeMult;
   }
 
+  // What this building turns out, or null if it turns out nothing. The keep is
+  // named separately because it is not in BUILDING_TYPES — it is the thing you
+  // start with rather than a thing you build.
+  // What a FINISHED building of this type turns out, ignoring whether this one
+  // is finished. placeBuilding needs the type's answer before the site is up.
+  trainsType(type) {
+    if (type === 'castle') return CASTLE.trains || null;
+    const def = BUILDING_TYPES[type];
+    return (def && def.trains) || null;
+  }
+
+  trainedType(building) {
+    if (!building || building.underConstruction) return null;
+    return this.trainsType(building.type);
+  }
+
+  // Everyone finished and not yet sent out, as one tally.
+  //
+  // This is the home garrison. It used to be player.idleUnits — one pool for
+  // the whole empire, filled by whatever finished anywhere and spendable
+  // anywhere inside the border. Troops wait in the building that made them
+  // now, so the tally is a view over the buildings rather than a field, and
+  // where your reserves are standing is a thing about the map instead of a
+  // number in the corner.
+  garrisonUnits(player) {
+    const out = emptyUnits();
+    for (const b of Object.values(player.buildings)) {
+      const type = this.trainedType(b);
+      if (type && b.ready > 0) out[type] += b.ready;
+    }
+    return out;
+  }
+
+  // Wound the garrison, and take the dead out of the buildings they were
+  // standing in. damageUnits owns the cheapest-first rule and the carried
+  // wound; this only has to put its answer back where it came from.
+  damageGarrison(player, damage) {
+    const before = this.garrisonUnits(player);
+    const after = { ...before };
+    damageUnits(player, after, player.mods, damage);
+    for (const type in before) {
+      let lost = before[type] - after[type];
+      if (lost <= 0) continue;
+      for (const b of Object.values(player.buildings)) {
+        if (lost <= 0) break;
+        if (this.trainedType(b) !== type || !b.ready) continue;
+        const take = Math.min(lost, b.ready);
+        b.ready -= take; lost -= take;
+      }
+    }
+  }
+
   // Room left in a bank. Not a bank, under construction, or full: nothing.
   bankSpace(plot) {
     if (!plot || plot.type !== 'bank' || plot.underConstruction) return 0;
@@ -1935,11 +1991,11 @@ class Match {
   homeDefense(player) {
     const mods = player.mods;
     return {
-      power: totalAttack(player.idleUnits, mods),
+      power: totalAttack(this.garrisonUnits(player), mods),
       // The garrison's own health, and nothing else's. A tower's hp used to be
       // added in here, which is what made three of them a thousand-point buffer
       // an attacker ground off before reaching a single defender.
-      hp: standingHp(player, player.idleUnits, mods),
+      hp: standingHp(player, this.garrisonUnits(player), mods),
     };
   }
 
@@ -2163,10 +2219,10 @@ class Match {
   // they were given the health to be worth it.
   applyDefenderLosses(player, pool, damage) {
     if (damage <= 0) return 0;
-    const garrison = standingHp(player, player.idleUnits, player.mods);
+    const garrison = standingHp(player, this.garrisonUnits(player), player.mods);
     const onGarrison = Math.min(garrison, damage);
     if (onGarrison > 0) {
-      damageUnits(player, player.idleUnits, player.mods, onGarrison);
+      this.damageGarrison(player, onGarrison);
       damage -= onGarrison;
     }
     return damage;
@@ -2200,6 +2256,7 @@ class Match {
     // sometimes a number and sometimes not is a trap for whoever drops one of
     // those. Banks only: nothing else has tenants.
     if (building.type === 'bank' && building.stored == null) building.stored = 0;
+    if (this.trainsType(building.type) && building.ready == null) building.ready = 0;
     player.buildings[tileKey(building.x, building.y)] = building;
     this.indexBuilding(player, building);
     // Every building is something to walk round now, so every building changes
@@ -2740,9 +2797,9 @@ class Match {
     for (const other of this.players.values()) {
       if (!other.alive || this.allied(player.id, other.id)) continue;
       if (Math.hypot(other.baseX - x, other.baseY - y) > spec.radius) continue;
-      const standing = standingHp(other, other.idleUnits, other.mods);
+      const standing = standingHp(other, this.garrisonUnits(other), other.mods);
       if (standing <= 0) continue;
-      damageUnits(other, other.idleUnits, other.mods,
+      this.damageGarrison(other,
         this.mitigate(other.id, Math.min(standing, spec.damage), player.race, true));
       struck++;
       this.emit(other.id, 'A plague has swept through your garrison.');
@@ -3507,18 +3564,14 @@ class Match {
 
   // Take up to the requested idle units from the player; returns the taken units
   // (and deducts them), or null if none were available.
-  takeIdleUnits(player, requested) {
+  takeReadyFrom(plot, want) {
+    const type = this.trainedType(plot);
+    if (!type) return null;
+    const take = Math.min(Math.max(0, Math.floor(finiteOr(want, 0))), plot.ready || 0);
+    if (take <= 0) return null;
+    plot.ready -= take;
     const units = emptyUnits();
-    let any = false;
-    for (const type in requested) {
-      if (!defOf(UNIT_TYPES, type)) continue;
-      const want = Math.max(0, Math.floor(finiteOr(requested[type], 0)));
-      const have = player.idleUnits[type] || 0;
-      const take = Math.min(want, have);
-      if (take > 0) { units[type] = take; any = true; }
-    }
-    if (!any) return null;
-    for (const type in units) player.idleUnits[type] -= units[type];
+    units[type] = take;
     return units;
   }
 
@@ -3526,23 +3579,26 @@ class Match {
   // Militia, knights and ballistae march as separate groups, so a mixed
   // selection becomes several armies heading for the same place rather than one
   // blended column moving at the speed of its slowest member.
-  spawnArmies(player, units, order, dest, targetType, targetId) {
+  spawnArmies(player, units, order, dest, targetType, targetId, origin) {
     const ids = [];
     for (const type in units) {
       if (!(units[type] > 0)) continue;
-      ids.push(this.spawnArmy(player, type, units[type], order, dest, targetType, targetId));
+      ids.push(this.spawnArmy(player, type, units[type], order, dest, targetType, targetId, origin));
     }
     return ids;
   }
 
-  spawnArmy(player, type, count, order, dest, targetType, targetId) {
+  spawnArmy(player, type, count, order, dest, targetType, targetId, origin) {
     const id = `army-${this.nextArmyId++}`;
     // A soldier's full health is fixed at muster, with the race and every boon
     // already folded in — so a boon drafted later does not retroactively
     // toughen troops already in the field, and the health bar of an army that
     // has been out for ten minutes still means what it meant when it left.
     const unitMaxHp = UNIT_TYPES[type].hp * player.mods.hpMult;
-    const home = this.musterPoint(player);
+    // Where they step out from. The building that trained them when there is
+    // one, and the keep's courtyard for everything else that raises troops —
+    // a shrine's golems, Reincarnation's risen.
+    const home = origin || this.musterPoint(player);
     this.armies.set(id, {
       id, ownerId: player.id, race: player.race,
       type,
@@ -3553,7 +3609,7 @@ class Match {
       unitMaxHp,
       plunder: 0,          // gold this army's current assault has earned so far
       x: home.x, y: home.y,
-      order,                                  // 'move' | 'attack' | 'return' | 'hold'
+      order,                                  // 'move' | 'attack' | 'store' | 'merge' | 'hold'
       // Set while the army is knocking down a wall segment that stood in its
       // way; null the rest of the time.
       breach: null,
@@ -3619,9 +3675,15 @@ class Match {
   // A group holds whatever ground it is standing on until it is given another
   // order. This is the whole shape of an army now: it is deployed, it stays,
   // and it moves when it is told to. Marching home is no longer something that
-  // happens *to* a group at the end of a fight — it is an order of its own
-  // (cmdRecallArmy), because a group that has just taken a camp is usually
-  // exactly where you wanted it.
+  // happens *to* a group at the end of a fight: a group that has just taken a
+  // camp is usually exactly where you wanted it.
+  //
+  // There is no way home any more. Marching back used to fold survivors into
+  // the empire's pool and heal them whole, which was the one repair short of
+  // Reincarnation — and it was also the reason a beaten group was worth more
+  // walked home than fought with. Troops wait in the building that made them
+  // now and there is no pool to rejoin, so a group that has left is out until
+  // it dies or the match does. The Maester's Guild is where healing goes.
   //
   // Nothing is lost by staying: plunder is banked the moment a raid or an
   // assault finishes, not when the survivors get home. See finishRaid.
@@ -3633,13 +3695,6 @@ class Match {
     army.route = null; army.routeFor = null;
   }
 
-  startReturn(army) {
-    army.order = 'return';
-    army.breach = null;
-    army.destX = army.homeX; army.destY = army.homeY;
-    army.targetType = null; army.targetId = null;
-  }
-
   // ---- Army commands ----
 
   // Raise new groups from idle units and march them to a tile. This is the only
@@ -3647,35 +3702,36 @@ class Match {
   // that is already standing on the map, not a way to raise one. Deploying and
   // then committing is a decision you get to make twice, which is the whole
   // point of troops that hold ground.
-  cmdDeployUnits(playerId, requestedUnits, x, y) {
+  // Send out troops that are standing in one building.
+  //
+  // (bx, by) names the building they are coming out of and (x, y) where they
+  // are going. Both, rather than a count and a destination: the soldiers are in
+  // a particular place now, and which barracks you emptied is a decision.
+  cmdDeployFrom(playerId, bx, by, count, x, y) {
     const player = this.players.get(playerId);
     if (!player || !player.alive) return;
+    const plot = player.buildings[tileKey(Math.round(finiteOr(bx, -1)), Math.round(finiteOr(by, -1)))];
+    if (!plot) return;
+    if (plot.underConstruction) { this.emit(playerId, 'That building is not finished.'); return; }
+    if (!this.trainedType(plot)) return;
+    if (!(plot.ready > 0)) { this.emit(playerId, 'Nobody is waiting in there.'); return; }
+    // No destination given: they step outside and hold, which is what the
+    // Deploy button on its own means.
+    if (x == null || y == null) { const spot = this.standOffFrom({ ownerId: playerId, x: plot.x, y: plot.y }, plot.x, plot.y); x = spot.x; y = spot.y; }
     x = finiteOr(x); y = finiteOr(y);
     if (x === null || y === null) return;
     if (!this.validMoveTile(x, y)) return;
-    // Troops muster inside ground you hold — your border, or an outpost you
-    // have taken. Where they go *afterwards* is unrestricted (cmdMoveArmy takes
-    // any passable tile on the map), so this buys territory a second meaning
-    // without taking anything away from a group already on its feet: an
-    // outpost is now a forward staging post and not merely more room to build.
     if (!this.inTerritory(player, Math.round(x), Math.round(y))) {
       this.emit(playerId, 'Troops can only be deployed inside your own territory.');
       return;
     }
-    const units = this.takeIdleUnits(player, requestedUnits);
+    const units = this.takeReadyFrom(plot, count);
     if (!units) return;
-    this.spawnArmies(player, units, 'move', { x: Math.round(x), y: Math.round(y) });
-    // The keep opens its gate to let them out. It is sent as an effect rather
-    // than inferred on the client from a new group appearing, because troops
-    // muster anywhere inside your territory — the group may come into being
-    // half the map from the keep, and it is still the keep they came out of.
-    // buildings is an object keyed by "x,y", not a list, and the keep is the one
-    // at the seat. It can be gone — losing your keep does not stop you
-    // deploying — so this checks rather than assumes.
-    const keep = player.buildings[tileKey(player.baseX, player.baseY)];
-    if (keep && keep.type === 'castle') {
-      this.effects.push({ kind: 'gate', x: keep.x, y: keep.y });
-    }
+    this.spawnArmies(player, units, 'move', { x: Math.round(x), y: Math.round(y) },
+      null, null, { x: plot.x, y: plot.y });
+    // The keep opens its gate to let them out — only when it IS the keep now,
+    // because that is the building they are walking out of.
+    if (plot.type === 'castle') this.effects.push({ kind: 'gate', x: plot.x, y: plot.y });
   }
 
   // Every order below starts the same way: is this a group you own, and are you
@@ -3961,13 +4017,6 @@ class Match {
     return id;
   }
 
-  cmdRecallArmy(playerId, armyId) {
-    const army = this.ownArmy(playerId, armyId);
-    if (!army) return;
-    this.bankPlunder(army);
-    this.startReturn(army);
-  }
-
   // Pulling out of a fight still banks whatever the army managed to loot.
   bankPlunder(army) {
     if (army.order !== 'fight' || army.plunder <= 0) return;
@@ -4063,7 +4112,9 @@ class Match {
           front.remainingSec -= dt;
           if (front.remainingSec <= 0) {
             plot.trainQueue.shift();
-            player.idleUnits[front.unitType] += 1;
+            // Into the building that made them, not into a pool. They stand
+            // here until something deploys them.
+            plot.ready = (plot.ready || 0) + 1;
           }
         }
       }
@@ -4188,14 +4239,6 @@ class Match {
       if (dist <= stopAt) {
         if (army.order === 'attack') {
           this.beginBattle(army);
-        } else if (army.order === 'return') {
-          const owner = this.players.get(army.ownerId);
-          // Home is where the wounded mend: the garrison is a tally of
-          // interchangeable soldiers, so survivors rejoin it whole. Marching
-          // back is the cost, and it is the only way to heal a group short of
-          // Reincarnation.
-          if (owner) owner.idleUnits[army.type] = (owner.idleUnits[army.type] || 0) + armyCount(army);
-          this.armies.delete(army.id);
         } else if (army.order === 'store') {
           const owner = this.players.get(army.ownerId);
           const plot = owner && owner.buildings[tileKey(army.storeX, army.storeY)];
@@ -5060,6 +5103,8 @@ class Match {
           // count on the building — see the note on storeWorkers for why it has
           // to be visible rather than folded into one income figure.
           stored: b.stored || 0,
+          // Trained and waiting inside. The building's own popup deploys them.
+          ready: b.ready || 0,
           hp: Math.max(0, Math.round(b.hp)), maxHp: b.maxHp,
           underConstruction: b.underConstruction,
           remainingSec: Math.max(0, Math.ceil(b.remainingSec || 0)),
@@ -5075,7 +5120,9 @@ class Match {
           ...(b.piece ? { piece: b.piece, builtin: true } : {}),
           ...(b.w ? { w: b.w, h: b.h } : {}),
         })),
-        idleUnits: p.idleUnits,
+        // The tally across every building, for the stat row. Which building
+        // each of them is standing in rides along on the buildings themselves.
+        idleUnits: this.garrisonUnits(p),
       })),
       // The roster itself stays on the server: the client needs to know how
       // many are standing, how hurt the group is, and how many of them are

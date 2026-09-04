@@ -27,6 +27,79 @@ const G = require('../../game.js');
 const { Match, armyCount, armyHp } = G;
 const validate = require('./validate.js');
 
+// --- staging troops for a test --------------------------------------------
+//
+// There is no player.idleUnits any more: soldiers wait in the building that
+// trained them. These two put a scenario together the way the old pool did —
+// `stock` says "this empire has N of these standing at home", `deployFrom`
+// sends them out — so the cases below stay about fighting and marching rather
+// than about where a barracks is.
+//
+// The trainer is raised if the empire has not got one. Placed straight through
+// placeBuilding, finished, and free: a test that wants ten swordsmen should not
+// have to buy a barracks and wait fourteen seconds for it first.
+function trainerOf(m, player, type) {
+  for (const b of Object.values(player.buildings)) {
+    if (m.trainsType(b.type) === type) return b;
+  }
+  const btype = Object.keys(cfg.BUILDING_TYPES).find(k => cfg.BUILDING_TYPES[k].trains === type);
+  if (!btype) return null;
+  for (let r = 2; r <= 14; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const x = player.baseX + dx, y = player.baseY + dy;
+        if (!m.canBuildAt(player, x, y)) continue;
+        const def = cfg.BUILDING_TYPES[btype];
+        return m.placeBuilding(player, {
+          x, y, type: btype, maxHp: def.hp, hp: def.hp,
+          underConstruction: false, remainingSec: 0, trainQueue: [], ready: 0,
+        });
+      }
+    }
+  }
+  return null;
+}
+function stock(m, player, type, n) {
+  const b = trainerOf(m, player, type);
+  if (b) b.ready = n;
+  return b;
+}
+function stockAll(m, player, units) {
+  for (const t in units) stock(m, player, t, units[t]);
+}
+function deployFrom(m, playerId, type, n, x, y) {
+  const player = m.players.get(playerId);
+  const b = trainerOf(m, player, type);
+  // Nothing TRAINS a golem or a colossus — they walk out of a shrine — so the
+  // ones no building makes are raised the way the game raises them.
+  if (!b) { m.spawnArmy(player, type, n, "move", { x, y }); return; }
+  if ((b.ready || 0) < n) b.ready = n;
+  m.cmdDeployFrom(playerId, b.x, b.y, n, x, y);
+}
+
+function deployAll(m, playerId, units, x, y) {
+  for (const t in units) if (units[t] > 0) deployFrom(m, playerId, t, units[t], x, y);
+}
+
+// A finished bank on free ground near the keep, for cases that need somewhere
+// to put villagers.
+function buildBank(m, player) {
+  for (let r = 2; r <= 14; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const x = player.baseX + dx, y = player.baseY + dy;
+        if (!m.canBuildAt(player, x, y)) continue;
+        const def = cfg.BUILDING_TYPES.bank;
+        return m.placeBuilding(player, {
+          x, y, type: 'bank', maxHp: def.hp, hp: def.hp,
+          underConstruction: false, remainingSec: 0, trainQueue: [], stored: 0,
+        });
+      }
+    }
+  }
+  return null;
+}
+
 let failures = 0;
 const check = (label, ok, detail) => {
   console.log(`${ok ? '  ok  ' : ' FAIL '} ${label}${detail !== undefined ? ` — ${detail}` : ''}`);
@@ -43,12 +116,12 @@ function fixedMatch(build) {
 }
 function field(m, pid, type, n, x, y) {
   const p = m.players.get(pid);
-  p.idleUnits[type] = (p.idleUnits[type] || 0) + n;
+  stock(m, p, type, (m.garrisonUnits(p)[type] || 0) + (n));
   const before = new Set(m.armies.keys());
   // Put down on the courtyard floor — the keep tile is outside the gate now —
   // and then teleported to where the case wants them, as before.
   const mp = m.musterPoint(p);
-  m.cmdDeployUnits(pid, { [type]: n }, mp.x, mp.y);
+  deployFrom(m, pid, type, n, mp.x, mp.y);
   const a = [...m.armies.values()].find(v => !before.has(v.id));
   a.x = x; a.y = y; a.destX = x; a.destY = y; a.order = 'hold';
   return a;
@@ -262,9 +335,14 @@ mirror('nobody ordered to do anything', (m) => {
           else if (r < 0.32) m.cmdTrainUnit(p.id, maybe(TYPES[Math.floor(rnd() * TYPES.length)]));
           else if (r < 0.35) { const [x, y] = near(9); m.cmdTrain(p.id, x, y, maybe(TYPES[Math.floor(rnd() * TYPES.length)])); }
           else if (r < 0.43) {
-            const want = {};
-            want[maybe(TYPES[Math.floor(rnd() * TYPES.length)])] = maybe(1 + Math.floor(rnd() * 9));
-            m.cmdDeployUnits(p.id, rnd() < 0.1 ? junk() : want, ...near(6));
+            // Deploying names a building now, so the junk goes into the
+            // coordinates as well as the count — a deploy from a tile with
+            // nothing on it is exactly the sort of message this is here to
+            // survive.
+            const plots = Object.values(p.buildings);
+            const from = plots.length ? plots[Math.floor(rnd() * plots.length)] : { x: X(), y: Y() };
+            m.cmdDeployFrom(p.id, rnd() < 0.1 ? junk() : from.x, rnd() < 0.1 ? junk() : from.y,
+              maybe(1 + Math.floor(rnd() * 9)), ...near(6));
           }
           else if (r < 0.50) m.cmdMoveArmy(p.id, myArmy(), X(), Y());
           else if (r < 0.60) {
@@ -276,7 +354,7 @@ mirror('nobody ordered to do anything', (m) => {
             m.cmdAttackArmy(p.id, myArmy(), kind, id);
           }
           else if (r < 0.65) m.cmdMergeArmy(p.id, myArmy(), anyArmy());
-          else if (r < 0.69) m.cmdRecallArmy(p.id, myArmy());
+          else if (r < 0.69) m.cmdMergeArmy(p.id, myArmy(), myArmy());
           else if (r < 0.76) {
             const id = maybe(CARD_IDS[Math.floor(rnd() * CARD_IDS.length)]);
             if (typeof id === 'string' && cfg.CARDS[id] && cfg.CARDS[id].spell) {
@@ -336,7 +414,7 @@ mirror('nobody ordered to do anything', (m) => {
         const r = rnd();
         if (r < 0.3) m.cmdBuild(id, p.baseX + Math.floor(rnd() * 8) - 4, p.baseY + Math.floor(rnd() * 8) - 4, 'barracks');
         else if (r < 0.6) m.cmdTrainUnit(id, 'swordsman');
-        else if (r < 0.8) m.cmdDeployUnits(id, { swordsman: 3 }, p.baseX, p.baseY);
+        else if (r < 0.8) deployFrom(m, id, 'swordsman', 3, p.baseX, p.baseY);
         else if (mine.length) m.cmdMoveArmy(id, mine[0].id, Math.floor(rnd() * 100), Math.floor(rnd() * 100));
       }
       m.tick(0.2);
@@ -541,7 +619,7 @@ for (const shrineWanted of [true, false]) {
     const m = garrisonless((mm, a, d) => {
       for (let i = 0; i < towers; i++) mm.cmdBuild('d', d.baseX + 2 + i, d.baseY + 2, 'tower');
       for (const b of Object.values(d.buildings)) b.underConstruction = false;
-      d.idleUnits.swordsman = garrison;
+      stock(mm, d, 'swordsman', garrison);
     });
     const d = m.players.get('d');
     const A = field(m, 'a', 'swordsman', attackers, d.baseX - 6, d.baseY);
