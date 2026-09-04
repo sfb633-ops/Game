@@ -49,7 +49,6 @@ const MAP_TILE_FALLBACK = 48;
 let buildingTypes = null, unitTypes = null, castleCfg = null;
 let terrainClearCost = 0;  // gold per tile of rock or water bought back
 let latestState = null;
-let armedDeploy = false;   // staged troops waiting for a map click to land on
 let armedClear = false;    // buying a tile of rock or water back as open ground
 // The groups under orders. A set rather than one id, because a drag across the
 // map selects everything inside it and every order below goes to all of them.
@@ -645,7 +644,7 @@ function abandonSession(reason) {
   selectedArmies.clear(); selectStart = null; selectBox = null;
   controlGroups = {};
   selectedBuilding = null; demolishHit = null;
-  armedSpell = null; armedAbility = false; armedBuild = null; armedDeploy = false;
+  armedSpell = null; armedAbility = false; armedBuild = null;
   // The tools too, or the next match opens with the wall tool still on and a
   // half-drawn drag from the last one still in memory.
   armedClear = false;
@@ -888,9 +887,8 @@ function onInit(msg) {
   // A fresh match means a fresh map and no leftover selections from the last one.
   latestState = null;
   terrainChunks = null;
-  selectedArmies.clear(); armedDeploy = false;
+  selectedArmies.clear();
   // A new empire has no buildings, so the roster waits again.
-  sawTrainer = false;
   // Army ids restart from scratch in a new match, so a slot held over would
   // point at whatever group happened to be dealt the same id.
   controlGroups = {};
@@ -921,7 +919,6 @@ function onInit(msg) {
   document.getElementById('room-code').textContent = myRoom ? myRoom.code : '—';
 
   resizeCanvas();               // canvas now fills the viewport pane, not the whole map
-  buildUnitInputs();
   if (rejoining) { if (assetsReady) buildTerrainLayer(); return; }
   inputsBound = true;
   // The map is prerendered as soon as both the art and this init message have
@@ -1351,7 +1348,6 @@ function disarmTools(keep) {
     armedClear = false;
     document.getElementById('clear-tool-btn').classList.remove('active');
   }
-  if (keep !== 'deploy') armedDeploy = false;
   if (keep !== 'spell') armedSpell = null;
   if (keep !== 'ability') armedAbility = false;
 }
@@ -1363,63 +1359,8 @@ function updateCursor() {
   canvas.style.cursor = armedBuild ? 'copy' : (wallMode ? 'cell' : 'crosshair');
 }
 
-function armDeploy(on) {
-  armedDeploy = !!on && !!stagedUnits();
-  if (armedDeploy) disarmTools('deploy');
-  updateCursor();
-  render(); renderPanel();
-}
 
-// Which of my buildings makes this kind of soldier, and which of those has the
-// most of them standing in it.
-//
-// The keep is not in buildingTypes — it is the thing you start with rather than
-// a thing you build — so it is named here the way the server names it.
-function trainsWhat(type) {
-  if (type === 'castle') return castleCfg && castleCfg.trains;
-  return (buildingTypes && buildingTypes[type] || {}).trains;
-}
-function fullestTrainer(unitType) {
-  const me = myPlayer();
-  if (!me) return null;
-  let best = null;
-  for (const b of me.buildings) {
-    if (b.underConstruction || trainsWhat(b.type) !== unitType) continue;
-    if (!(b.ready > 0)) continue;
-    if (!best || b.ready > best.ready) best = b;
-  }
-  return best;
-}
 
-// Send the staged troops to a tile and clear the staging row. Returns whether
-// the order went out, so a click on water can leave the deployment armed to try
-// again rather than silently throwing the selection away.
-function deployStagedAt(ix, iy) {
-  const units = stagedUnits();
-  if (!units) return false;
-  if (!isMarchable(ix, iy)) { log('Troops cannot march onto water or rock.'); return false; }
-  if (!isMyTerritory(ix, iy)) {
-    log('Troops can only be deployed inside your own territory — send them on from there.');
-    return false;
-  }
-  // One message per kind, each naming the building those troops are standing
-  // in. There is no empire-wide pool to draw on any more — see garrisonUnits
-  // on the server — so the client has to say which barracks it is emptying.
-  //
-  // Interim: it picks the fullest building that makes each kind. The building's
-  // own popup is where this belongs, and this row goes when that lands.
-  for (const type in units) {
-    const from = fullestTrainer(type);
-    if (!from) { log('Nothing of that kind is waiting anywhere.'); continue; }
-    send({ type: 'deployFrom', bx: from.x, by: from.y, count: units[type], x: ix, y: iy });
-  }
-  document.querySelectorAll('#unit-inputs input').forEach(inp => { inp.value = 0; });
-  updateDeployButton();
-  // Counts move as soldiers fall, so the slider's ceiling has to move with
-  // them rather than being set once when the selection was made.
-  renderGroupBar();
-  return true;
-}
 
 // ---------- Race ability ----------
 
@@ -1650,7 +1591,6 @@ function frame(ts) {
   }
   updateCamera(dt);
   render();
-  drawTroopIcons();
   drawBuildIcons();
   requestAnimationFrame(frame);
 }
@@ -2693,7 +2633,7 @@ function onCanvasMouseDown(e) {
   // Nothing is being carried, so the press starts a selection box. Anything
   // armed owns the click instead — dragging a box while holding a building
   // would be two gestures fighting over one drag.
-  if (armedBuild || armedClear || armedDeploy || armedAbility || armedSpell) return;
+  if (armedBuild || armedClear || armedAbility || armedSpell) return;
   // Cleared on the way in rather than on the way out. It is set when a drag
   // finishes so the click that follows is ignored — but a drag released over
   // the side panel or off the window never produces a click on the canvas at
@@ -2774,7 +2714,6 @@ function cancelDrag() {
   if (selectStart || selectBox) { selectStart = null; selectBox = null; had = true; }
   if (wallDrag) { wallDrag = null; wallLast = null; had = true; }
   if (armedBuild) { armBuild(null); had = true; }
-  if (armedDeploy) { armDeploy(false); had = true; }
   if (armedClear) { armClear(false); had = true; }
   if (had) { log('Cancelled.'); render(); }
   return had;
@@ -2890,16 +2829,6 @@ function nearestMyArmy(fx, fy, maxDist = 0.8, exclude = null) {
   return best;
 }
 
-// Read the unit counts staged in the Send Army inputs.
-function stagedUnits() {
-  const units = {};
-  let any = false;
-  document.querySelectorAll('#unit-inputs input').forEach(inp => {
-    const n = parseInt(inp.value, 10) || 0;
-    if (n > 0) { units[inp.dataset.unit] = n; any = true; }
-  });
-  return any ? units : null;
-}
 
 function onCanvasClick(e) {
   if (wallMode) return; // drag handlers own the canvas while the wall tool is on
@@ -2920,13 +2849,6 @@ function onCanvasClick(e) {
     if (!isMyTerritory(ix, iy)) log('You can only clear ground inside your own territory.');
     else if (isMarchable(ix, iy)) log('That ground is already clear.');
     else send({ type: 'clearTerrain', x: ix, y: iy });
-    return;
-  }
-
-  // Staged troops land where you click, before anything else can read the click
-  // as a selection.
-  if (armedDeploy) {
-    if (deployStagedAt(ix, iy)) armDeploy(false);
     return;
   }
 
@@ -3317,14 +3239,10 @@ function onCanvasRightClick(e) {
     return;
   }
 
-  // ...otherwise the staged troops are deployed here. Right-click is the
-  // shortcut for the Deploy button and does the same thing; there is no way to
-  // raise a group already attacking, by design.
-  if (!stagedUnits()) {
-    log('Right-click a group to command it, or pick troops below and deploy them.');
-    return;
-  }
-  if (deployStagedAt(ix, iy)) armDeploy(false);
+  // Nothing else to do with a right-click on open ground. Troops come out of
+  // the building that trained them now, through its own popup, so there is no
+  // staging row for this to land.
+  log('Right-click a group to command it, or click a building to train and deploy from it.');
 }
 
 function onKeyDown(e) {
@@ -3350,7 +3268,6 @@ function onKeyDown(e) {
     if (armedBuild) { armBuild(null); return; }
     if (armedSpell) { armSpell(null); return; }
     if (armedAbility) { armAbility(false); return; }
-    if (armedDeploy) { armDeploy(false); return; }
     if (armedClear) { armClear(false); return; }
   }
   if (k === 'q') { useAbility(); return; }
@@ -3804,7 +3721,6 @@ function syncLive(root, values) {
 // covers both habits.
 // Whether this empire has ever had a building that trains something. The
 // troop roster is not on screen before that; see renderPanel.
-let sawTrainer = false;
 let armedBuild = null;      // building type being carried, or null
 
 // Palette cells are narrow, so the labels are short. The real name is on the
@@ -3882,111 +3798,14 @@ function drawBuildIcons() { /* icons are static */ }
 // are about to send. Clicking it orders one; the grey that sits over the
 // portrait wipes away as that one trains. Right-click stages the whole lot for
 // sending, since that is the other thing you constantly want from this row.
-const troopIcons = [];   // { type, ctx, canvas, fill } — redrawn by the render loop
 
-function buildUnitInputs() {
-  const container = document.getElementById('unit-inputs');
-  container.innerHTML = '';
-  troopIcons.length = 0;
-  for (const type in unitTypes) {
-    const slot = document.createElement('div');
-    // A unit nobody trains still needs a slot, or a golem that was recalled
-    // home could never be sent out again — but the slot is hidden until you
-    // actually have one, so the row is not carrying a permanently empty cell
-    // with a price nobody can pay. See the per-tick update below.
-    slot.className = 'troop-slot' + (unitTypes[type].special ? ' special' : '');
-    slot.dataset.slot = type;
-    slot.innerHTML =
-      `<div class="troop-portrait">` +
-      `<canvas class="troop-icon" width="${TROOP_ICON_W}" height="${TROOP_ICON_H}"></canvas>` +
-      `<div class="troop-progress"></div>` +
-      `<span class="troop-queue"></span>` +
-      `</div>` +
-      `<span class="troop-have" id="have-${type}">0</span>` +
-      `<input type="number" min="0" value="0" data-unit="${type}" title="How many to send">`;
-    container.appendChild(slot);
-    const cv = slot.querySelector('canvas');
-    const c = cv.getContext('2d');
-    c.imageSmoothingEnabled = false;
-    troopIcons.push({ type, ctx: c, canvas: cv, fill: slot.querySelector('.troop-progress'), queue: slot.querySelector('.troop-queue') });
-  }
-  container.addEventListener('input', updateDeployButton);
-  container.addEventListener('click', (e) => {
-    const slot = e.target.closest('.troop-slot');
-    if (!slot || e.target.tagName === 'INPUT') return;
-    send({ type: 'trainUnit', unitType: slot.dataset.slot });
-  });
-  // Right-click is the staging shortcut: all of them, or none if you had them all.
-  container.addEventListener('contextmenu', (e) => {
-    const slot = e.target.closest('.troop-slot');
-    if (!slot) return;
-    e.preventDefault();
-    const type = slot.dataset.slot;
-    const have = idleCount(type);
-    setUnitInput(type, stagedCount(type) >= have ? 0 : have);
-  });
-  document.getElementById('max-all-btn').addEventListener('click', () => {
-    for (const type in unitTypes) setUnitInput(type, idleCount(type));
-  });
-  document.getElementById('clear-all-btn').addEventListener('click', () => {
-    for (const type in unitTypes) setUnitInput(type, 0);
-  });
-}
 
-// Which building trains a given unit, for the tooltip on a slot you can't use.
-function trainerNameFor(unitType) {
-  for (const key in buildingTypes) {
-    if (buildingTypes[key].trains === unitType) return buildingTypes[key].name;
-  }
-  return 'building';
-}
 
-function stagedCount(type) {
-  const inp = document.querySelector(`#unit-inputs input[data-unit="${type}"]`);
-  return inp ? (parseInt(inp.value, 10) || 0) : 0;
-}
 
-// The portraits animate off the same clock as the map, so the roster is alive
-// even when nothing is happening. Drawn straight from the race's own sheets —
-// an Orc player sees orcs here, not a generic icon.
-function drawTroopIcons() {
-  if (!assetsReady || !myRace) return;
 
-  for (const icon of troopIcons) {
-    const c = icon.ctx;
-    c.setTransform(1, 0, 0, 1, 0, 0);
-    c.clearRect(0, 0, TROOP_ICON_W, TROOP_ICON_H);
-    Sprites.drawUnit(c, myRace, icon.type, 'idle', 'down', clock,
-      TROOP_ICON_W / 2, TROOP_ICON_BASE);
-  }
-}
 
-function idleCount(type) {
-  const me = myPlayer();
-  return (me && me.idleUnits[type]) || 0;
-}
 
-function setUnitInput(type, value) {
-  const inp = document.querySelector(`#unit-inputs input[data-unit="${type}"]`);
-  if (!inp) return;
-  inp.value = value;
-  updateDeployButton();
-}
 
-// Deploy needs troops staged and nothing else — there is no target to pick.
-function updateDeployButton() {
-  const btn = document.getElementById('deploy-btn');
-  const staged = !!stagedUnits();
-  btn.disabled = !staged;
-  if (armedDeploy && !staged) { armedDeploy = false; updateCursor(); }  // emptied under it
-  btn.classList.toggle('armed', armedDeploy);
-  document.getElementById('deploy-hint').textContent = armedDeploy
-    ? 'Click inside your own territory to put them there.'
-    : staged ? 'Press Deploy, then click where they should go.'
-             : 'Pick troops below, then Deploy them inside your territory.';
-}
-
-document.getElementById('deploy-btn').addEventListener('click', () => armDeploy(!armedDeploy));
 
 // Write text only when it changed. renderPanel runs five times a second, and
 // touching textContent on every field of every frame is how a panel starts
@@ -4074,7 +3893,6 @@ function renderPanel() {
   const me = latestState.players.find(p => p.id === myId);
   if (!me) return;
 
-  updateDeployButton();
 
   // First, because the draft covers everything else while it is up.
   renderDraft(me);
@@ -4285,57 +4103,6 @@ function logGarrison(me) {
   // tally in the stat row. It is in the Town Center card now — see
   // renderGarrison, and the click on your own keep that opens it.
 
-  // Nothing to train until something trains it.
-  //
-  // A fresh empire has a keep and nothing else, and the roster was three
-  // portraits you could click all you liked for a message telling you to go
-  // and build a barracks. The bar is not up until one of the buildings that
-  // trains a unit is standing — after that it stays, because a roster that
-  // came and went as buildings fell would be worse than one that waits.
-  // The keep trains workers and is not in buildingTypes — it is not a thing
-  // you build — so it is named here too. Without it the roster stayed hidden on
-  // a fresh empire that could already make workers from the first second.
-  const trains = me.buildings.some(b => b.type === 'castle'
-    ? !!(castleCfg && castleCfg.trains)
-    : !!(b.type && buildingTypes[b.type] && buildingTypes[b.type].trains));
-  if (trains) sawTrainer = true;
-  document.getElementById('troop-bar').classList.toggle('hidden', !sawTrainer);
-  for (const icon of troopIcons) {
-    const type = icon.type;
-    const inp = document.querySelector(`#unit-inputs input[data-unit="${type}"]`);
-    const slot = inp.closest('.troop-slot');
-    const have = me.idleUnits[type] || 0;
-    const t = (me.training && me.training[type]) || { queued: 0, capacity: 0, progress: 0, canTrain: false, full: false };
-    const price = priceFor(unitTypes[type].cost);
-
-    inp.max = have;
-    const haveEl = document.getElementById(`have-${type}`);
-    if (haveEl.textContent !== String(have)) haveEl.textContent = have;
-    if (parseInt(inp.value, 10) > have) inp.value = have;   // only reachable by typing
-
-    // Grey covers what is not yet trained and recedes as it is, so a glance at
-    // the row tells you what is on the way as well as what you have.
-    icon.fill.style.height = `${Math.round((1 - (t.queued ? t.progress : 1)) * 100)}%`;
-    // Anything past the one in progress is a number, not a second bar.
-    const waiting = Math.max(0, t.queued - 1);
-    const queueText = waiting ? `+${waiting}` : '';
-    if (icon.queue.textContent !== queueText) icon.queue.textContent = queueText;
-
-    if (unitTypes[type].special) slot.classList.toggle('hidden', have === 0);
-    slot.classList.toggle('empty', have === 0 && !t.queued);
-    slot.classList.toggle('untrainable', !t.canTrain);
-    slot.classList.toggle('unaffordable', t.canTrain && !t.full && me.gold < price);
-    // One line: a title attribute is not the place for a layout.
-    slot.title = !t.canTrain
-      ? unitTypes[type].name + ' \u2014 build a ' + trainerNameFor(type) + ' to train these'
-      : unitTypes[type].name + ' \u2014 click to train (' + price + 'g) \u00b7 ' +
-        trim(unitTypes[type].attack * modOf('attackMult')) + ' attack \u00b7 ' +
-        trim(unitTypes[type].hp * modOf('hpMult')) + ' hp' +
-        ' \u00b7 ' + trim(unitTypes[type].speed * modOf('speedMult')) + ' speed' +
-        ' \u00b7 queue ' + t.queued + '/' + t.capacity +
-        (t.full ? ' (full ' + '\u2014' + ' another ' + trainerNameFor(type) + ' widens it)' : '') +
-        ' \u00b7 right-click to stage all';
-  }
 
   if (latestState.gameOver) {
     const banner = document.getElementById('game-over-banner');

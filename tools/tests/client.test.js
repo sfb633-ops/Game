@@ -57,7 +57,6 @@ for (const [fn, where, source] of [
   ['renderDraft', 'renderPanel', panel],
   ['renderCards', 'renderPanel', panel],
   ['renderAbility', 'renderPanel', panel],
-  ['drawTroopIcons', 'frame', frame],
   ['drawBuildIcons', 'frame', frame],
   ['trackBuildings', 'onState', state],
   ['trackArmies', 'onState', state],
@@ -843,6 +842,9 @@ if (geomStart > 0 && geomEnd > geomStart) {
     client.includes("id=\"bp-demolish\""));
   check('  and the count it sends is the slider beside them',
     client.includes("count: bpCount"));
+  check('  and the troop row it replaced is gone',
+    !html.includes('id="troop-bar"') && !client.includes('armedDeploy'),
+    'a second way to deploy, from a pool that no longer exists');
 
   check('the build palette is a bar on the map', html.includes('id="build-bar"'));
   check('  drawn from icon files, not a live sprite per cell',
