@@ -4622,5 +4622,41 @@ function fightOut(m, ours, theirs) {
     bank.stored === 0 && m.incomePerSec(a) === 0, `stored ${bank.stored}`);
 }
 
+// --- a building opens its door to let them out -----------------------------
+//
+// The keep has had a portcullis since long before this. Every other building
+// swings a door on its front, which is the same idea and a different sprite, so
+// it says so with its own effect rather than overloading the keep's.
+{
+  const m = twoSides();
+  const a = m.players.get('a');
+  a.gold = 999999;
+  const keep = a.buildings[a.baseX + ',' + a.baseY];
+  keep.ready = 2;
+  m.effects.length = 0;
+  m.cmdDeployFrom('a', keep.x, keep.y, 1);
+  check('the keep raises its portcullis',
+    m.effects.some(e => e.kind === 'gate' && e.x === keep.x && e.y === keep.y),
+    m.effects.map(e => e.kind).join(',') || 'nothing');
+
+  const barracks = trainerOf(m, a, 'swordsman');
+  barracks.ready = 2;
+  m.effects.length = 0;
+  m.cmdDeployFrom('a', barracks.x, barracks.y, 1);
+  check('  and a barracks opens its door',
+    m.effects.some(e => e.kind === 'door' && e.x === barracks.x && e.y === barracks.y),
+    m.effects.map(e => e.kind).join(',') || 'nothing');
+  check('  which is not the keep\u2019s gate',
+    !m.effects.some(e => e.kind === 'gate'));
+
+  // Nobody inside, nothing to open for: a door that swings on a refused order
+  // is a building telling you something happened when it did not.
+  barracks.ready = 0;
+  m.effects.length = 0;
+  m.cmdDeployFrom('a', barracks.x, barracks.y, 1);
+  check('  and an empty building keeps its door shut',
+    !m.effects.some(e => e.kind === 'door'), m.effects.map(e => e.kind).join(',') || 'nothing');
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');
 process.exit(failures ? 1 : 0);

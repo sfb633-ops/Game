@@ -1769,6 +1769,12 @@ function drawBuilding(b, px, py, color, hasWall, race, pop) {
     ctx.fillRect(px - ts / 2, py - ts / 2, ts, ts);
     return;
   }
+  // The door, if this one is swinging. Drawn over the building because the
+  // shut frame it starts and ends on is the one baked into the wall, so a door
+  // at rest is invisible work rather than a seam.
+  const swing = doorOpenAt(b.x, b.y);
+  if (swing > 0) Sprites.drawBuildingDoor(ctx, b.type, px, py, art, swing);
+
   // A tower's archer is a separate sprite standing in its gallery. He watches
   // the last thing the tower shot at and plays his loose while the arrow is
   // still in the air; with nothing to do he idles facing the camera.
@@ -4347,6 +4353,7 @@ function onState(msg) {
   if (msg.effects) for (const fx of msg.effects) {
     if (fx.kind === 'arrow') { addArrow(fx); playSfx('arrow'); }
     else if (fx.kind === 'gate') { gateOpened.set(fx.x + ',' + fx.y, clock); playSfx('gate'); }
+    else if (fx.kind === 'door') { doorOpened.set(fx.x + ',' + fx.y, clock); playSfx('gate'); }
     else {
       spellFlash.push({ ...fx, start: clock });
       // Only the ability has a sound in the pack. The spells get their flash and
@@ -4370,6 +4377,24 @@ function onState(msg) {
 // long enough for the gate to still be open when the group that caused it walks
 // out of it, which is the only reason any of this is on screen.
 const GATE_UP = 0.35, GATE_HOLD = 1.2, GATE_DOWN = 0.7;
+
+// A door on the front of a building, on the same clock as the keep's
+// portcullis and for the same reason: it has to still be open when the group
+// that caused it walks out of it. Faster on the way open than a portcullis —
+// a door is pushed, not winched — and it swings shut rather than dropping.
+const doorOpened = new Map();
+const DOOR_OPEN = 0.18, DOOR_HOLD = 1.3, DOOR_SHUT = 0.55;
+function doorOpenAt(x, y) {
+  const t0 = doorOpened.get(x + ',' + y);
+  if (t0 == null) return 0;
+  const t = clock - t0;
+  if (t < 0) return 0;
+  if (t < DOOR_OPEN) return t / DOOR_OPEN;
+  if (t < DOOR_OPEN + DOOR_HOLD) return 1;
+  const shut = (t - DOOR_OPEN - DOOR_HOLD) / DOOR_SHUT;
+  if (shut >= 1) { doorOpened.delete(x + ',' + y); return 0; }
+  return 1 - shut;
+}
 function gateOpenAt(x, y) {
   const t0 = gateOpened.get(x + ',' + y);
   if (t0 == null) return 0;

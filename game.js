@@ -3759,9 +3759,11 @@ class Match {
     if (!units) return;
     this.spawnArmies(player, units, 'move', { x: Math.round(x), y: Math.round(y) },
       null, null, { x: plot.x, y: plot.y });
-    // The keep opens its gate to let them out — only when it IS the keep now,
-    // because that is the building they are walking out of.
-    if (plot.type === 'castle') this.effects.push({ kind: 'gate', x: plot.x, y: plot.y });
+    // The building they walked out of opens its door. The keep's is a
+    // portcullis and has had its own effect since long before this; everything
+    // else swings a door on the front, which is the same idea and a different
+    // sprite, so it gets its own kind rather than overloading that one.
+    this.effects.push({ kind: plot.type === 'castle' ? 'gate' : 'door', x: plot.x, y: plot.y });
   }
 
   // Every order below starts the same way: is this a group you own, and are you
@@ -3833,6 +3835,7 @@ class Match {
     plot.stored -= n;
     this.spawnArmies(player, { worker: n }, 'move', this.deployExit(player, plot),
       null, null, { x: plot.x, y: plot.y });
+    this.effects.push({ kind: 'door', x: plot.x, y: plot.y });
     this.emit(playerId, `${n} villager${n === 1 ? '' : 's'} back out of the bank.`);
   }
 

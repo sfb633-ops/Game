@@ -636,19 +636,68 @@ function fitW(img, px) { return ops.resize(img, px, Math.max(1, Math.round(img.h
 // A camp is 4.5 against the player buildings' 3: it is a hall rather than a
 // house, and the extra width is most of what tells the two apart at a glance.
 const SOURCE_TILES_WIDE = { barracks: 3, bank: 3, stable: 3, siege: 3, camp: 4.5 };
+// The door recipes, so the opening frames are cut from the same cells the
+// shut one was. make-building owns that table; importing it beats copying it.
+const MAKE = require('./make-building');
+
 const BUILDING_SRC_DIR = 'buildings-src';
 
 // A building composed from the pack and left in assets/buildings-src as a PNG.
 // Returns null when there is no file for this type, which is most of them for
 // now — the rest still come off MiniWorldSprites until they are made.
+// The door, as a strip of the frames it opens through.
+//
+// !Fantasy_door1 is an RPG Maker character sheet: each door is three frames
+// across and FOUR ROWS DOWN, and the rows are the swing — shut, ajar, half, and
+// flat against the wall with the doorway black behind it. make-building bakes
+// the shut frame into the wall and writes down where it put it; this cuts all
+// four and scales them exactly as the building was scaled, so the strip drops
+// onto the sprite at the recorded offset with no arithmetic at draw time.
+//
+// Per BUILDING rather than per door style, because the scale is the building's:
+// a camp is 4.5 tiles wide against a barracks' 3, so one shared strip would be
+// right for one of them and wrong for the other.
+const DOOR_FRAMES = 4;
+function buildDoorStrip(type, setName, spec, scale) {
+  const [cc, cr] = MAKE.DOORS[spec.style] || MAKE.DOORS.plank;
+  const sheet = decodePNG(need(path.join(WINLU, 'characters', MAKE.DOOR_SHEET)));
+  const w = Math.max(1, Math.round(spec.w * scale));
+  const h = Math.max(1, Math.round(spec.h * scale));
+  const strip = ops.blank(w * DOOR_FRAMES, h);
+  for (let f = 0; f < DOOR_FRAMES; f++) {
+    // Middle column of each row: the outer two are the character sheet's walk
+    // frames and are the same door.
+    const cell = ops.crop(sheet, cc * 144 + 48, (cr * 4 + f) * 96, 48, 96);
+    ops.blit(strip, ops.resize(cell, w, h), f * w, 0);
+  }
+  return {
+    file: write(strip, 'buildings', setName, type + '-door.png'),
+    w, h, frames: DOOR_FRAMES,
+    x: Math.round(spec.x * scale), y: Math.round(spec.y * scale),
+  };
+}
+
 function buildFromSource(type, setName) {
   const file = path.join(SRC, BUILDING_SRC_DIR, type + '.png');
   if (!fs.existsSync(file)) return null;
   let img = decodePNG(file);
   const box = ops.bbox(img);
   if (box) img = ops.crop(img, box.x0, box.y0, box.w, box.h);
-  img = fitW(img, (SOURCE_TILES_WIDE[type] || 3) * TILE);
-  return describeBuilding(img, 'buildings', setName, type + '.png');
+  const cropped = img.width;
+  const target = (SOURCE_TILES_WIDE[type] || 3) * TILE;
+  img = fitW(img, target);
+  const out = describeBuilding(img, 'buildings', setName, type + '.png');
+  // The door rides through the same crop and the same scale the sprite did.
+  const meta = path.join(SRC, BUILDING_SRC_DIR, type + '.doors.json');
+  if (fs.existsSync(meta)) {
+    const doors = JSON.parse(fs.readFileSync(meta, 'utf8'));
+    const spec = doors[0];
+    if (spec) {
+      const shifted = { ...spec, x: spec.x - (box ? box.x0 : 0), y: spec.y - (box ? box.y0 : 0) };
+      out.door = buildDoorStrip(type, setName, shifted, target / cropped);
+    }
+  }
+  return out;
 }
 
 // ---- The keep ---------------------------------------------------------------

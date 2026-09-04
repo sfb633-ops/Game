@@ -412,6 +412,33 @@ const Sprites = (function () {
     return ((raw % def.frames) + def.frames) % def.frames;
   }
 
+  // The door on the front of a building, at whatever point of its swing.
+  //
+  // `open` is 0 shut to 1 flat against the wall, and the strip is four frames
+  // of that arc — the same shut frame that is baked into the wall, then ajar,
+  // half, and open. Frame 0 is drawn over the baked one and is identical to it,
+  // so there is no seam at either end of the animation and nothing has to know
+  // whether a door is moving.
+  //
+  // Positioned from the sprite's own top-left with an offset the asset build
+  // recorded, so nothing here has to know where a doorway is: see
+  // buildDoorStrip, which cuts the frames at the building's own scale for
+  // exactly this reason.
+  function drawBuildingDoor(ctx, type, worldX, worldY, opts, open) {
+    const def = buildingDef(type, opts || {});
+    const door = def && def.door;
+    if (!door || !ready(door.file)) return false;
+    const frame = Math.max(0, Math.min(door.frames - 1,
+      Math.round((open || 0) * (door.frames - 1))));
+    const x = Math.round(worldX - def.anchorX) + door.x;
+    const y = Math.round(buildingBase(worldY) - def.anchorY - ((opts && opts.lift) || 0)) + door.y;
+    ctx.save();
+    if (opts && opts.alpha != null) ctx.globalAlpha = opts.alpha;
+    ctx.drawImage(get(door.file), frame * door.w, 0, door.w, door.h, x, y, door.w, door.h);
+    ctx.restore();
+    return true;
+  }
+
   function drawBuilding(ctx, type, worldX, worldY, opts = {}) {
     const def = buildingDef(type, opts);
     if (!def || !ready(def.file)) return false;
@@ -869,7 +896,7 @@ const Sprites = (function () {
     image: get,
     isReady: ready,
     buildTerrainCanvas, terrainOrigin,
-    drawBuilding, drawBanner, buildingDef, drawWall, groundShadow,
+    drawBuilding, drawBuildingDoor, drawBanner, buildingDef, drawWall, groundShadow,
     drawUnit, drawArmy,
     drawSmoke,
     drawSpellEffect,

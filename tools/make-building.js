@@ -179,11 +179,22 @@ function charSheet(file) {
 // which is the one a building wants standing in its wall.
 const DOORS = { plank: [0, 0], oak: [1, 0], rough: [2, 0], studded: [3, 0],
                 red: [0, 1], pale: [1, 1], dark: [2, 1] };
+// Where the last recipe put its doors, in the coordinates of the canvas it was
+// drawn on. Recorded rather than worked out afterwards, because only the recipe
+// knows: the door is drawn from its FOOT and the sheet cell is bigger than the
+// leaf, so hunting for it in the finished sprite would be guesswork.
+//
+// build() translates these by the crop it does at the end and writes them beside
+// the PNG, which is how the door survives into the asset pipeline and, in the
+// end, gets to swing when troops come out.
+let lastDoors = [];
 function door(dst, which, footTx, footTy) {
   const [cc, cr] = DOORS[which] || DOORS.plank;
   const img = ops.crop(charSheet('!Fantasy_door1.png'), cc * 144 + 48, cr * 384, 48, 96);
-  ops.drawOver(dst, img, Math.round(footTx * TILE - img.width / 2),
-    Math.round(footTy * TILE - img.height));
+  const x = Math.round(footTx * TILE - img.width / 2);
+  const y = Math.round(footTy * TILE - img.height);
+  lastDoors.push({ style: which in DOORS ? which : 'plank', x, y, w: img.width, h: img.height });
+  ops.drawOver(dst, img, x, y);
 }
 
 // A hanging trade sign off !Signs. Row 0 carries twelve of them and row 1 three
@@ -403,11 +414,25 @@ function build(name, force) {
   // afterwards, so an oversized canvas costs nothing and a small one silently
   // clips — the keep lost its right-hand tower to a six-tile canvas.
   const canvas = ops.blank(12 * TILE, 13 * TILE);
+  lastDoors = [];
   make(canvas);
   const box = ops.bbox(canvas);
   const img = box ? ops.crop(canvas, box.x0, box.y0, box.w, box.h) : canvas;
   fs.writeFileSync(out, encodePNG(img));
   console.log('wrote ' + out + '  ' + img.width + 'x' + img.height);
+  // The doors, moved into the cropped image's coordinates. A sidecar rather
+  // than a table in build-assets: the recipe above is the only thing that knows
+  // where it put the door, and two copies of that would drift the first time
+  // somebody nudges one.
+  const dx = box ? box.x0 : 0, dy = box ? box.y0 : 0;
+  const doors = lastDoors.map(d => ({ ...d, x: d.x - dx, y: d.y - dy }));
+  const meta = path.join(OUT_DIR, name + '.doors.json');
+  if (doors.length) {
+    fs.writeFileSync(meta, JSON.stringify(doors, null, 2));
+    console.log('  and ' + doors.length + ' door' + (doors.length === 1 ? '' : 's') + ' -> ' + path.basename(meta));
+  } else if (fs.existsSync(meta)) {
+    fs.unlinkSync(meta);
+  }
 }
 
 if (require.main === module) {
@@ -417,4 +442,6 @@ if (require.main === module) {
   build(name, force);
 }
 
-module.exports = { build, RECIPES };
+// DOORS travels with the recipes: build-assets cuts the opening frames out of
+// the same sheet and has to look them up the same way.
+module.exports = { build, RECIPES, DOORS, DOOR_SHEET: '!Fantasy_door1.png' };

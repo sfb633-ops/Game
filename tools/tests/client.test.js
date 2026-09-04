@@ -39,6 +39,7 @@ for (const file of ['client.js', 'sprites.js', 'artdefs.js']) {
 // The handful of entry points that make a feature visible at all. Each has to
 // be reachable from the code that runs every state message or every frame.
 const client = fs.readFileSync(path.join(SRC, 'client.js'), 'utf8');
+const sprites = fs.readFileSync(path.join(SRC, 'sprites.js'), 'utf8');
 const bodyOf = (name) => {
   const start = client.indexOf(`function ${name}(`);
   if (start < 0) return '';
@@ -842,6 +843,12 @@ if (geomStart > 0 && geomEnd > geomStart) {
     client.includes("id=\"bp-demolish\""));
   check('  and the count it sends is the slider beside them',
     client.includes("count: bpCount"));
+  check('a building swings its door when it turns somebody out',
+    client.includes('doorOpenAt(') && client.includes('drawBuildingDoor(') &&
+    client.includes("fx.kind === 'door'"),
+    'the effect has to be stored, read, and drawn');
+  check('  and the frames come off the same sheet the shut one was baked from',
+    sprites.includes('def.door') && sprites.includes('door.frames'));
   check('  and the troop row it replaced is gone',
     !html.includes('id="troop-bar"') && !client.includes('armedDeploy'),
     'a second way to deploy, from a pool that no longer exists');

@@ -798,6 +798,14 @@
       "h": 29,
       "anchorX": 72,
       "anchorY": 0
+     },
+     "door": {
+      "file": "buildings/cyan/barracks-door.png",
+      "w": 36,
+      "h": 72,
+      "frames": 4,
+      "x": 36,
+      "y": 72
      }
     },
     "bank": {
@@ -813,6 +821,14 @@
       "h": 29,
       "anchorX": 72,
       "anchorY": 0
+     },
+     "door": {
+      "file": "buildings/cyan/bank-door.png",
+      "w": 36,
+      "h": 72,
+      "frames": 4,
+      "x": 36,
+      "y": 72
      }
     },
     "stable": {
@@ -828,6 +844,14 @@
       "h": 29,
       "anchorX": 72,
       "anchorY": 0
+     },
+     "door": {
+      "file": "buildings/cyan/stable-door.png",
+      "w": 36,
+      "h": 72,
+      "frames": 4,
+      "x": 36,
+      "y": 72
      }
     },
     "siege": {
@@ -843,6 +867,14 @@
       "h": 29,
       "anchorX": 72,
       "anchorY": 0
+     },
+     "door": {
+      "file": "buildings/cyan/siege-door.png",
+      "w": 36,
+      "h": 72,
+      "frames": 4,
+      "x": 36,
+      "y": 72
      }
     },
     "castle": {
@@ -1065,6 +1097,14 @@
       "h": 29,
       "anchorX": 72,
       "anchorY": 0
+     },
+     "door": {
+      "file": "buildings/red/barracks-door.png",
+      "w": 36,
+      "h": 72,
+      "frames": 4,
+      "x": 36,
+      "y": 72
      }
     },
     "bank": {
@@ -1080,6 +1120,14 @@
       "h": 29,
       "anchorX": 72,
       "anchorY": 0
+     },
+     "door": {
+      "file": "buildings/red/bank-door.png",
+      "w": 36,
+      "h": 72,
+      "frames": 4,
+      "x": 36,
+      "y": 72
      }
     },
     "stable": {
@@ -1095,6 +1143,14 @@
       "h": 29,
       "anchorX": 72,
       "anchorY": 0
+     },
+     "door": {
+      "file": "buildings/red/stable-door.png",
+      "w": 36,
+      "h": 72,
+      "frames": 4,
+      "x": 36,
+      "y": 72
      }
     },
     "siege": {
@@ -1110,6 +1166,14 @@
       "h": 29,
       "anchorX": 72,
       "anchorY": 0
+     },
+     "door": {
+      "file": "buildings/red/siege-door.png",
+      "w": 36,
+      "h": 72,
+      "frames": 4,
+      "x": 36,
+      "y": 72
      }
     },
     "castle": {
@@ -1332,6 +1396,14 @@
       "h": 29,
       "anchorX": 72,
       "anchorY": 0
+     },
+     "door": {
+      "file": "buildings/lime/barracks-door.png",
+      "w": 36,
+      "h": 72,
+      "frames": 4,
+      "x": 36,
+      "y": 72
      }
     },
     "bank": {
@@ -1347,6 +1419,14 @@
       "h": 29,
       "anchorX": 72,
       "anchorY": 0
+     },
+     "door": {
+      "file": "buildings/lime/bank-door.png",
+      "w": 36,
+      "h": 72,
+      "frames": 4,
+      "x": 36,
+      "y": 72
      }
     },
     "stable": {
@@ -1362,6 +1442,14 @@
       "h": 29,
       "anchorX": 72,
       "anchorY": 0
+     },
+     "door": {
+      "file": "buildings/lime/stable-door.png",
+      "w": 36,
+      "h": 72,
+      "frames": 4,
+      "x": 36,
+      "y": 72
      }
     },
     "siege": {
@@ -1377,6 +1465,14 @@
       "h": 29,
       "anchorX": 72,
       "anchorY": 0
+     },
+     "door": {
+      "file": "buildings/lime/siege-door.png",
+      "w": 36,
+      "h": 72,
+      "frames": 4,
+      "x": 36,
+      "y": 72
      }
     },
     "castle": {
@@ -1599,6 +1695,14 @@
       "h": 29,
       "anchorX": 72,
       "anchorY": 0
+     },
+     "door": {
+      "file": "buildings/purple/barracks-door.png",
+      "w": 36,
+      "h": 72,
+      "frames": 4,
+      "x": 36,
+      "y": 72
      }
     },
     "bank": {
@@ -1614,6 +1718,14 @@
       "h": 29,
       "anchorX": 72,
       "anchorY": 0
+     },
+     "door": {
+      "file": "buildings/purple/bank-door.png",
+      "w": 36,
+      "h": 72,
+      "frames": 4,
+      "x": 36,
+      "y": 72
      }
     },
     "stable": {
@@ -1629,6 +1741,14 @@
       "h": 29,
       "anchorX": 72,
       "anchorY": 0
+     },
+     "door": {
+      "file": "buildings/purple/stable-door.png",
+      "w": 36,
+      "h": 72,
+      "frames": 4,
+      "x": 36,
+      "y": 72
      }
     },
     "siege": {
@@ -1644,6 +1764,14 @@
       "h": 29,
       "anchorX": 72,
       "anchorY": 0
+     },
+     "door": {
+      "file": "buildings/purple/siege-door.png",
+      "w": 36,
+      "h": 72,
+      "frames": 4,
+      "x": 36,
+      "y": 72
      }
     },
     "castle": {
@@ -1866,6 +1994,14 @@
       "h": 29,
       "anchorX": 108,
       "anchorY": 0
+     },
+     "door": {
+      "file": "buildings/neutral/camp-door.png",
+      "w": 36,
+      "h": 72,
+      "frames": 4,
+      "x": 90,
+      "y": 72
      }
     },
     "shrine": {
