@@ -849,6 +849,12 @@ if (geomStart > 0 && geomEnd > geomStart) {
     'the effect has to be stored, read, and drawn');
   check('  and the frames come off the same sheet the shut one was baked from',
     sprites.includes('def.door') && sprites.includes('door.frames'));
+  check('a click anywhere on a building selects THAT building, not the tile',
+    client.includes('selectedBuilding = (selectedBuilding && selectedBuilding.x === hit.x') &&
+    client.includes(': { x: hit.x, y: hit.y };'),
+    'storing the clicked tile means selectedBuildingLive finds nothing on a multi-tile building');
+  check('  and the keep is clickable across its whole footprint',
+    client.includes('function hitsBuilding') && client.includes('castleCfg.footprint'));
   check('  and the troop row it replaced is gone',
     !html.includes('id="troop-bar"') && !client.includes('armedDeploy'),
     'a second way to deploy, from a pool that no longer exists');

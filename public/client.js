@@ -2919,12 +2919,17 @@ function onCanvasClick(e) {
     // The keep answers to a click anywhere on its artwork: it is six tiles wide
     // and asking for its anchor tile would be a guessing game. Everything else
     // stands on the one tile it occupies.
-    const hit = mine.buildings.find(b => b.type && !b.builtin &&
-      (b.type === 'castle' ? withinBuilding(b, ix, iy) : (b.x === ix && b.y === iy)));
+    const hit = mine.buildings.find(b => b.type && !b.builtin && hitsBuilding(b, ix, iy));
     if (hit) {
-      selectedBuilding = (selectedBuilding && selectedBuilding.x === ix && selectedBuilding.y === iy)
-        ? null                                  // clicking it again puts the cross away
-        : { x: ix, y: iy };
+      // The BUILDING's tile, not the one under the cursor. Storing the clicked
+      // tile worked for as long as every building was one tile: the moment the
+      // keep answered across its whole footprint, selectedBuildingLive went
+      // looking for a building at the corner you clicked, found nothing, and
+      // cleared the selection again. One square in forty-two opened the popup —
+      // the tile behind the gate — and it read as the popup being broken.
+      selectedBuilding = (selectedBuilding && selectedBuilding.x === hit.x && selectedBuilding.y === hit.y)
+        ? null                                  // clicking it again puts it away
+        : { x: hit.x, y: hit.y };
       selectedArmies.clear();
       render();
       renderPanel();
@@ -3081,6 +3086,26 @@ function withinBuilding(b, x, y) {
   return x >= b.x && x < b.x + w && y >= b.y && y < b.y + h;
 }
 
+// Can this tile be clicked to mean "that building"?
+//
+// The keep is the reason this is not just withinBuilding. It is six tiles wide
+// and seven tall on screen and it does NOT carry w/h in the state — only the
+// compound's own pieces do — so withinBuilding was treating it as one tile.
+// Exactly one square out of forty-two opened it, which reads as the popup being
+// broken rather than as a target being small, and it is the tile behind the
+// gate at that: the least likely place anybody clicks.
+//
+// CASTLE.footprint is the ground its art stands on and the client already has
+// it — the build placement rule uses it a few hundred lines up. Same box, so
+// what you can click is what you can see.
+function hitsBuilding(b, x, y) {
+  if (b.type === 'castle' && castleCfg && castleCfg.footprint) {
+    const f = castleCfg.footprint, dx = x - b.x, dy = y - b.y;
+    return dx >= -f.left && dx <= f.right && dy >= -f.up && dy <= f.down;
+  }
+  return withinBuilding(b, x, y);
+}
+
 // The building you have selected, as a live state object — or null if it has
 // since been pulled down, destroyed, or the empire lost. Everything that reads
 // the selection goes through here, so a stale `{x, y}` can never draw a cross
@@ -3108,10 +3133,17 @@ function drawDemolishBadge(ts) {
   const def = buildingTypes[b.type];
   const px = b.x * ts, py = b.y * ts;
 
-  // The building itself, ringed, so it is obvious which one is about to go.
+  // The building itself, ringed, so it is obvious which one is selected. Round
+  // the whole of it: a one-tile square on a keep six tiles wide pointed at the
+  // ground behind its gate and looked like it had picked something else.
+  const f = b.type === 'castle' && castleCfg && castleCfg.footprint;
+  const x0 = f ? px - (f.left + 0.5) * ts : px - ts / 2;
+  const y0 = f ? py - (f.up + 0.5) * ts : py - ts / 2;
+  const w = f ? (f.left + f.right + 1) * ts : ts;
+  const h = f ? (f.up + f.down + 1) * ts : ts;
   ctx.strokeStyle = '#ffd76a';
   ctx.lineWidth = 1.5;
-  ctx.strokeRect(px - ts / 2 + 0.5, py - ts / 2 + 0.5, ts - 1, ts - 1);
+  ctx.strokeRect(x0 + 0.5, y0 + 0.5, w - 1, h - 1);
 
   // Just the ring. The cross that used to hang over it was the only way to
   // pull a building down; that is a button in the building's own popup now, and
