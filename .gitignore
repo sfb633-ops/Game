@@ -8,3 +8,9 @@ desktop.ini
 
 # Art review renders, not part of the build
 art-review/
+
+# Audio masters. The .ogg files beside them are what the game loads and what
+# is committed; these are the uncompressed sources at about 10MB each, kept
+# locally so a track can be re-encoded without going back for a re-export.
+# Committing them would triple the repo permanently — git never forgets a blob.
+public/media/*.wav

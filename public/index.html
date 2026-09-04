@@ -314,12 +314,19 @@
 
      The theme is preloaded because it is meant to be playing while you are
      still reading the menu. The other three are not wanted until a match
-     starts, and between them they are thirty megabytes, so they are left to be
-     fetched then rather than racing the art for the connection. -->
+     starts, so they are left to be fetched then rather than racing the art for
+     the connection — three megabytes between them rather than the thirty they
+     were as WAV, but still nothing the menu needs.
+
+     Ogg Vorbis, with the .wav masters kept beside them and out of the repo. The
+     encode is sample-exact — 2646000 samples in, 2646000 out — which is what a
+     layer that loops for a whole match wants. Safari is the one browser that
+     has been shaky on Vorbis in <audio>; if that ever matters, these take a
+     second <source> rather than a rewrite. -->
 <audio id="menu-music" src="media/menu-theme.mp3" loop preload="auto"></audio>
-<audio id="ambience" src="media/ambience-forest.wav" loop preload="none"></audio>
-<audio id="music-regular" src="media/music-regular.wav" loop preload="none"></audio>
-<audio id="music-battle" src="media/music-battle.wav" loop preload="none"></audio>
+<audio id="ambience" src="media/ambience-forest.ogg" loop preload="none"></audio>
+<audio id="music-regular" src="media/music-regular.ogg" loop preload="none"></audio>
+<audio id="music-battle" src="media/music-battle.ogg" loop preload="none"></audio>
 
 <script src="artdefs.js"></script>
 <script src="sprites.js"></script>
