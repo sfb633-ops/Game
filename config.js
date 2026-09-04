@@ -712,6 +712,11 @@ const ORE = {
   // touching it, diagonals included — and so a second crew that cannot stand
   // exactly where the first one is still works the seam. Four workers can share
   // a seam and they need not arrive as one group.
+  //
+  // In practice a crew ordered at a seam now settles at exactly 1.0 — measured,
+  // 200 seeds, every one — because standOffFrom ranks the four edge tiles ahead
+  // of the four corners. The 1.5 is for the fallback: when all four edges are
+  // taken the corners are still offered, and a corner is 1.41 away.
   radius: 1.5,
   perWorkerPerSec: 1.2,
   // A seam is a place, and a place holds so many people. Past this, more

@@ -3680,6 +3680,18 @@ class Match {
   // building.
   standOffFrom(army, x, y) {
     if (!this.standOffTile(army, x, y)) return { x, y };
+    // Edge-on before corner-on, and nearest-first inside each.
+    //
+    // A crew that settles on a diagonal is 1.41 tiles from the rock it is
+    // swinging at, and at 48px a tile that is a clear gap of daylight between
+    // the pick and the stone — they read as mining the air beside it. The four
+    // tiles that share an EDGE with the seam are 1.0 away and the worker's
+    // shoulder is against it.
+    //
+    // Ranking rather than restricting: if all four edges are taken the corners
+    // are still offered, because standing a little wide is better than the
+    // order being refused. The nearest-first rule inside each class is what
+    // still keeps the group on the side it approached from.
     let best = null;
     for (let oy = -1; oy <= 1; oy++) {
       for (let ox = -1; ox <= 1; ox++) {
@@ -3687,8 +3699,12 @@ class Match {
         const nx = x + ox, ny = y + oy;
         if (!this.validMoveTile(nx, ny)) continue;
         if (this.standOffTile(army, nx, ny)) continue;
+        const diagonal = ox !== 0 && oy !== 0;
         const d = Math.hypot(nx - army.x, ny - army.y);
-        if (!best || d < best.d) best = { x: nx, y: ny, d };
+        const better = !best
+          || (best.diagonal && !diagonal)                      // an edge beats a corner
+          || (diagonal === best.diagonal && d < best.d);       // then nearest wins
+        if (better) best = { x: nx, y: ny, d, diagonal };
       }
     }
     // Ringed in by its own works: stand on it rather than refuse the order.
