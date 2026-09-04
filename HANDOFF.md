@@ -4730,6 +4730,44 @@ trio. MiniWorldSprites/Ground/Cliff.png is the plateau set already taken apart
 above, and the village pack's stone folder is pebbles four to eleven pixels
 across.
 
+### The bite out of every plateau corner (4 Sep 2026)
+
+The taper that stops a face ending square was firing at corners as well as at
+ends, and (3,15) — the piece it fires — carries a big triangular wedge of
+grass. So every corner of every plateau in the game had a bite taken out of it:
+the flank came down as a hairline, the face started a tile lower and half a tile
+left, and the two were joined by a hole.
+
+The condition was `d > 1 && c === 0`, which is "this is the west end of a run of
+face". That is true of a genuine end AND of every flank, because a face stops
+wherever the mass turns north. The lip a few lines below already had the right
+test and had had it all along — `diagW`/`diagE`, which ask whether the mass
+actually carries on diagonally (`isRock(x - 1, y - 1)`) rather than merely
+stopping. The body row now asks the same question.
+
+With the taper off, the fallthrough gives the block's own end column, and the
+artist drew those to stack: (0,14)/(2,14) for the body, solid, over
+(0,15)/(2,15) for the base, which lets grass into its bottom corner. An earlier
+note here reasoned that this pair disagreed — "the body pair are solid, so the
+middle of a three-row face was sliced off flat while the course under it curved
+away" — and swapped in the diagonals to fix it. Rendering the kit cell by cell
+says otherwise: the two are a matched pair and the curve at the base is the
+foot of the wall meeting the ground, which is what a wall does. The slicing that
+note describes was real, but it was the corner hole, seen from the other side.
+
+**How to look at this.** `buildTerrainCanvas` takes its terrain as predicates,
+so a synthetic plateau needs no Match and no map: pass `(x,y) => x>=4 && x<=15
+&& y>=3 && y<=11` and render that. A rectangle with one step in it shows every
+case — four corners, a step, a long face — with no scenery or coastline in the
+way, and it is the difference between "something looks off around there" and a
+tile you can name. Hunting this on a real map cost several renders and found
+nothing conclusive; the synthetic one showed it immediately.
+
+Also worth keeping: build the terrain canvas ONCE and cut crops out of its
+pixels rather than redrawing it per crop. Three crops of Highlands went from
+five minutes to fourteen seconds, which is the difference between iterating on
+cliff art and not.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

@@ -237,14 +237,28 @@ const Sprites = (function () {
           // solid, so the middle of a three-row face was sliced off flat on a
           // tile boundary while the course under it curved away.
           //
-          // The artist never meets this because his cliffs are terraces: a
+// The artist never meets this because his cliffs are terraces: a
           // boundary there runs on and on and never ends mid-face. Ours are
-          // masses, so every run has two raw ends, and the honest answer is to
-          // taper them with the diagonal wall pieces — which is what those
-          // pieces are for, and what makes his ribbons fade out instead of
-          // stopping.
-          else if (d > 1 && c === 0) drawKit(3, 6, x, y);             // (3,15), rock to the NE
-          else if (d > 1 && c === 2) drawKit(3, 5, x, y);             // (3,14), rock to the SW
+          // masses, so every run has two raw ends, and where one really is an
+          // end the diagonal wall pieces are what taper it.
+          //
+          // But ONLY where it really is one, which is the same test the lip
+          // below already applies and this line did not. A face that stops
+          // because the mass turns north — every flank of every plateau — is
+          // not an end, it is a corner, and (3,15) carries a big triangular
+          // wedge of grass. Firing it there punched that wedge into the corner
+          // of the mass: the flank came down as a hairline, the face started a
+          // tile lower and half a tile left, and the two were joined by a bite
+          // out of the stone. It is the most obvious defect on any plateau in
+          // the game and it is on all four corners of every one.
+          //
+          // The square ends are right there and the artist drew them to stack:
+          // (0,14)/(2,14) for the body over (0,15)/(2,15) for the base, the
+          // body solid and the base letting grass into its bottom corner. That
+          // pairing is what the fallthrough gives, so a corner simply needs the
+          // taper not to fire.
+          else if (d > 1 && c === 0 && diagW(x, y)) drawKit(3, 6, x, y);   // (3,15), rock to the NE
+          else if (d > 1 && c === 2 && diagE(x, y)) drawKit(3, 5, x, y);   // (3,14), rock to the SW
           else drawKit(c, d === 1 ? 6 : bodyRow(x, y, c), x, y);
           continue;
         }
