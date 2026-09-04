@@ -4592,6 +4592,75 @@ this is written down as a fact rather than as a near miss.
 and a building site is metres across where a seam is a rock.
 
 
+### Two tests that were coin tosses (3 Sep 2026)
+
+Both found by running the recent work rather than reading it, and both the same
+shape: a test that hard-codes a distance from a keep, on a map generated fresh
+every run. Neither is a bug in the game. Both were the test asking a question
+whose answer the map is entitled to change.
+
+**The tower that sometimes never fired.** `smoke.test.js` ends by asserting that
+some tower loosed an arrow across 1800 ticks — a canary for towers silently
+doing nothing. It failed about three runs in a hundred.
+
+The towers went up at `base ± 5` under a comment saying the keep's art reserved
+the ground nearer than that. It does not: `CASTLE.footprint` is two tiles left,
+three right, and nothing at all below. Four out is legal on every map — measured
+25/25 — and so is the whole south side. Five was picked for a reason that was
+not true, and five is exactly `BUILDING_TYPES.tower.range`.
+
+An attacker walks to the defender's keep and stops on it, so its closest
+approach to either tower was the keep's own tile, which is to say the tower's
+exact reach. Whether it got shot at was then decided by the fraction of a tile
+the group settled at when it squared up: **5.0022 against a range of 5**, on the
+three failing seeds out of a hundred. A third of all runs came within 0.2 tiles
+of that boundary — the test had been riding this the whole time and only fell
+off it occasionally.
+
+At four out the whole population moves off the cliff: 150 runs, none within 0.2
+of the boundary, none failing. That is the check worth keeping — not "it passed
+thirty times", which at a 3% rate proves very little.
+
+**And the same seam flake, in the file the sweep could not see.**
+`reconnect.test.js` raises a wall at `baseX - 5` to prove a resumed socket can
+still act. Five is the bottom of `ORE.homeRadius`, so a home seam lands on that
+tile about **one run in fifty** — measured over 3000 matches, 64 refusals, every
+single one of them a seam. It moved to four, which is inside the ring's lower
+bound: 0 refusals in 3000.
+
+This is exactly what `freeTile` was written for the day the seams went in, and
+this file was missed because **it only runs under `npm run test:net`, which needs
+a server and is not part of `npm test`.** Worth remembering when a change breaks
+a class of thing rather than a case: the sweep only reaches the files that run.
+`reconnect.test.js:73` and `lobby.test.js:219` build at `baseX - 4, baseY - 1` —
+4.12 out, outside the ring — and were never at risk.
+
+**Nothing was added to `rules.test.js`.** It is a pin for bugs the game has had,
+and neither of these was one; the game behaved correctly both times. A tower
+with a reach of 5 not hitting something 5.0022 away is a tower working.
+
+**What the same pass checked and found sound**, so it is not re-checked from
+scratch next time: the home pair over 12,960 seats across every map and team
+count, none short, none crowded, none unplaced; a crew ordered onto a seam
+mining afterwards in every shape tried — four workers, twenty, and two and three
+groups stacked on one rock — settling at 1.414 at worst against a reach of 1.5,
+which is structural rather than lucky, because the stand-off can only ever
+return a ring-1 tile; seams drawing centred on their own tile with the crew
+beside them; all 23 stages sharing one ground line and one centre; and the same
+seed still producing the same terrain, seats and seams on every map.
+
+Two things looked like bugs on the way and were not, which is worth writing down
+so they are not "found" again. A captured camp's art covers 17 buildable tiles
+of its own outpost and draws through anything put there — but two ordinary
+player buildings do the same to each other at one, two and three tiles apart.
+144px of art on a one-tile footprint is what makes a row of buildings read as a
+street, and the camp is following the house style rather than breaking it. And
+the captured-camp banner pole hangs down the front through the thatch and lands
+on the weapon rack — but `drawBanner` is proportional (`footW * 0.42`,
+`anchorY * 0.92`), so the old 96px camp put the pole in the identical relative
+spot, checked by rendering it out of git. The only new part is the rack being
+under it, which is cosmetic.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

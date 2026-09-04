@@ -3,9 +3,6 @@
 const cfg = require('../../config.js');
 const { Match } = require('../../game.js');
 
-// Troops are deployed and then given orders — there is no command that raises a
-// group already attacking. This is the two steps the UI takes, in one call, so
-// the tests below stay about what they are testing.
 // A build tile as near as possible to where the case asked for one.
 //
 // Every empire is dealt two gold seams 5 to 8 tiles from its keep, and a seam
@@ -14,10 +11,14 @@ const { Match } = require('../../game.js');
 // this file failed roughly one run in eight the day the seams went in, on a
 // bank at baseX-6 that the map had put a rock on.
 //
-// Nudging outward keeps the case saying what it meant — "a tower over there" —
+// Nudging outward keeps the case saying what it meant — "a bank over there" —
 // without pinning it to a tile the map is entitled to have used. Seeding the
 // match would only have made the coin-flip land the same way every time, which
 // hides the class rather than handling it.
+//
+// The towers do not come through here any more: they moved to four out, which
+// is inside the seam ring's lower bound and so has nothing to dodge. See the
+// note where they are placed for why that distance is not arbitrary.
 function freeTile(m, p, dx, dy) {
   for (let r = 0; r <= 4; r++)
     for (let oy = -r; oy <= r; oy++)
@@ -28,6 +29,9 @@ function freeTile(m, p, dx, dy) {
   return [p.baseX + dx, p.baseY + dy];
 }
 
+// Troops are deployed and then given orders — there is no command that raises a
+// group already attacking. This is the two steps the UI takes, in one call, so
+// the tests below stay about what they are testing.
 function sendAt(m, playerId, units, targetType, targetId) {
   const p = m.players.get(playerId);
   const before = new Set(m.armies.keys());
@@ -60,9 +64,22 @@ function standUp(m, id) {
 
 // towers, banks, barracks around both bases
 for (const [id, p] of [['a', a], ['b', b]]) {
-  // Five out either side: the keep's art reserves the ground nearer than that.
-  m.cmdBuild(id, ...freeTile(m, p, 5, 0), 'tower');
-  m.cmdBuild(id, ...freeTile(m, p, -5, 0), 'tower');
+  // Four out either side, and the distance is load-bearing.
+  //
+  // It was five, on a comment claiming the keep's art reserved the ground
+  // nearer than that. It does not: CASTLE.footprint is two tiles left and
+  // three right, and the whole south side is open. Five was the one distance
+  // that happens to equal BUILDING_TYPES.tower.range — and an attacker walks
+  // to the keep and stops ON it, so the closest it ever came to either tower
+  // was exactly the tower's reach. Whether it got shot at came down to the
+  // fraction of a tile the group settled at when it squared up: measured at
+  // 5.0022 against a range of 5, the post-condition below failed about three
+  // runs in a hundred saying "no tower ever fired".
+  //
+  // Four leaves a full tile of margin, and is also clear of ORE.homeRadius,
+  // which starts at five — so these two need no nudging.
+  m.cmdBuild(id, p.baseX + 4, p.baseY, 'tower');
+  m.cmdBuild(id, p.baseX - 4, p.baseY, 'tower');
   // Beside the keep, clear of the ground its art reserves.
   m.cmdBuild(id, p.baseX - 4, p.baseY - 1, 'barracks');
   m.cmdBuild(id, ...freeTile(m, p, 5, -1), 'bank');

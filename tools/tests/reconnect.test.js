@@ -96,8 +96,18 @@ const check = (label, ok, detail) => {
   const backState = await next(back, 'state');
   const mine = backState.players.find(p => p.id === initBack.playerId);
   check('and the buildings are still standing', mine.buildings.some(b => b.type === 'barracks'));
-  // Five out, clear of the ground the keep's art reserves.
-  back.send(JSON.stringify({ type: 'buildWall', tiles: [{x: mine.baseX - 5, y: mine.baseY}], x: mine.baseX - 5, y: mine.baseY, buildingType: 'wall' }));
+  // Four out, not five. The keep's art reserves two tiles to the left and
+  // three to the right (CASTLE.footprint), so four is clear of it — and five
+  // is the bottom of ORE.homeRadius, where every seat is now dealt a pair of
+  // gold seams. A seam blocks building, so this tile was refused about one run
+  // in fifty and the check read as "a resumed socket cannot act", which is not
+  // what it would have been telling us.
+  //
+  // interactions.test.js and smoke.test.js got a freeTile helper for the same
+  // problem the day the seams went in. This file was missed because it only
+  // runs under `npm run test:net`, which needs a server and is not part of
+  // `npm test` — so the sweep that fixed the others never saw it fail.
+  back.send(JSON.stringify({ type: 'buildWall', tiles: [{x: mine.baseX - 4, y: mine.baseY}], x: mine.baseX - 4, y: mine.baseY, buildingType: 'wall' }));
   await new Promise(r => setTimeout(r, 500));
   const after = await next(back, 'state');
   check('a resumed socket can still act',
