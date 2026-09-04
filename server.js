@@ -639,7 +639,7 @@ wss.on('connection', (ws) => {
         match.cmdStoreInBank(playerId, msg.armyId, msg.x, msg.y);
         break;
       case 'releaseFromBank':
-        match.cmdReleaseFromBank(playerId, msg.x, msg.y);
+        match.cmdReleaseFromBank(playerId, msg.x, msg.y, msg.count);
         break;
       case 'attackArmy':
         match.cmdAttackArmy(playerId, msg.armyId, msg.targetType, msg.targetId);

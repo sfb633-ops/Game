@@ -2945,21 +2945,6 @@ function onCanvasClick(e) {
     return;
   }
 
-  // The cross over a selected building beats everything, including an army
-  // standing on top of it. It is a small target that only exists because you
-  // put it there on the previous click, so a click inside it can only have
-  // meant one thing.
-  if (demolishHit && tileX >= demolishHit.x0 && tileX <= demolishHit.x1 &&
-      tileY >= demolishHit.y0 && tileY <= demolishHit.y1) {
-    const b = selectedBuildingLive();
-    if (b) send({ type: 'demolish', x: b.x, y: b.y });
-    selectedBuilding = null;
-    demolishHit = null;
-    render();
-    renderPanel();
-    return;
-  }
-
   // 1) Select one of my armies (left-click). Highest priority so armies parked
   //    on a base/target are still clickable.
   const armyHit = nearestMyArmy(tileX, tileY);
@@ -2988,9 +2973,12 @@ function onCanvasClick(e) {
   // goes up — the keep is not for sale — so it can sit above the sale branch
   // without taking a click away from it.
   if (mine && mine.buildings) {
-    const keepHit = mine.buildings.find(b =>
-      (b.type === 'castle' || b.builtin) && withinBuilding(b, ix, iy));
-    if (keepHit) {
+    // The compound's own walls are stonework, not a building you run: they say
+    // what is standing at home and open nothing. The KEEP used to be caught
+    // here with them, which is why clicking it only ever logged the garrison —
+    // it has a popup of its own now and has to fall through to it.
+    const wallHit = mine.buildings.find(b => b.builtin && withinBuilding(b, ix, iy));
+    if (wallHit) {
       logGarrison(mine);
       selectedBuilding = null;
       selectedArmies.clear();
@@ -3000,8 +2988,11 @@ function onCanvasClick(e) {
     }
   }
   if (mine && mine.buildings) {
-    // The compound is not for sale, so its pieces do not take the click.
-    const hit = mine.buildings.find(b => b.type && b.type !== 'castle' && !b.builtin && b.x === ix && b.y === iy);
+    // The keep answers to a click anywhere on its artwork: it is six tiles wide
+    // and asking for its anchor tile would be a guessing game. Everything else
+    // stands on the one tile it occupies.
+    const hit = mine.buildings.find(b => b.type && !b.builtin &&
+      (b.type === 'castle' ? withinBuilding(b, ix, iy) : (b.x === ix && b.y === iy)));
     if (hit) {
       selectedBuilding = (selectedBuilding && selectedBuilding.x === ix && selectedBuilding.y === iy)
         ? null                                  // clicking it again puts the cross away
@@ -3017,6 +3008,141 @@ function onCanvasClick(e) {
   if (!e.shiftKey) selectedArmies.clear();
   render();
   renderPanel();
+}
+
+
+// ---------- The building popup ----------
+//
+// Everything you can do with a building, at the building. It replaced two
+// things: the cross-and-refund badge that was the only way to pull one down,
+// and the troop row along the bottom that deployed out of an empire-wide pool
+// that no longer exists. Soldiers wait in the building that trained them, so
+// the place to send them out from is the building.
+//
+// Rebuilt from scratch on every state message, which is 5Hz — cheap for a
+// dozen nodes, and it means nothing here can hold a stale count. The one thing
+// that must NOT be rebuilt is the slider's value while a thumb is on it, so it
+// is remembered against the building it belongs to and reset when the selection
+// moves, exactly as the split slider does.
+let bpCount = 1;
+let bpCountFor = null;
+
+function bpUnitName(type) {
+  return (unitTypes && unitTypes[type] && unitTypes[type].name) || type;
+}
+
+// Screen position of a building, in the same transform render() draws with.
+function buildingScreenPos(b) {
+  const ts = mapCfg.tileSize;
+  return { x: (b.x * ts - camera.x) * zoom, y: (b.y * ts - camera.y) * zoom };
+}
+
+function renderBuildingPopup() {
+  const el = document.getElementById('building-popup');
+  if (!el) return;
+  const b = selectedBuildingLive();
+  const me = myPlayer();
+  if (!b || !me || !mapCfg) { el.classList.add('hidden'); bpCountFor = null; return; }
+
+  const key = b.x + ',' + b.y;
+  if (bpCountFor !== key) { bpCountFor = key; bpCount = 1; }
+
+  const def = buildingTypes[b.type];
+  const isKeep = b.type === 'castle';
+  const trains = isKeep ? (castleCfg && castleCfg.trains) : (def && def.trains);
+  const ready = b.ready || 0;
+  const name = isKeep ? 'Town Center' : (def ? def.name : b.type);
+
+  const title = document.getElementById('bp-title');
+  title.innerHTML = name +
+    (isKeep ? '<span class="bp-sub">Level ' + (b.level || 1) + '</span>' : '');
+
+  const rows = [];
+  if (b.underConstruction) {
+    rows.push('<div class="bp-line">Still going up — ' + Math.ceil(b.remainingSec || 0) + 's left.</div>');
+  } else {
+    if (trains) {
+      const st = (me.training && me.training[trains]) || {};
+      const cost = unitTypes[trains] ? priceFor(unitTypes[trains].cost) : 0;
+      rows.push('<div class="bp-line">Trains <b>' + bpUnitName(trains) + '</b>' +
+        (st.capacity ? ' — queue ' + (st.queued || 0) + '/' + st.capacity : '') + '</div>');
+      rows.push('<div class="btn-row"><button class="btn btn-sm" id="bp-train"' +
+        (me.gold < cost || st.full ? ' disabled' : '') + '>Train<span class="btn-note">' +
+        cost + 'g</span></button></div>');
+      rows.push('<div class="bp-line"><b>' + ready + '</b> waiting inside</div>');
+    }
+    if (b.type === 'bank') {
+      const holds = def && def.holds;
+      rows.push('<div class="bp-line"><b>' + (b.stored || 0) + '</b> of ' + holds +
+        ' villagers inside, earning <b>' +
+        ((b.stored || 0) * (def.incomePerWorker || 0)) + '/s</b></div>');
+      if (!b.stored) {
+        rows.push('<div class="bp-line">Right-click it with villagers to put them to work.</div>');
+      }
+    }
+    const out = b.type === 'bank' ? (b.stored || 0) : ready;
+    if (out > 0) {
+      if (bpCount > out) bpCount = out;
+      rows.push('<div class="slider-row"><label for="bp-count">Send</label>' +
+        '<input type="range" id="bp-count" min="1" max="' + out + '" step="1" value="' + bpCount + '">' +
+        '<output id="bp-count-out">' + bpCount + '</output></div>');
+      rows.push('<div class="btn-row"><button class="btn btn-primary btn-sm" id="bp-deploy">' +
+        (b.type === 'bank' ? 'Send out' : 'Deploy') + '</button></div>');
+    }
+    if (isKeep && castleCfg && (b.level || 1) < castleCfg.maxLevel) {
+      const up = priceFor(castleCfg.upgradeCost[b.level || 1]);
+      rows.push('<div class="btn-row"><button class="btn btn-sm" id="bp-upgrade"' +
+        (me.gold < up ? ' disabled' : '') + '>Upgrade<span class="btn-note">' + up + 'g</span></button></div>');
+    }
+  }
+  if (!isKeep && !b.builtin) {
+    const refund = def ? Math.floor(priceFor(def.cost) / 3) : 0;
+    rows.push('<div class="btn-row bp-danger"><button class="btn btn-danger btn-sm" id="bp-demolish">' +
+      'Pull down<span class="btn-note">+' + refund + 'g</span></button></div>');
+  }
+  document.getElementById('bp-body').innerHTML = rows.join('');
+
+  // Wiring. Fresh nodes every render, so the handlers go on fresh too.
+  const train = document.getElementById('bp-train');
+  if (train) train.onclick = () => send({ type: 'train', x: b.x, y: b.y, unitType: trains });
+  const up = document.getElementById('bp-upgrade');
+  if (up) up.onclick = () => send({ type: 'upgradeCastle' });
+  const dem = document.getElementById('bp-demolish');
+  if (dem) dem.onclick = () => { send({ type: 'demolish', x: b.x, y: b.y }); closeBuildingPopup(); };
+  const slider = document.getElementById('bp-count');
+  if (slider) {
+    paintRange(slider);
+    slider.oninput = () => {
+      bpCount = Number(slider.value) || 1;
+      document.getElementById('bp-count-out').textContent = bpCount;
+      paintRange(slider);
+    };
+  }
+  const go = document.getElementById('bp-deploy');
+  if (go) go.onclick = () => {
+    if (b.type === 'bank') send({ type: 'releaseFromBank', x: b.x, y: b.y, count: bpCount });
+    else send({ type: 'deployFrom', bx: b.x, by: b.y, count: bpCount });
+  };
+
+  // Anchored to the building, then kept on screen. A panel pinned to something
+  // on the map has to follow it, or it is lying about which building it is for.
+  el.classList.remove('hidden');
+  const pos = buildingScreenPos(b);
+  const w = el.offsetWidth || 220, h = el.offsetHeight || 160;
+  const pad = 8;
+  let left = pos.x + mapCfg.tileSize * zoom * 0.7;
+  let top = pos.y - h / 2;
+  if (left + w + pad > canvas.width) left = pos.x - w - mapCfg.tileSize * zoom * 0.7;
+  el.style.left = Math.max(pad, Math.min(canvas.width - w - pad, left)) + 'px';
+  el.style.top = Math.max(pad, Math.min(canvas.height - h - pad, top)) + 'px';
+}
+
+document.getElementById('bp-close').addEventListener('click', () => closeBuildingPopup());
+
+function closeBuildingPopup() {
+  selectedBuilding = null;
+  renderBuildingPopup();
+  render();
 }
 
 // Buildings are one tile each except the castle compound, whose pieces carry
@@ -3036,7 +3162,7 @@ function selectedBuildingLive() {
   const me = myPlayer();
   if (!me || !me.buildings) return null;
   const b = me.buildings.find(v => v.x === selectedBuilding.x && v.y === selectedBuilding.y && v.type);
-  if (!b || b.type === 'castle') { selectedBuilding = null; return null; }
+  if (!b) { selectedBuilding = null; return null; }
   return b;
 }
 
@@ -3059,6 +3185,11 @@ function drawDemolishBadge(ts) {
   ctx.lineWidth = 1.5;
   ctx.strokeRect(px - ts / 2 + 0.5, py - ts / 2 + 0.5, ts - 1, ts - 1);
 
+  // Just the ring. The cross that used to hang over it was the only way to
+  // pull a building down; that is a button in the building's own popup now, and
+  // two ways to demolish — one of them a small target floating above the roof —
+  // is one way too many.
+  if (def || b.type === 'castle') return;
   const size = ts * 0.72;
   const bx = px - size / 2, by = py - ts * 1.25 - size;
   const refund = def ? Math.floor(priceFor(def.cost) / 3) : 0;
@@ -3226,6 +3357,7 @@ function onKeyDown(e) {
   // R was Recall — march home, heal, rejoin the pool. There is no pool and no
   // way home now: a group that has left is out until it dies, and healing is
   // the Maester's Guild's job.
+  if (k === 'escape' && selectedBuilding) { closeBuildingPopup(); return; }
   // Halve every selected group. Halving rather than a typed number because it
   // is the only split that needs no second input and it composes: half, half
   // again is a quarter. The server takes a count, so a precise split is one
@@ -3937,6 +4069,7 @@ function setTip(sel, text, isSelector = false) {
 }
 
 function renderPanel() {
+  renderBuildingPopup();
   if (!latestState) return;
   const me = latestState.players.find(p => p.id === myId);
   if (!me) return;
@@ -3996,20 +4129,9 @@ function renderPanel() {
   ].filter(Boolean).join('\n');
   setTip('works-stat', worksTip + `\nYour border reaches ${borderRadius(me)} tiles${nextRadius ? ` — ${nextRadius} at the next level` : ''}.`);
 
-  const upgradeBtn = document.getElementById('upgrade-btn');
-  const upgradeState = castle.upgrading ? 'going' : maxed ? 'max' : 'buy';
-  if (upgradeBtn.dataset.state !== upgradeState + upgradeCost) {
-    upgradeBtn.dataset.state = upgradeState + upgradeCost;
-    upgradeBtn.classList.toggle('hidden', maxed);
-    upgradeBtn.dataset.cost = upgradeState === 'buy' ? upgradeCost : '';
-    upgradeBtn.textContent = upgradeState === 'going' ? 'Upgrading…' : `Upgrade ${upgradeCost}g`;
-    upgradeBtn.disabled = upgradeState !== 'buy';
-    if (!upgradeBtn.dataset.bound) {
-      upgradeBtn.dataset.bound = '1';
-      upgradeBtn.addEventListener('click', () => send({ type: 'upgradeCastle' }));
-    }
-  }
-  if (upgradeState === 'going') upgradeBtn.textContent = `Upgrading… ${castle.remainingSec}s`;
+  // Upgrading is in the keep's popup now. The bar is the health and nothing
+  // else — a second Upgrade button floating over the map next to the one on the
+  // building was two answers to the same question.
   syncAffordability(document.getElementById('keep-bar'), me.gold);
 
   // The troops standing at home, by kind.

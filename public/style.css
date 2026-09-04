@@ -1342,3 +1342,31 @@ input[type="range"]:disabled { cursor: not-allowed; filter: grayscale(1) brightn
 }
 #tip.hidden { display: none; }
 #tip b { color: var(--gold); font-weight: normal; }
+/* The building popup. Anchored in SCREEN space at the building's own position,
+   written by renderBuildingPopup on every frame the camera moves — a panel
+   pinned to a thing on the map has to follow it or it is lying about which
+   building it belongs to. */
+#building-popup {
+  position: absolute; z-index: 7;
+  min-width: 208px; max-width: 260px;
+  padding: 0.55rem 0.7rem 0.6rem;
+  display: flex; flex-direction: column; gap: 0.45rem;
+}
+#building-popup.hidden { display: none; }
+#bp-title {
+  font-size: 0.78rem; color: var(--gold); letter-spacing: 0.04em;
+  padding-right: 1.4rem;               /* room for the close button */
+}
+#bp-title .bp-sub { display: block; color: var(--parchment); font-size: 0.68rem; letter-spacing: 0; }
+#bp-body { display: flex; flex-direction: column; gap: 0.4rem; }
+#bp-body .bp-line { font-size: 0.7rem; color: var(--parchment); }
+#bp-body .bp-line b { color: var(--gold); }
+#bp-body .btn-row { display: flex; gap: 0.35rem; }
+#bp-body .btn-row .btn { flex: 1 1 auto; min-height: 26px; }
+#bp-body .slider-row { margin-bottom: 0; gap: 0.4rem; }
+#bp-body .slider-row label { flex: 0 0 auto; font-size: 0.68rem; }
+#bp-body input[type="range"] { width: 100%; flex: 1 1 auto; }
+#bp-body output { flex: 0 0 1.8rem; text-align: right; font-size: 0.7rem; }
+#bp-close { position: absolute; top: 4px; right: 4px; padding: 0 0.42rem; min-height: 22px; }
+/* Pulling a building down is not the same kind of act as training out of it. */
+#bp-body .bp-danger { margin-top: 0.15rem; }

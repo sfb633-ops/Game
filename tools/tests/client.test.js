@@ -832,9 +832,17 @@ if (geomStart > 0 && geomEnd > geomStart) {
   check('  with the garrison on the tooltip that replaced the fold-out',
     client.includes("setTip('works-stat'") && client.includes('garrisonRoster('));
 
-  check('upgrading the keep hangs off the keep bar', html.includes('id="upgrade-btn"'));
+  check('upgrading the keep moved into its own popup, off the second bar',
+    !html.includes('id="upgrade-btn"') && client.includes("id=\"bp-upgrade\""));
   check('  and still asks the server rather than deciding locally',
     client.includes("send({ type: 'upgradeCastle' })"));
+  check('a building popup is where the business of a building lives',
+    html.includes('id="building-popup"') && client.includes('function renderBuildingPopup'));
+  check('  it trains, deploys and pulls down from the one place',
+    client.includes("id=\"bp-train\"") && client.includes("id=\"bp-deploy\"") &&
+    client.includes("id=\"bp-demolish\""));
+  check('  and the count it sends is the slider beside them',
+    client.includes("count: bpCount"));
 
   check('the build palette is a bar on the map', html.includes('id="build-bar"'));
   check('  drawn from icon files, not a live sprite per cell',

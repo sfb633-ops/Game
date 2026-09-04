@@ -85,9 +85,10 @@
         <span id="keep-name">Town Center</span>
         <span id="keep-hp">—</span>
       </div>
-      <!-- Under the caption rather than in it: #keep-cap is a centred flex
-           row, so anything added to it widens the whole bar. -->
-      <button class="btn btn-sm hidden" id="upgrade-btn"></button>
+      <!-- Upgrading moved into the keep's own popup, with training and
+           deploying, because that is where a building's business is now. The
+           bar keeps the health, which is the one thing about the keep worth
+           watching without clicking on it. -->
     </div>
 
     <!-- Somebody is storming your empire. Loud on purpose and gone on its own:
@@ -217,6 +218,16 @@
           <button class="btn btn-sm" id="clear-tool-btn">Clear<span class="btn-note" id="clear-cost"></span></button>
         </div>
       </div>
+    </div>
+
+    <!-- What a building does, at the building. Everything you can do with one
+         lives here: train out of it, send out who is standing in it, and pull
+         it down. The keep's upgrade is in here too, because the keep is a
+         building that trains and this is where a building's business is now. -->
+    <div id="building-popup" class="frame frame-plate hidden">
+      <div id="bp-title"></div>
+      <div id="bp-body"></div>
+      <button id="bp-close" class="btn btn-sm" title="Close (Esc)" aria-label="Close">✕</button>
     </div>
 
     <div id="troop-bar" class="frame frame-plate">

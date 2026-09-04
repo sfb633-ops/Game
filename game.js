@@ -3702,6 +3702,35 @@ class Match {
   // that is already standing on the map, not a way to raise one. Deploying and
   // then committing is a decision you get to make twice, which is the whole
   // point of troops that hold ground.
+  // Where a building puts people out: through the door and a step clear of it.
+  //
+  // South, because that is where the door is on every one of them. The sprites
+  // are drawn in elevation with their feet on the anchor row and the doorway in
+  // the front face, and CASTLE.footprint says the same thing in numbers — it
+  // reserves six rows ABOVE the keep and none below, because below is the gate.
+  //
+  // Two tiles rather than one. One puts them under the eaves: a 144px building
+  // stands three tiles up from its anchor and its shadow falls down-right, so a
+  // group on the next tile down is standing in it and reads as half indoors.
+  // Two clears the shadow and still reads as "just came out of there".
+  //
+  // Walked outward rather than fixed, so a building against a cliff or a lake
+  // still turns its people out somewhere they can stand; the ring is the last
+  // resort and only for a building that is walled in on every side.
+  deployExit(player, plot) {
+    for (let d = 2; d <= 4; d++) {
+      const y = plot.y + d;
+      if (this.validMoveTile(plot.x, y) && !this.tileOccupied(plot.x, y)) return { x: plot.x, y };
+    }
+    for (let d = 2; d <= 4; d++) {
+      for (const dx of [-1, 1, -2, 2]) {
+        const x = plot.x + dx, y = plot.y + d;
+        if (this.validMoveTile(x, y) && !this.tileOccupied(x, y)) return { x, y };
+      }
+    }
+    return this.standOffFrom({ ownerId: player.id, x: plot.x, y: plot.y }, plot.x, plot.y);
+  }
+
   // Send out troops that are standing in one building.
   //
   // (bx, by) names the building they are coming out of and (x, y) where they
@@ -3715,9 +3744,10 @@ class Match {
     if (plot.underConstruction) { this.emit(playerId, 'That building is not finished.'); return; }
     if (!this.trainedType(plot)) return;
     if (!(plot.ready > 0)) { this.emit(playerId, 'Nobody is waiting in there.'); return; }
-    // No destination given: they step outside and hold, which is what the
-    // Deploy button on its own means.
-    if (x == null || y == null) { const spot = this.standOffFrom({ ownerId: playerId, x: plot.x, y: plot.y }, plot.x, plot.y); x = spot.x; y = spot.y; }
+    // No destination given: out of the door and a step clear of it, which is
+    // what the Deploy button on its own means. That is the ordinary case now —
+    // troops come out where they were made and you march them on from there.
+    if (x == null || y == null) { const spot = this.deployExit(player, plot); x = spot.x; y = spot.y; }
     x = finiteOr(x); y = finiteOr(y);
     if (x === null || y === null) return;
     if (!this.validMoveTile(x, y)) return;
@@ -3790,15 +3820,19 @@ class Match {
   }
 
   // Turn the tenants of a bank back out onto the map.
-  cmdReleaseFromBank(playerId, x, y) {
+  // `count` omitted means all of them, which is what the button meant before
+  // it had a slider beside it.
+  cmdReleaseFromBank(playerId, x, y, count) {
     const player = this.players.get(playerId);
     if (!player) return;
     const plot = player.buildings[tileKey(Math.round(x), Math.round(y))];
     if (!plot || plot.type !== 'bank' || !plot.stored) return;
-    const n = plot.stored;
-    plot.stored = 0;
-    this.spawnArmies(player, { worker: n }, 'move', this.standOffFrom(
-      { ownerId: playerId, x: plot.x, y: plot.y }, plot.x, plot.y));
+    const want = count == null ? plot.stored : Math.max(0, Math.floor(finiteOr(count, 0)));
+    const n = Math.min(plot.stored, want);
+    if (n <= 0) return;
+    plot.stored -= n;
+    this.spawnArmies(player, { worker: n }, 'move', this.deployExit(player, plot),
+      null, null, { x: plot.x, y: plot.y });
     this.emit(playerId, `${n} villager${n === 1 ? '' : 's'} back out of the bank.`);
   }
 
