@@ -2256,10 +2256,53 @@ const TAROT_SCALE = 3, TOME_SCALE = 6;
 // whatever rule it felt like.
 const TAROT_THUMB = 1, TOME_THUMB = 2;
 
+// The arcana come with their own names printed on them, and the game gives each
+// one a different name underneath. So "Prosperity" was a card reading XIX / SUN
+// and "Deadly Tactics" one reading VIII / STRENGTH — the art contradicting its
+// own label, in a typeface that is itself half broken: the pack's W is a J, so
+// The Tower reads TOJER and The World reads JORLD.
+//
+// The plates are wiped rather than cropped out. Cropping would change the
+// card's proportions and .card-face in style.css is sized to 51x79 at x3;
+// blanking keeps every dimension, keeps the frame, and leaves two empty
+// cartouches, which is what a tarot card looks like anyway. The illustration is
+// untouched — that is the half that was doing its job, and the pairings behind
+// it are deliberate (Prosperity is the Sun, Ironhide the Emperor).
+//
+// The rows are the template's, shared by all 22 arcana: a light plate at 4-10
+// and another at 68-74, each with the lettering punched through it in the dark
+// ink. Filling between the outermost light pixels of a row erases the glyphs
+// and stops short of the frame, so nothing has to know where the border is.
+const TAROT_PLATE_ROWS = [[4, 10], [68, 74]];
+function blankTarotPlates(img) {
+  const { width: w, data } = img;
+  const at = (x, y) => (y * w + x) * 4;
+  for (const [y0, y1] of TAROT_PLATE_ROWS) {
+    for (let y = y0; y <= y1; y++) {
+      let lo = -1, hi = -1;
+      for (let x = 0; x < w; x++) {
+        const o = at(x, y);
+        if (data[o + 3] > 40 && data[o] > 200 && data[o + 1] > 200 && data[o + 2] > 200) {
+          if (lo < 0) lo = x;
+          hi = x;
+        }
+      }
+      if (lo < 0) continue;                       // no plate on this row
+      const o0 = at(lo, y);
+      for (let x = lo; x <= hi; x++) {
+        const o = at(x, y);
+        data[o] = data[o0]; data[o + 1] = data[o0 + 1];
+        data[o + 2] = data[o0 + 2]; data[o + 3] = 255;
+      }
+    }
+  }
+  return img;
+}
+
 // A card's source pixels, before any magnification: the arcanum whole, or the
 // tome trimmed out of its cell.
 function cardSource(tomes, art) {
-  if (art.tarot) return decodePNG(need(path.join(TAROT, `${art.tarot}.png`)));
+  if (art.tarot) return blankTarotPlates(decodePNG(need(path.join(TAROT, `${art.tarot}.png`))));
   const [row, col] = art.tome;
   const cell = ops.crop(tomes, col * 32, row * 32, 32, 32);
   const box = ops.bbox(cell);
