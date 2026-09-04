@@ -291,9 +291,9 @@ let muted = remembered(STORE.muted, '0') === '1';
 // a cut between them would announce the fight a beat before the fight, and be
 // the most conspicuous thing in the game.
 // `bus` is which slider governs it. The forest is on Effects rather than Music
-// because that is what it is — weather and birds, not score — and it means all
-// three sliders do something real today rather than one of them waiting for
-// sound effects that do not exist yet. When they arrive, they join that bus.
+// because that is what it is — weather and birds, not score. It used to be the
+// only thing on that bus, holding the slider up until there were effects to put
+// there; the effects are below now and they joined it, as that note promised.
 const layers = {
   ambience: { el: document.getElementById('ambience'),      peak: 0.11, fade: 2.5, bus: 'sfx' },
   menu:     { el: document.getElementById('menu-music'),    peak: 0.45, fade: 0.8, bus: 'music' },
@@ -310,6 +310,67 @@ const volFrom = (key) => {
 const VOL = { master: volFrom(STORE.volMaster), music: volFrom(STORE.volMusic), sfx: volFrom(STORE.volSfx) };
 const allLayers = Object.values(layers);
 for (const l of allLayers) { l.el.volume = 0; l.want = 0; }
+
+// ---------- Sound effects ----------
+//
+// The four layers above are long files that FADE. These are short files that
+// FIRE, which is a different problem and gets a different mechanism.
+//
+// Each sound keeps a small ring of its own <audio> elements. One element per
+// sound does not work: two arrows a fifth of a second apart have to overlap,
+// and restarting a single element mid-flight cuts the first one off — so the
+// second arrow silences the first and a volley sounds thinner the busier it
+// gets, which is exactly backwards.
+//
+// `minGapMs` is the other half of that. A siege with six towers can loose more
+// arrows per second than anyone can hear as separate events; past a point the
+// extra ones only add level. The gap makes each sound a rate rather than a
+// count, so a big fight is louder than a small one without turning into noise.
+//
+// Everything here is on the sfx bus and honours the mute, so the Effects slider
+// governs both these and the forest.
+const SFX = {
+  // A portcullis, for the keep opening to let a group out. The one sound in the
+  // set that names its own event exactly.
+  gate:    { file: 'media/sfx/gate.ogg',    peak: 0.55, minGapMs: 150 },
+  // A blade cutting air, standing in for a bowstring: the pack has no bow, and
+  // of what it does have this is the only one that is a whoosh rather than an
+  // impact. Quiet, because towers fire on their own and an unmissable sound for
+  // something the player did not order becomes nagging within a minute.
+  arrow:   { file: 'media/sfx/arrow.ogg',   peak: 0.26, minGapMs: 70 },
+  // Blows landing on a group of yours. Not on every group on the map: what is
+  // worth hearing is your own soldiers being hurt.
+  hit:     { file: 'media/sfx/hit.ogg',     peak: 0.34, minGapMs: 160 },
+  // The race ability. Loudest of the four and the rarest, which is the right
+  // way round — it is the one thing here the player deliberately did.
+  ability: { file: 'media/sfx/ability.ogg', peak: 0.60, minGapMs: 400 },
+};
+const SFX_VOICES = 4;
+for (const s of Object.values(SFX)) {
+  s.voices = [];
+  for (let i = 0; i < SFX_VOICES; i++) {
+    const el = new Audio(s.file);
+    el.preload = 'auto';
+    s.voices.push(el);
+  }
+  s.at = 0;
+  s.lastAt = 0;
+}
+function playSfx(name) {
+  const s = SFX[name];
+  if (!s || muted) return;
+  const vol = VOL.master * VOL.sfx * s.peak;
+  if (vol <= 0.001) return;                    // slider is down; do not even start one
+  const now = Date.now();
+  if (now - s.lastAt < s.minGapMs) return;
+  s.lastAt = now;
+  s.at = (s.at + 1) % SFX_VOICES;
+  const el = s.voices[s.at];
+  el.volume = Math.min(1, vol);
+  // Autoplay is blocked until the page has been interacted with, exactly as it
+  // is for the beds, and a rejected play() is not an error worth surfacing.
+  try { el.currentTime = 0; el.play().catch(() => {}); } catch (e) { /* not ready */ }
+}
 
 // A skirmish is a handful of seconds and the war music is a minute long, so
 // without a floor under it the score would spend the match sliding between two
@@ -335,7 +396,12 @@ function watchForCombat(msg) {
   const mine = msg.armies.filter(a => a.ownerId === myId);
   for (const a of mine) {
     const before = armyHpSeen.get(a.id);
-    if (a.order === 'fight' || (before !== undefined && a.hp < before)) noteCombat();
+    const hurt = before !== undefined && a.hp < before;
+    if (a.order === 'fight' || hurt) noteCombat();
+    // The same signal the battle bed rides, used for the blow itself. Losing
+    // health is the honest test: a group on 'hold' inside a tower's reach is
+    // being hit without ever entering 'fight'.
+    if (hurt) playSfx('hit');
     armyHpSeen.set(a.id, a.hp);
   }
   // Groups that are gone are gone. Without this the map grows for the whole
@@ -4357,9 +4423,14 @@ function onState(msg) {
     if (assetsReady) buildTerrainLayer();
   }
   if (msg.effects) for (const fx of msg.effects) {
-    if (fx.kind === 'arrow') addArrow(fx);
-    else if (fx.kind === 'gate') gateOpened.set(fx.x + ',' + fx.y, clock);
-    else spellFlash.push({ ...fx, start: clock });
+    if (fx.kind === 'arrow') { addArrow(fx); playSfx('arrow'); }
+    else if (fx.kind === 'gate') { gateOpened.set(fx.x + ',' + fx.y, clock); playSfx('gate'); }
+    else {
+      spellFlash.push({ ...fx, start: clock });
+      // Only the ability has a sound in the pack. The spells get their flash and
+      // nothing else rather than borrowing one that means something different.
+      if (fx.kind === 'ability') playSfx('ability');
+    }
   }
   latestState = msg;
   rebuildTileSets(msg);

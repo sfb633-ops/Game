@@ -1995,7 +1995,18 @@ const ICON_PX = 64;
 const ICONS = {
   // Buildings, in the order the build bar puts them.
   barracks: { x: 17, y: 17, w: 120, h: 114 },     // crossed swords
-  stable:   { x: 299, y: 7, w: 101, h: 124 },     // a plumed helm; the sheet has no horse
+  // The sheet has no horse — checked all 100 icons with tools/slice-icons.js,
+  // twice now. It was a plumed helm, and a helm is the wrong wrong-answer: the
+  // barracks next to it is crossed swords, so the two military buildings both
+  // read "soldier" and the row stopped distinguishing them. The winged boot is
+  // the other thing a stable means — this is where the fast unit comes from —
+  // and it collides with nothing else on the bar.
+  //
+  // The building's own hanging sign is a horseshoe, so icon and sign still do
+  // not match. Cutting the horseshoe out of the Winlu sign sheet would fix that
+  // and put one painterly icon in a row of six cartoon ones, which is a worse
+  // trade. Left for whenever the icon sheet grows a horse.
+  stable:   { x: 1226, y: 372, w: 106, h: 115 },  // a winged boot: the fast unit
   siege:    { x: 640, y: 599, w: 93, h: 86 },     // hammer and wrench, for a workshop
   bank:     { x: 864, y: 165, w: 111, h: 83 },    // a stack of coins
   tower:    { x: 525, y: 703, w: 88, h: 106 },    // a stone tower
