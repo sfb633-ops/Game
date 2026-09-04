@@ -747,7 +747,15 @@ const Sprites = (function () {
     const raw = Math.floor(timeSec * fps + (opts.phase || 0));
     const frame = opts.once ? Math.min(total - 1, raw) : ((raw % total) + total) % total;
 
-    const { frameW, frameH } = variant;
+    // An animation may carry its own frame size and anchor. The sword swing
+    // does: it is an OVERSIZE animation, a bigger canvas around a soldier drawn
+    // at exactly the same size, because the blade and its arc leave the box a
+    // walk cycle fits in. Anchored on its own feet, so he does not hop when he
+    // starts swinging.
+    const frameW = anim.frameW || variant.frameW;
+    const frameH = anim.frameH || variant.frameH;
+    const anchorX = anim.anchorX != null ? anim.anchorX : variant.anchorX;
+    const anchorY = anim.anchorY != null ? anim.anchorY : variant.anchorY;
     const sx = frame * frameW;
     const sy = (u.dirRows[facing] || 0) * frameH;
     const img = get(anim.file);
@@ -756,7 +764,7 @@ const Sprites = (function () {
     ctx.save();
     if (opts.alpha != null) ctx.globalAlpha = opts.alpha;
     ctx.drawImage(img, sx, sy, frameW, frameH,
-      x - variant.anchorX, y - variant.anchorY, frameW, frameH);
+      x - anchorX, y - anchorY, frameW, frameH);
     ctx.restore();
   }
 

@@ -2913,8 +2913,14 @@ function clearLane(m, x0, x1, y0, y1) {
     for (const [unit, v] of Object.entries(manifest.units[race].variants)) {
       for (const [name, clip] of Object.entries(v.anims)) {
         const img = decodePNG(path.join(__dirname, '..', '..', 'public', 'assets', clip.file));
+        // An animation may carry its own frame size — the foot soldier's swing
+        // is an OVERSIZE clip, a bigger canvas around the same character, to
+        // hold the blade and its arc. Reading it at the variant's size would
+        // crop rows out of the middle of the sheet and call whatever it landed
+        // on the facing, which passes and means nothing.
+        const fw = clip.frameW || v.frameW, fh = clip.frameH || v.frameH;
         for (const [dir, row] of Object.entries(manifest.units[race].dirRows)) {
-          const cell = cropRaw(img, 0, row * v.frameH, v.frameW, v.frameH);
+          const cell = cropRaw(img, 0, row * fh, fw, fh);
           if (!anyOpaque(cell)) blank.push(`${race}/${unit}/${name}/${dir}`);
         }
       }
@@ -2922,6 +2928,43 @@ function clearLane(m, x0, x1, y0, y1) {
   }
   check('  and every facing of every animation actually has art in it',
     blank.length === 0, blank.slice(0, 6).join(' ') || 'nothing blank');
+
+  // The soldier swings a sword, and the sheet is the reason that has to be
+  // checked rather than assumed.
+  //
+  // Every LPC sheet carries a 64px "slash" and a 64px "thrust" whose frame
+  // counts fit a melee attack perfectly — and on these four the weapon layer is
+  // NOT on either of them: the man swings his empty hands. The sword is on the
+  // OVERSIZE slash, 128px frames, which is why the attack clip is bigger than
+  // the walk. Pick the tidy-looking one and the game ships soldiers miming.
+  //
+  // So: the swing has to be the oversize clip, and it has to put ink outside
+  // the body's own column. A fist stays inside it; a blade and its arc do not.
+  {
+    const bare = [];
+    for (const race of ['human', 'orc', 'undead', 'elf']) {
+      const v = manifest.units[race].variants.swordsman;
+      const clip = v.anims.attack;
+      const fw = clip.frameW || v.frameW, fh = clip.frameH || v.frameH;
+      if (fw <= v.frameW) { bare.push(`${race}: swing is not oversize`); continue; }
+      const img = decodePNG(path.join(__dirname, '..', '..', 'public', 'assets', clip.file));
+      const row = manifest.units[race].dirRows.down;
+      // The widest reach of any frame, measured from the anchor the clip is
+      // drawn on. The body is about a tile across; a sword goes well past it.
+      let reach = 0;
+      for (let f = 0; f < clip.frames; f++) {
+        const cell = cropRaw(img, f * fw, row * fh, fw, fh);
+        for (let y = 0; y < fh; y++) for (let x = 0; x < fw; x++) {
+          if (cell.data[(y * fw + x) * 4 + 3] > 24) {
+            reach = Math.max(reach, Math.abs(x - clip.anchorX));
+          }
+        }
+      }
+      if (reach < v.frameW * 0.6) bare.push(`${race}: reaches only ${reach}px`);
+    }
+    check('the foot soldier swings with a sword in his hand, not a fist',
+      bare.length === 0, bare.join('  ') || 'all four reach past the body');
+  }
 
   check('every race fields each unit at the same frame size', odd.length === 0,
     odd.join('  ') || 'all in step');

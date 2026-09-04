@@ -1880,6 +1880,105 @@ function buildElves() {
   return out;
 }
 
+
+// ---------------------------------------------------------------------------
+// The four races' foot soldier, off the Universal LPC sheets
+// ---------------------------------------------------------------------------
+//
+// One sheet per race, 1664x4992, identical layout in all four: 26 by 78 cells
+// of 64px. There are a great many animations on them and only two are wanted,
+// so the rows are named here rather than hunted for at build time.
+//
+// The blocks were read by counting how many columns of each row carry ink,
+// which groups the sheet into its animations without knowing anything about
+// LPC: 7-frame spellcast, 8-frame thrust, 9-frame walk, 6-frame slash,
+// 13-frame shoot, and so on down.
+//
+// **WALK is rows 8-11 and the soldier is carrying his sword in it.**
+// **THRUST and the 64px SLASH are empty-handed** — the weapon layer is not on
+// them — so neither can be the attack however much the frame counts suit. The
+// sword swing is the OVERSIZE slash at rows 54-61, which is 128px frames: the
+// character is drawn the same size and the extra canvas is there to hold the
+// blade and its arc. That is the one with a sword in hand, so that is the one.
+//
+// Direction order down each block is up, left, down, right. Checked by looking
+// at one frame from each row rather than trusting it — the note on CHAR_LAYOUT
+// order above is there because getting left and right the wrong way round
+// mirrors every sprite silently, and it would do the same here.
+const LPC_DIR = path.join(SRC, 'Race Spritesheets');
+const LPC_SHEETS = {
+  human:  'Human Spritesheet.png',
+  orc:    'Orc Spritesheet.png',
+  undead: 'Undead Spritesheet.png',
+  elf:    'Elf Spritesheet.png',
+};
+// Measured, not chosen. Body height the way the elf note measures it — rows
+// carrying at least a quarter of the widest row, which drops a sword blade and
+// keeps a torso — is 48px on the LPC walk against 36px on the soldier already
+// in the game. That is exactly three quarters, so a 64px frame becomes 48 and
+// the 128px oversize becomes 96, and the new soldier stands the same height as
+// everything he is fighting.
+const LPC_SCALE = 0.75;
+const LPC_ORDER = ['up', 'left', 'down', 'right'];
+const LPC_WALK = { row: 8, frame: 64, frames: 9 };
+const LPC_SLASH = { row: 54, frame: 128, frames: 6 };
+
+// One animation out of an LPC sheet, as frames across by four facings down.
+function lpcAnim(sheet, spec, frames) {
+  const F = spec.frame;
+  const out = ops.blank(frames * F, 4 * F);
+  LPC_ORDER.forEach((dir, i) => {
+    const srcRow = spec.row + i * (F / 64);
+    for (let f = 0; f < frames; f++) {
+      ops.blit(out, ops.crop(sheet, f * F, srcRow * 64, F, F), f * F, DIR_ROWS[dir] * F);
+    }
+  });
+  const size = Math.round(F * LPC_SCALE);
+  return { img: ops.resize(out, frames * size, 4 * size), size };
+}
+
+// Feet and centre of the down-facing first frame, which is what every anim is
+// anchored on so a soldier does not hop when he starts swinging.
+function lpcAnchor(img, size) {
+  const frame = ops.crop(img, 0, DIR_ROWS.down * size, size, size);
+  const box = ops.bbox(frame);
+  return { anchorX: medianX(frame), anchorY: box ? box.y1 + 1 : size };
+}
+
+function buildLpcSoldier(race, unitType) {
+  const file = path.join(LPC_DIR, LPC_SHEETS[race]);
+  if (!fs.existsSync(file)) return null;
+  const sheet = decodePNG(file);
+
+  const walk = lpcAnim(sheet, LPC_WALK, LPC_WALK.frames);
+  const slash = lpcAnim(sheet, LPC_SLASH, LPC_SLASH.frames);
+  // LPC's walk frame 0 is the standing pose, so the idle is not a separate
+  // animation on the sheet — it is the frame the walk cycle starts from, which
+  // is also why the two never disagree about where he is standing.
+  const idle = ops.blank(walk.size, 4 * walk.size);
+  for (let r = 0; r < 4; r++) {
+    ops.blit(idle, ops.crop(walk.img, 0, r * walk.size, walk.size, walk.size), 0, r * walk.size);
+  }
+
+  const a = lpcAnchor(walk.img, walk.size);
+  const sa = lpcAnchor(slash.img, slash.size);
+  return {
+    frameW: walk.size, frameH: walk.size, anchorX: a.anchorX, anchorY: a.anchorY,
+    anims: {
+      idle: { file: write(idle, 'units', race, unitType, 'idle.png'), frames: 1 },
+      walk: { file: write(walk.img, 'units', race, unitType, 'walk.png'), frames: LPC_WALK.frames },
+      // The oversize frame carries its own size and anchor: it is a bigger
+      // canvas around the same soldier, so it cannot use the walk's.
+      attack: {
+        file: write(slash.img, 'units', race, unitType, 'attack.png'),
+        frames: LPC_SLASH.frames,
+        frameW: slash.size, frameH: slash.size,
+        anchorX: sa.anchorX, anchorY: sa.anchorY,
+      },
+    },
+  };
+}
+
 function buildUnits() {
   // One golem, shared by every race — see buildGolem. Same for the colossus:
   // what a shrine wakes belongs to whoever woke it rather than to an empire,
@@ -1895,12 +1994,23 @@ function buildUnits() {
       if (colossus) variants.colossus = colossus;
     }
     for (const [unitType, [relPath, layoutName]] of Object.entries(byType)) {
+      // The barracks soldier comes off the race's own LPC sheet now — four
+      // directions of walking, and a swing with the sword actually in his hand.
+      // Everything else on this row is still the old pack: the stable and the
+      // siege works were left alone deliberately.
+      if (unitType === 'swordsman' && LPC_SHEETS[race]) {
+        const soldier = buildLpcSoldier(race, unitType);
+        if (soldier) { variants[unitType] = soldier; continue; }
+      }
       // Skipped rather than built and overwritten: building it would write a
       // set of PNGs nothing ever reads.
       if (race === 'elf' && elves && elves[unitType]) continue;
       variants[unitType] = buildCharacter(race, unitType, relPath, layoutName);
     }
-    if (race === 'elf' && elves) Object.assign(variants, elves);
+    if (race === 'elf' && elves) {
+      // ...but not over the LPC soldier, which is the elf's swordsman now.
+      for (const [t, v] of Object.entries(elves)) if (!variants[t]) variants[t] = v;
+    }
     manifest.units[race] = {
       dirMode: '4dir', dirRows: DIR_ROWS,
       fps: { idle: 5, walk: 10, attack: 9 },

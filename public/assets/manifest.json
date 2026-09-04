@@ -2298,8 +2298,8 @@
     "swordsman": {
      "frameW": 48,
      "frameH": 48,
-     "anchorX": 24,
-     "anchorY": 42,
+     "anchorX": 23,
+     "anchorY": 48,
      "anims": {
       "idle": {
        "file": "units/human/swordsman/idle.png",
@@ -2307,11 +2307,15 @@
       },
       "walk": {
        "file": "units/human/swordsman/walk.png",
-       "frames": 5
+       "frames": 9
       },
       "attack": {
        "file": "units/human/swordsman/attack.png",
-       "frames": 4
+       "frames": 6,
+       "frameW": 96,
+       "frameH": 96,
+       "anchorX": 48,
+       "anchorY": 72
       }
      }
     },
@@ -2431,6 +2435,30 @@
       }
      }
     },
+    "swordsman": {
+     "frameW": 48,
+     "frameH": 48,
+     "anchorX": 23,
+     "anchorY": 48,
+     "anims": {
+      "idle": {
+       "file": "units/elf/swordsman/idle.png",
+       "frames": 1
+      },
+      "walk": {
+       "file": "units/elf/swordsman/walk.png",
+       "frames": 9
+      },
+      "attack": {
+       "file": "units/elf/swordsman/attack.png",
+       "frames": 6,
+       "frameW": 96,
+       "frameH": 96,
+       "anchorX": 48,
+       "anchorY": 72
+      }
+     }
+    },
     "catapult": {
      "frameW": 48,
      "frameH": 48,
@@ -2448,26 +2476,6 @@
       "attack": {
        "file": "units/elf/catapult/attack.png",
        "frames": 4
-      }
-     }
-    },
-    "swordsman": {
-     "frameW": 48,
-     "frameH": 48,
-     "anchorX": 24,
-     "anchorY": 45,
-     "anims": {
-      "idle": {
-       "file": "units/elf/swordsman/idle.png",
-       "frames": 1
-      },
-      "walk": {
-       "file": "units/elf/swordsman/walk.png",
-       "frames": 8
-      },
-      "attack": {
-       "file": "units/elf/swordsman/attack.png",
-       "frames": 8
       }
      }
     },
@@ -2570,8 +2578,8 @@
     "swordsman": {
      "frameW": 48,
      "frameH": 48,
-     "anchorX": 24,
-     "anchorY": 45,
+     "anchorX": 23,
+     "anchorY": 47,
      "anims": {
       "idle": {
        "file": "units/orc/swordsman/idle.png",
@@ -2579,11 +2587,15 @@
       },
       "walk": {
        "file": "units/orc/swordsman/walk.png",
-       "frames": 5
+       "frames": 9
       },
       "attack": {
        "file": "units/orc/swordsman/attack.png",
-       "frames": 6
+       "frames": 6,
+       "frameW": 96,
+       "frameH": 96,
+       "anchorX": 48,
+       "anchorY": 71
       }
      }
     },
@@ -2706,8 +2718,8 @@
     "swordsman": {
      "frameW": 48,
      "frameH": 48,
-     "anchorX": 24,
-     "anchorY": 42,
+     "anchorX": 23,
+     "anchorY": 47,
      "anims": {
       "idle": {
        "file": "units/undead/swordsman/idle.png",
@@ -2715,11 +2727,15 @@
       },
       "walk": {
        "file": "units/undead/swordsman/walk.png",
-       "frames": 5
+       "frames": 9
       },
       "attack": {
        "file": "units/undead/swordsman/attack.png",
-       "frames": 4
+       "frames": 6,
+       "frameW": 96,
+       "frameH": 96,
+       "anchorX": 48,
+       "anchorY": 71
       }
      }
     },
