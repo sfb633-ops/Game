@@ -4661,6 +4661,75 @@ on the weapon rack — but `drawBanner` is proportional (`footW * 0.42`,
 spot, checked by rendering it out of git. The only new part is the rack being
 under it, which is cosmetic.
 
+### Buttresses on a cliff face: tried, reverted (4 Sep 2026)
+
+A fifth attempt at the cliffs, and the first one aimed at the EDGES rather than
+the interior. It does not work, and the reason is worth having written down
+because the asset looks exactly like the answer.
+
+**What was wrong.** A face built from the kit is one tile repeated for the
+length of the run. The artist never meets this — his cliffs are four-tile
+terraces — and ours run twenty, so even with the body rows mixed at random a
+long face reads as masonry rather than rock.
+
+**What looked like the fix.** `!$Cliff_decoration.png` in the Winlu characters
+folder: eleven rock spurs drawn front-on in the same three-quarter view as the
+face, each with its own shadow under it. Four of them are exactly one tile by
+three, and a two-course face plus its lip is exactly three tiles, so they seat
+with no arithmetic at all. Nothing in the build had ever opened the file.
+
+**Why it fails.** Two things, and the second is the one that kills it.
+
+The spurs stand about a tile proud of the cliff top rather than topping out at
+the lip, so a piece meant to be a buttress reads as a shard stuck through the
+edge. That part is a seating bug and could be chased.
+
+The palette does not match, and cannot be made to without repainting. The
+terrain comes from the pack's GREEN edition — `winluSheet` prefers
+`Fantasy_Outside_A5_green.png` — and there is no green edition of the
+decoration sheet; it ships base, blue and red only. Rendered against a real
+cliff the spur is markedly paler than the face beside it and reads as torn
+paper. **A mean-colour comparison hides this**: the kit's rock averages
+66,97,78 and the decoration's 69,86,77, a distance of 11, which looks like a
+match and is not — the means agree while the value ranges do not.
+
+That mean test is also what picked the base variant over blue and red, and that
+part stands: measured on vegetation against our own grass, base is 8.8 away,
+blue 17.7, and red has one vegetation pixel in the entire sheet. If anyone
+repaints these, base is the one to start from.
+
+**So the choice is a repaint, not a composite**, which is the same conclusion
+"The cliff tileset, and why the mountain still is not one" reached by four
+other routes. Left reverted rather than shipped half-matched.
+
+### The library was never actually being surveyed (4 Sep 2026)
+
+`tools/inventory.js` exists because "survey the library before designing" kept
+not happening. Its own header says so at length. It has a bug that made it keep
+not happening: line 164 is
+
+    run(process.argv[2] || path.join(SRC, 'Winlu exterior remaster'));
+
+— so the no-argument run everyone reaches for inventories **one pack**. That is
+71 files of 892, and INDEX.md comes out listing six folders of a hundred, which
+looks complete unless you count. Run it as
+`node tools/inventory.js "C:/Users/seth/Desktop/assets"` until the default is
+changed.
+
+The full pass turned up one thing that contradicts something written down here.
+The cliff section says a stone-ground fill is what a real mountain interior
+would need and that "there is no such stone-ground tileset in any pack". There
+is: `Pixel Art Top Down - Basic v1.2.3/Texture/TX Tileset Stone Ground.png`,
+256x256. It is a different pack at a different scale and may well not fit — but
+the claim as written is false, and the interior question should be reopened
+against that file rather than treated as settled.
+
+Otherwise the sweep confirms the narrow result: across all 892 files in all 22
+packs the only art drawn for a cliff edge at our scale is the Winlu decoration
+trio. MiniWorldSprites/Ground/Cliff.png is the plateau set already taken apart
+above, and the village pack's stone folder is pebbles four to eleven pixels
+across.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no
