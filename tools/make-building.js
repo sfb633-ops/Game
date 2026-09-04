@@ -246,6 +246,45 @@ function statue(dst, which, tx, ty) {
 // facade is what has to be legible, and a hanging sign says what a building is
 // more cleanly than a yard full of barrels ever did.
 const RECIPES = {
+  // The AI camp. The one structure on the map that belongs to nobody, so it
+  // has to read as a different KIND of thing from the four buildings a player
+  // puts up — those are a village street, masonry and plaster with a trade
+  // sign over the door. This is a hall in the woods.
+  //
+  // Three things do that and none of them is used anywhere else: kind 72 is
+  // the log cabin, horizontal logs with their cut ends showing at the corners,
+  // and no player building has a log wall anywhere. Kind 59 is the dark
+  // weathered thatch rather than the stable's bright straw. And 'dark' is the
+  // pack's patched door — boards nailed crooked across a frame — in weathered
+  // wood; the siege shop has the same door in fresh timber, which is the joke,
+  // one is a workshop and one is a wreck.
+  //
+  // No trade sign, because a camp is not selling anything. The banner says it
+  // instead: !Flags_banner's black pennant with the red ring, middle of its
+  // three frames. It takes no faction colour, which matters — a camp that gets
+  // captured has a player pennant drawn over on the RIGHT by drawCamp, so this
+  // one hangs left and the two never sit on each other.
+  //
+  // Six tiles wide against everything else's four, and the same four tall, so
+  // it comes out long and low where a player's buildings are tall and narrow.
+  // That silhouette is doing as much work as the materials: you can tell a
+  // camp from a barracks at a zoom where you cannot tell thatch from slate.
+  //
+  // What is NOT here is a stockade, and it was tried. C(8..10, 4..5) looks
+  // exactly like a run of sharpened stakes standing in a bank of rubble, and
+  // it is a WOODPILE — Map008 stands it in a garden next to a chopping block
+  // and a haystack, and the "rubble" is the cut ends of logs stacked flat.
+  // The pack's only real fences are the sawn plank runs a vegetable patch gets,
+  // which is a village and not a camp. So the camp does not get a wall, and
+  // the sample map is why. See tools/sample-map.js.
+  camp: (dst) => {
+    slab(dst, 59, 0, 0, 6, 2);            // weathered thatch
+    slab(dst, 72, 0, 2, 6, 2);            // log cabin
+    chunk(dst, '!Flags_banner.png', 4 * TILE, 0, TILE, 2 * TILE, 1.1, 2.05);
+    door(dst, 'dark', 3, 4);
+    stamp(dst, 'C', 0, 6, 4.3, 2.44, 1, 2);  // weapon rack, axes and swords
+  },
+
   barracks: (dst) => {
     slab(dst, 71, 0, 0, 4, 2);            // dark shingle
     slab(dst, 90, 0, 2, 4, 2);            // grey stone

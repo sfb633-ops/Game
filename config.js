@@ -641,21 +641,78 @@ const BUILD_WORK = {
 };
 
 const ORE = {
-  // Plenty for four empires, thin for twelve — which is the right way round.
-  // A twelve-player map should be short of seams by the midgame.
-  count: 34,
+  // Scattered seams, on top of the guaranteed ones below. Raised from 34: the
+  // keep pays nothing now, so a seam is not a bonus on top of an income, it IS
+  // the income, and 34 across four times the old map left whole stretches with
+  // nothing in them. A player who has worked out their home pair should find
+  // the next one by marching rather than by combing.
+  //
+  // With homePerPlayer this is not the total. A twelve-seat map lays down 24
+  // guaranteed seams and then these, so a full map carries 68 — double what it
+  // did. Deliberately: the thing being doubled is a resource that RUNS OUT, so
+  // it buys time on the map rather than gold in the bank, and the pressure to
+  // go and take the next one arrives later instead of never.
+  count: 44,
   // Off everybody's doorstep, and not clustered. Smaller than a camp's 14,
   // because seams are meant to be common enough to be a route rather than a
-  // landmark.
+  // landmark. Measured from the home seams too, which is what stops the
+  // scatter from stacking a third seam onto somebody's opening pair.
   spacing: 12,
+  // Every seat opens with this many seams inside its own border, wherever the
+  // scatter happens to fall.
+  //
+  // The scatter is deliberately unfair and stays that way — see generateOre —
+  // but "unfair" and "unplayable" are different things. With the keep paying
+  // nothing, an empire that rolled no seam within marching distance had no
+  // opening at all: 150 gold, four workers, and nowhere to put them. That is
+  // not a map you have been dealt, it is a game you are not in. Two is enough
+  // to stand an economy up and not enough to live on — a pair is about six
+  // minutes of a full crew, and then the border has to move.
+  //
+  // Laid down for every SEAT rather than every player, because the terrain is
+  // generated before anybody joins and must not change underneath them. A seat
+  // nobody takes just leaves its pair on the map as ordinary ground worth
+  // walking to.
+  homePerPlayer: 2,
+  // Where in the opening border they land: outside the keep's own art, inside
+  // the level-1 build radius of 9. Far enough that they are not under the
+  // castle, near enough that the first workers you buy can reach one without
+  // being escorted.
+  homeRadius: [5, 8],
+  // Extra tiles of clearance around the keep, on top of CASTLE.footprint.
+  //
+  // The footprint is measured for PLACEMENT — it is the ground a building may
+  // not be dropped on, and it is a tile narrower and a row shorter than the
+  // artwork it stands for. A seam has a harder test to pass than a building
+  // does: it has to be SEEN. Scene order is by y, so a seam north of the keep
+  // draws before it and ends up behind a tower — cleared for placement, and
+  // invisible. One tile all round is the difference between the two boxes.
+  homeClearance: 2,
+  // How far a home seam keeps from anything already placed — the other seam of
+  // its own pair, mostly. Smaller than `spacing` because the whole point is to
+  // be close in, and the keep it belongs to is exempt by construction.
+  homeSpacing: 6,
   // What a seam holds. Four workers pull 4.8/s, so a full seam is about three
   // minutes of a small crew — long enough to be worth walking to and defending,
   // short enough that a match visibly moves through them.
   amount: 800,
-  // How near a worker has to be. Two tiles rather than standing exactly on it:
-  // nobody should be nudging a group a tile at a time to start it earning,
-  // and there is no hauling to make distance mean anything.
-  radius: 2,
+  // How near a worker has to be: the seam's own tile and the ring of eight
+  // around it, and nothing further.
+  //
+  // It was 2, on the reasoning that nobody should have to nudge a group a tile
+  // at a time to start it earning. That reasoning was answered by something
+  // else: right-clicking a seam walks the group ONTO it — a seam does not block
+  // movement — and a group ordered at one settles at a distance of exactly
+  // zero, every time, measured. So the slack was never buying the ordered case
+  // anything. What it bought was the accidental one, and that is the case that
+  // looked wrong: a crew parked two tiles off for some other reason was mining,
+  // and reading the screen there was nothing to say why.
+  //
+  // 1.5 rather than 1 so it is a rule that can be said in words — on it, or
+  // touching it, diagonals included — and so a second crew that cannot stand
+  // exactly where the first one is still works the seam. Four workers can share
+  // a seam and they need not arrive as one group.
+  radius: 1.5,
   perWorkerPerSec: 1.2,
   // A seam is a place, and a place holds so many people. Past this, more
   // workers are better spent on the next seam — which is what stops one rich

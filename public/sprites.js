@@ -833,10 +833,17 @@ const Sprites = (function () {
     const last = def.frames - 1;
     const frame = Math.max(0, Math.min(last, Math.round((1 - left) * last)));
     const t = manifest.tileSize;
-    // Cells are the tile size exactly, so this lands on the grid with no
-    // scaling and no anchor maths.
+    // Cells are the tile size exactly, so this needs no scaling — but it does
+    // need the half-tile every other layer already applies. A tile's coordinate
+    // is its CENTRE, not its top-left: terrainOrigin offsets the whole terrain
+    // canvas by -0.5 tiles for exactly that reason, and a unit at (x,y) is drawn
+    // centred on (x*t, y*t). This was drawing the cell with its top-left corner
+    // there instead, so every seam sat half a tile down and right of the tile it
+    // was actually on — about 34 diagonal pixels. That is most of why mining
+    // looked like it triggered from too far away: a group standing exactly ON a
+    // seam was drawn half a tile clear of the rock.
     ctx.drawImage(img, frame * def.w, 0, def.w, def.h,
-      Math.round(tileX * t), Math.round(tileY * t), def.w, def.h);
+      Math.round(tileX * t - def.w / 2), Math.round(tileY * t - def.h / 2), def.w, def.h);
   }
   return {
     load,

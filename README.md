@@ -305,8 +305,16 @@ terraces, Map016 forest. Reach for these before inferring anything from a
 screenshot — several long detours came from reverse-engineering a rescaled promo
 image, and each one was settled in a single read once the maps were rendered.
 
-Two things they corrected outright:
+Three things they corrected outright:
 
+- **C(8-10, 4-5) is a woodpile, not a palisade.** At sheet scale it is three
+  tiles of upright sharpened logs standing in a bank of rubble, which is exactly
+  what a stockade looks like, and a whole AI camp was built around it on that
+  reading. Map008 stands the same piece in a vegetable garden beside a chopping
+  block and a haystack: the uprights are stacked timber and the "rubble" is the
+  cut ends of logs laid flat. The pack's only real fences are the sawn plank
+  runs a garden gets, which is a village and not a camp — so the camp does not
+  get a wall. One render of one map, and the answer was not arguable.
 - **A curtain wall is an A4 wall autotile with the battlement kit dropped on
   top.** Map008 lays the body as kind 105 — the light ashlar at A4 (2-3, 8-9) —
   and puts the B merlons over it. We had `facePale` pointing at A4 (7,4), a dark
@@ -815,8 +823,18 @@ sprite anchors and layering can be eyeballed as a PNG.
   the map is built, and any lake the border later grows over is drained as it
   reaches it — including when a boon widens it. Mountains stay: build around
   them, or Reshape the Land.
-- Keep + Banks generate gold over time. Spend gold to build Barracks,
-  Stables, Siege Factories, Archer Towers, or more Banks.
+- **Gold comes out of the ground.** The keep pays nothing. What pays is a gold
+  seam — a place on the map with a finite amount of gold in it — worked by
+  standing workers at it, up to four at a time. Right-click a seam with workers
+  selected and they walk over and stand beside it; "at it" means the seam's own
+  tile or one of the eight around it, and nothing further. The other source is a
+  Bank, the one building that pays a flat rate for ever. **Every empire opens
+  with two seams
+  inside its own border**, five to eight tiles out, however the rest of the map
+  fell; the other forty-four are scattered and are not fair. Your pair is about
+  six minutes of a full crew and then it is spent, and the next seam is further
+  out, nearer somebody else. Spend gold to build Barracks, Stables, Siege
+  Factories, Archer Towers, or more Banks.
 - **Archer Towers shoot on their own.** A finished tower looses an arrow at
   the nearest enemy army within 5 tiles, once every 3 seconds, for 12 damage —
   whether or not that army is coming for your keep. It fires the moment
@@ -897,9 +915,9 @@ Races are stat multipliers, one active ability and their own troop sprites,
 not unique units with unique rules — and that is the intent, not a stub. There's
 no capturing enemy bases outright (raids damage the keep, they don't take
 ownership), no alliances beyond the teams the host sets in the lobby, and no
-resource types beyond gold — and with camps no longer paying, gold now comes from
-the keep and its banks alone, which is one income with one decision attached
-rather than two with a grind attached.
+resource types beyond gold — and gold itself comes out of the ground rather than
+out of the keep, which pays nothing: seams and Banks are the whole economy, one
+that runs out and one that does not.
 Nothing here is matchmade: a game is a four-letter code you share,
 which is enough for now and is not what a Steam release looks like. The halves
 of a split are always the same kind of soldier, because a group is one kind by

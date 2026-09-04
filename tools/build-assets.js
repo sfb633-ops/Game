@@ -633,7 +633,9 @@ function fitW(img, px) { return ops.resize(img, px, Math.max(1, Math.round(img.h
 // How wide each composed building stands, in tiles. The keep is six, so these
 // are deliberately smaller — a barracks that rivals the castle for size reads
 // as a second castle.
-const SOURCE_TILES_WIDE = { barracks: 3, bank: 3, stable: 3, siege: 3 };
+// A camp is 4.5 against the player buildings' 3: it is a hall rather than a
+// house, and the extra width is most of what tells the two apart at a glance.
+const SOURCE_TILES_WIDE = { barracks: 3, bank: 3, stable: 3, siege: 3, camp: 4.5 };
 const BUILDING_SRC_DIR = 'buildings-src';
 
 // A building composed from the pack and left in assets/buildings-src as a PNG.
@@ -1035,10 +1037,20 @@ function buildBuildings() {
   for (const [setName, colour] of Object.entries(BUILDING_SETS)) {
     sets[setName] = buildBuildingSet(setName, colour);
   }
-  // AI camps are a wooden fort — same keep silhouette as a player's town
-  // center, in the neutral set, so they read as something worth storming.
+  // The AI camp is a Winlu building like every other building on the map:
+  // tools/make-building.js composes it out of the pack's log-cabin wall,
+  // weathered thatch and patched door and leaves it in assets/buildings-src,
+  // and it is picked up here by the same rule the player's four follow. It was
+  // a 32px MiniWorldSprites wood keep until then, which was the last thing on
+  // the map still borrowing a silhouette from another pack.
+  //
+  // Wider than the others on purpose — see the recipe. buildFromSource is what
+  // enforces that: SOURCE_TILES_WIDE.camp is 4.5 against their 3, and the
+  // height follows from the art rather than being set, so a camp comes out
+  // long and low where a barracks is square.
   sets.neutral = {
-    camp: cutBuilding(miniBuildingSheet('Wood', 'Keep'), [0, 0, 32, 32], 'buildings', 'neutral', 'camp.png'),
+    camp: buildFromSource('camp', 'neutral') ||
+      cutBuilding(miniBuildingSheet('Wood', 'Keep'), [0, 0, 32, 32], 'buildings', 'neutral', 'camp.png'),
     // The shrine is a mausoleum: stone, sealed, with something green lit behind
     // the door. It has to read as a different kind of thing from a camp at a
     // glance — a camp is somebody's fort and this is nobody's — so it is the
@@ -2020,6 +2032,41 @@ function buildIcons() {
 // copied rather than scaled.
 const ORE_CELL = 48;
 
+// The rock is drawn at very nearly the whole cell — 46x40 of ink in a 48px
+// square — which put it half again as wide as the people standing at it: a
+// worker is 30x36 and a knight 21x45. Scaled to this, a seam is 41x35 — the size
+// of the two-worker crew that stands at it — and reads
+// as a boulder somebody could put a pick in rather than as a piece of terrain.
+//
+// This is a resample, which the pipeline normally refuses, and the usual reason
+// does not apply: that rule is about tile art and 9-slices, which have grids and
+// corners a fractional scale destroys, and about the sprite packs, which are
+// 16px art blown up x3 into clean square blocks. The ore sheet is neither. It is
+// native 48px artwork with fine one-pixel detail — the one sheet in the pipeline
+// that was copied rather than scaled — so there is no block grid to break, and
+// ops.resize is an alpha-weighted box filter, which is the right thing to hand
+// a picture of a rock.
+const ORE_ART_SCALE = 0.85;
+// Scaled about the ground line, not about the middle of the cell. Every one of
+// the 23 stages has its ink bottom at exactly this row and its centre at x 23.5,
+// so one transform about that point keeps all 23 registered with each other AND
+// leaves the rock standing on the ground it already stood on. About the centre
+// it would float a few pixels, and by a different amount at each stage, so a
+// seam would visibly hop as it was worked out.
+const ORE_GROUND_Y = 43;
+
+// One stage, shrunk inside its own cell so the cell stays TILE-sized. Keeping
+// the cell at TILE is what lets drawOre stay one drawImage with no per-stage
+// anchor: the art carries its own placement, exactly as the artist drew it.
+function shrinkOreCell(cell) {
+  if (ORE_ART_SCALE === 1) return cell;
+  const s = Math.max(1, Math.round(ORE_CELL * ORE_ART_SCALE));
+  const out = ops.blank(ORE_CELL, ORE_CELL);
+  ops.drawOver(out, ops.resize(cell, s, s),
+    Math.round((ORE_CELL - s) / 2), Math.round(ORE_GROUND_Y * (1 - ORE_ART_SCALE)));
+  return out;
+}
+
 function buildOre() {
   const sheet = decodePNG(need(ORE_SHEET));
   const cols = Math.floor(sheet.width / ORE_CELL);
@@ -2030,7 +2077,7 @@ function buildOre() {
       const cut = ops.crop(sheet, c * ORE_CELL, r * ORE_CELL, ORE_CELL, ORE_CELL);
       // Skip the empty tail of the grid rather than hard-coding a count: if a
       // stage is ever added to the sheet it comes along on its own.
-      if (ops.bbox(cut)) cells.push(cut);
+      if (ops.bbox(cut)) cells.push(shrinkOreCell(cut));
     }
   }
   const strip = ops.blank(ORE_CELL * cells.length, ORE_CELL);
@@ -2039,7 +2086,7 @@ function buildOre() {
     file: write(strip, 'terrain', 'ore.png'),
     w: ORE_CELL, h: ORE_CELL, frames: cells.length,
   };
-  console.log(`  ore: ${cells.length} stages at ${ORE_CELL}px`);
+  console.log(`  ore: ${cells.length} stages at ${ORE_CELL}px, art at ${ORE_ART_SCALE}`);
 }
 
 // The town center's health bar, from the Dark Ages UI sheet.

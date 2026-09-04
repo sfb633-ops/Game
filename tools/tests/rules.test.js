@@ -4223,10 +4223,31 @@ function fightOut(m, ours, theirs) {
   p.draft = null;
   m.start();
 
-  check('a map is dealt gold seams', m.ore.length === cfg.ORE.count, `${m.ore.length} seams`);
+  // Two guaranteed seams per SEAT plus the scatter. Per seat rather than per
+  // player because the terrain is generated before anybody joins.
+  const homeTotal = m.spawns.length * cfg.ORE.homePerPlayer;
+  check('a map is dealt gold seams', m.ore.length === cfg.ORE.count + homeTotal,
+    `${m.ore.length} seams: ${homeTotal} home, ${cfg.ORE.count} scattered`);
   check('  each holding its full amount', m.ore.every(o => o.amount === cfg.ORE.amount));
-  check('  and none of them on anybody\'s doorstep',
-    m.ore.every(o => m.spawns.every(s => Math.hypot(s.x - o.x, s.y - o.y) >= cfg.ORE.spacing)));
+
+  // The floor under the scatter's variance. With the keep paying nothing, a
+  // seat that rolled no seam within marching distance is not a map you have
+  // been dealt, it is a game you are not in — so every seat gets its pair, and
+  // gets exactly its pair, on every map and every layout.
+  const homeOf = (s) =>
+    m.ore.filter(o => Math.hypot(s.x - o.x, s.y - o.y) <= cfg.ORE.homeRadius[1] + 0.5);
+  check('  every seat opens with its own pair inside its border',
+    m.spawns.every(s => homeOf(s).length === cfg.ORE.homePerPlayer),
+    m.spawns.map(s => homeOf(s).length).join(','));
+  check('    and none of them under the keep\'s own artwork',
+    m.spawns.every(s => homeOf(s).every(o =>
+      !(o.x - s.x >= -cfg.CASTLE.footprint.left && o.x - s.x <= cfg.CASTLE.footprint.right &&
+        o.y - s.y >= -cfg.CASTLE.footprint.up && o.y - s.y <= cfg.CASTLE.footprint.down))));
+  // Everything that is not somebody's home pair still keeps its distance from
+  // everybody: the scatter is unfair on purpose but never on a doorstep.
+  check('  and every other seam is off everybody\'s doorstep',
+    m.ore.every(o => m.spawns.some(s => Math.hypot(s.x - o.x, s.y - o.y) <= cfg.ORE.homeRadius[1] + 0.5) ||
+      m.spawns.every(s => Math.hypot(s.x - o.x, s.y - o.y) >= cfg.ORE.spacing)));
 
   // Standing near it is the whole verb — there is nothing to carry back.
   const seam = m.ore[0];
@@ -4276,6 +4297,46 @@ function fightOut(m, ours, theirs) {
   check('a seam takes only so many hands at once',
     Math.abs((before2 - seam2.amount) - cfg.ORE.maxWorkers * cfg.ORE.perWorkerPerSec * 5) < 0.5,
     `${(before2 - seam2.amount).toFixed(1)} mined by twenty, cap is ${cfg.ORE.maxWorkers}`);
+  // Reported off a screenshot: a worker standing a clear two tiles from a rock,
+  // swinging at nothing. Three separate causes, and the sim owns two of them.
+  //
+  // The reach was 2 on the reasoning that nobody should have to nudge a group a
+  // tile at a time — but a group ordered at a seam walks ONTO it, so the slack
+  // never bought the ordered case anything and only ever paid for the
+  // accidental one. It is 1.5: the seam's tile and the eight around it.
+  //
+  // And a crew ordered at a seam now stands BESIDE it, the same rule your own
+  // buildings got, because four workers drawn on top of a rock the size of a
+  // worker hide the one thing saying how much of the seam is left. Those two
+  // are coupled: the stand-off ring is walked nearest-first, so a crew can land
+  // on a diagonal at 1.41, which is why the reach is 1.5 and not 1.
+  {
+    const seam3 = m.ore.find(o => o.amount === o.maxAmount && o !== seam && o !== seam2);
+    const mineNear = new Match({ seed: 4242 });
+    const q = mineNear.addPlayer('q', 'human', 'Q');
+    q.draft = null;
+    mineNear.start();
+    const target = mineNear.ore
+      .map(o => ({ o, d: Math.hypot(o.x - q.baseX, o.y - q.baseY) }))
+      .sort((a, b) => a.d - b.d)[0].o;
+    q.idleUnits.worker = 8;
+    mineNear.cmdDeployUnits('q', { worker: 4 }, q.baseX + 1, q.baseY + 1);
+    const atIt = [...mineNear.armies.values()][0];
+    mineNear.cmdMoveArmy('q', atIt.id, target.x, target.y);
+    mineNear.cmdDeployUnits('q', { worker: 4 }, q.baseX - 1, q.baseY + 1);
+    const off = [...mineNear.armies.values()].find(a => a.id !== atIt.id);
+    // Two tiles clear: what used to mine and must not.
+    mineNear.cmdMoveArmy('q', off.id, target.x, target.y - 2);
+    for (let i = 0; i < 400; i++) mineNear.tick(0.1);
+    const dAt = Math.hypot(atIt.x - target.x, atIt.y - target.y);
+    check('a crew sent to a seam stands beside it rather than on top of it',
+      dAt > 0 && dAt <= cfg.ORE.radius, `settled ${dAt.toFixed(2)} tiles off`);
+    check('  and mines it from there', atIt.working === true);
+    check('  while a crew two tiles clear of it does not',
+      Math.hypot(off.x - target.x, off.y - target.y) > cfg.ORE.radius && !off.working,
+      `${Math.hypot(off.x - target.x, off.y - target.y).toFixed(2)} tiles off, working ${off.working}`);
+    void seam3;
+  }
 
   // Run one dry and it stops paying, but the rubble stays where it was.
   seam2.amount = 2;

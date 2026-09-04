@@ -387,6 +387,17 @@ function sweepMountainScraps(isRock, clear, width, height, fill) {
   }
 }
 
+// The ground a town center's sprite stands on, measured from the base tile it
+// is anchored to. Module-level because two callers need it and only one of them
+// has a player: Match.inCastleFootprint asks on behalf of somebody who has
+// joined, and findHomeSeam asks about a SEAT, before anybody has.
+function castleFootprintCovers(baseX, baseY, x, y, pad = 0) {
+  const f = CASTLE.footprint;
+  const dx = x - baseX, dy = y - baseY;
+  return dx >= -f.left - pad && dx <= f.right + pad &&
+         dy >= -f.up - pad && dy <= f.down + pad;
+}
+
 class Match {
   // `started` defaults to true because a Match is a running game — that is what
   // every test and every direct construction means by one. A room that is
@@ -1251,27 +1262,83 @@ class Match {
     });
   }
 
-  // Gold seams, scattered like everything else and finite.
+  // Gold seams: two inside every empire's border, and the rest scattered.
   //
-  // Deliberately NOT placed fairly. The shrine gets fairestSpot because there
-  // are two of them and they are the objective; there are thirty-four of these
-  // and an empire that happens to open next to a rich patch has been dealt a
-  // map, which is the kind of variance this game says it wants. What matters is
-  // that no seam sits on anybody's doorstep, and findOpenSpot's spacing is
-  // measured from the starting positions as well as from everything else.
+  // The scatter is deliberately NOT fair. The shrine gets fairestSpot because
+  // there are two of them and they are the objective; there are forty-four of
+  // these and an empire that happens to open next to a rich patch has been
+  // dealt a map, which is the kind of variance this game says it wants. What
+  // matters is that no scattered seam sits on anybody's doorstep, and
+  // findOpenSpot's spacing is measured from the starting positions as well as
+  // from everything else.
+  //
+  // The home pair is the floor under that variance, and it exists because the
+  // keep stopped paying. An empire that rolled nothing within marching
+  // distance used to have no opening at all — see ORE.homePerPlayer in
+  // config.js, which is where the argument is written out. The pair goes down
+  // FIRST so a full scatter can never crowd it out, and each one is recorded
+  // in usedSpawns like everything else, so the scatter then spaces itself off
+  // them at the full twelve.
   generateOre() {
     const out = [];
-    for (let i = 0; i < ORE.count; i++) {
-      const spot = this.findOpenSpot(ORE.spacing);
-      if (!spot) break;              // a small or crowded map seats what it can
+    const add = (spot) => {
+      if (!spot) return;
       out.push({
-        id: `ore-${i}`,
+        id: `ore-${out.length}`,
         x: spot.x, y: spot.y,
         amount: ORE.amount,
         maxAmount: ORE.amount,
       });
+    };
+    // Per SEAT, not per player: nobody has joined yet, and the terrain sent at
+    // init must not change underneath anyone afterwards.
+    for (const seat of this.spawns)
+      for (let i = 0; i < ORE.homePerPlayer; i++) add(this.findHomeSeam(seat));
+    for (let i = 0; i < ORE.count; i++) {
+      const spot = this.findOpenSpot(ORE.spacing);
+      if (!spot) break;              // a small or crowded map seats what it can
+      add(spot);
     }
     return out;
+  }
+
+  // A tile in the ring ORE.homeRadius around one seat: land, clear of the
+  // keep's own artwork, and clear of everything already placed except the keep
+  // it belongs to — which is the whole point of it and is exempt by name.
+  //
+  // Every candidate is enumerated and then one is drawn, rather than throwing
+  // darts at the ring until one sticks. The ring is about 250 tiles and the
+  // exclusion around the keep is a tenth of that, so darts land often enough
+  // to look fine and then quietly miss on the one map where the ring is half
+  // sea — which is exactly the seat that most needed the seam. Enumerating
+  // finds a spot whenever a spot exists, and there is no attempt budget to
+  // tune. It also costs nothing: this runs twelve times, once per seat, once
+  // per match.
+  findHomeSeam(seat) {
+    const [minR, maxR] = ORE.homeRadius;
+    const open = [];
+    for (let dy = -maxR; dy <= maxR; dy++) {
+      for (let dx = -maxR; dx <= maxR; dx++) {
+        const d = Math.hypot(dx, dy);
+        if (d < minR || d > maxR) continue;
+        const x = seat.x + dx, y = seat.y + dy;
+        if (x < 1 || y < 1 || x >= MAP.width - 1 || y >= MAP.height - 1) continue;
+        if (this.terrain[y][x] !== TILE_LAND) continue;
+        // Under the castle sprite is not "close to the keep", it is behind it.
+        if (castleFootprintCovers(seat.x, seat.y, x, y, ORE.homeClearance)) continue;
+        let tooClose = false;
+        for (const spot of this.usedSpawns) {
+          if (spot.x === seat.x && spot.y === seat.y) continue;   // its own keep
+          if (Math.hypot(spot.x - x, spot.y - y) < ORE.homeSpacing) { tooClose = true; break; }
+        }
+        if (tooClose) continue;
+        open.push({ x, y });
+      }
+    }
+    if (!open.length) return null;
+    const pick = open[Math.floor(this.rng() * open.length)];
+    this.usedSpawns.push(pick);
+    return pick;
   }
 
   generateCamps() {
@@ -1685,9 +1752,7 @@ class Match {
   // The ground the town center's sprite stands on. Bigger than the one tile it
   // occupies, because the art is: see CASTLE.footprint.
   inCastleFootprint(player, x, y) {
-    const f = CASTLE.footprint;
-    const dx = x - player.baseX, dy = y - player.baseY;
-    return dx >= -f.left && dx <= f.right && dy >= -f.up && dy <= f.down;
+    return castleFootprintCovers(player.baseX, player.baseY, x, y);
   }
 
   // Is (x,y) already taken by any building (any player) or a live AI camp?
@@ -3599,34 +3664,53 @@ class Match {
   // building and its progress bar, and since nothing has to be stood on to be
   // built or mined, standing on it buys nothing at all.
   //
+  // A gold seam is the same shape of problem and was the same oversight. It
+  // blocks nothing, so a crew ordered at one walked onto it and settled at a
+  // distance of exactly zero — four workers drawn over a rock that is now the
+  // size of a worker, hiding the one thing on screen saying how much of the
+  // seam is left. Mining is proximity, so standing on it was never worth
+  // anything; standing AT it is what the config has always said a worker is
+  // for. Note that this is why ORE.radius is 1.5 rather than 1: the ring is
+  // walked nearest-first, so a crew can end up on a diagonal, and a diagonal
+  // is 1.41 away.
+  //
   // So a move onto occupied ground lands on the nearest free tile beside it.
   // The ring is walked nearest-first, which keeps the group on the side it
   // approached from rather than teleporting the destination across the
   // building.
   standOffFrom(army, x, y) {
-    // Only YOUR OWN stonework, and that is the whole scope of this.
-    //
-    // Somebody else's already blocks the route, so there is nothing to stand
-    // off from — and an enemy KEEP has to stay reachable or an assault cannot
-    // arrive. routeBlocked lets an army onto a castle tile for exactly that
-    // reason, and diverting the order a tile short would have broken every
-    // storming of a keep in the game.
-    const found = this.buildingIndex.get(tileKey(x, y));
-    if (!found || !this.allied(army.ownerId, found.owner.id)) return { x, y };
+    if (!this.standOffTile(army, x, y)) return { x, y };
     let best = null;
     for (let oy = -1; oy <= 1; oy++) {
       for (let ox = -1; ox <= 1; ox++) {
         if (!ox && !oy) continue;
         const nx = x + ox, ny = y + oy;
         if (!this.validMoveTile(nx, ny)) continue;
-        const near = this.buildingIndex.get(tileKey(nx, ny));
-        if (near && this.allied(army.ownerId, near.owner.id)) continue;
+        if (this.standOffTile(army, nx, ny)) continue;
         const d = Math.hypot(nx - army.x, ny - army.y);
         if (!best || d < best.d) best = { x: nx, y: ny, d };
       }
     }
     // Ringed in by its own works: stand on it rather than refuse the order.
     return best ? { x: best.x, y: best.y } : { x, y };
+  }
+
+  // Ground a group should stand BESIDE rather than on.
+  //
+  // Your own stonework, and that is the whole scope of the building half.
+  // Somebody else's already blocks the route, so there is nothing to stand off
+  // from — and an enemy KEEP has to stay reachable or an assault cannot arrive.
+  // routeBlocked lets an army onto a castle tile for exactly that reason, and
+  // diverting the order a tile short would have broken every storming of a keep
+  // in the game.
+  //
+  // A seam belongs to nobody and is stood off by everybody, which needs no
+  // scope: there is no order whose point is to be on top of one, and an
+  // exhausted seam still has its rubble drawn on the tile.
+  standOffTile(army, x, y) {
+    const found = this.buildingIndex.get(tileKey(x, y));
+    if (found && this.allied(army.ownerId, found.owner.id)) return true;
+    return this.ore.some(o => o.x === x && o.y === y);
   }
 
   cmdAttackArmy(playerId, armyId, targetType, targetId) {

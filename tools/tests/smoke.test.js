@@ -6,6 +6,28 @@ const { Match } = require('../../game.js');
 // Troops are deployed and then given orders — there is no command that raises a
 // group already attacking. This is the two steps the UI takes, in one call, so
 // the tests below stay about what they are testing.
+// A build tile as near as possible to where the case asked for one.
+//
+// Every empire is dealt two gold seams 5 to 8 tiles from its keep, and a seam
+// blocks building — so a hard-coded offset anywhere in that ring is free about
+// 95 times in 100 and is a flaky test the other five. That was not hypothetical:
+// this file failed roughly one run in eight the day the seams went in, on a
+// bank at baseX-6 that the map had put a rock on.
+//
+// Nudging outward keeps the case saying what it meant — "a tower over there" —
+// without pinning it to a tile the map is entitled to have used. Seeding the
+// match would only have made the coin-flip land the same way every time, which
+// hides the class rather than handling it.
+function freeTile(m, p, dx, dy) {
+  for (let r = 0; r <= 4; r++)
+    for (let oy = -r; oy <= r; oy++)
+      for (let ox = -r; ox <= r; ox++) {
+        const x = p.baseX + dx + ox, y = p.baseY + dy + oy;
+        if (m.canBuildAt(p, x, y)) return [x, y];
+      }
+  return [p.baseX + dx, p.baseY + dy];
+}
+
 function sendAt(m, playerId, units, targetType, targetId) {
   const p = m.players.get(playerId);
   const before = new Set(m.armies.keys());
@@ -39,11 +61,11 @@ function standUp(m, id) {
 // towers, banks, barracks around both bases
 for (const [id, p] of [['a', a], ['b', b]]) {
   // Five out either side: the keep's art reserves the ground nearer than that.
-  m.cmdBuild(id, p.baseX + 5, p.baseY, 'tower');
-  m.cmdBuild(id, p.baseX - 5, p.baseY, 'tower');
+  m.cmdBuild(id, ...freeTile(m, p, 5, 0), 'tower');
+  m.cmdBuild(id, ...freeTile(m, p, -5, 0), 'tower');
   // Beside the keep, clear of the ground its art reserves.
   m.cmdBuild(id, p.baseX - 4, p.baseY - 1, 'barracks');
-  m.cmdBuild(id, p.baseX + 5, p.baseY - 1, 'bank');
+  m.cmdBuild(id, ...freeTile(m, p, 5, -1), 'bank');
   standUp(m, id);
   m.cmdUpgradeCastle(id);
 }

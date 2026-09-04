@@ -3082,7 +3082,7 @@ function onCanvasRightClick(e) {
       if (seam) {
         const diggers = commanding.reduce((n, a) => n + (a.type === 'worker' ? a.count : 0), 0);
         log(diggers
-          ? `Sent ${diggers} to the seam — they mine it by standing on it.`
+          ? `Sent ${diggers} to the seam — they mine it by standing at it.`
           : 'That is a gold seam. Send workers to it and they will mine it.');
       }
     }

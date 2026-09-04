@@ -701,5 +701,36 @@ for (const shrineWanted of [true, false]) {
     check(`${map} leaves no one-tile rock stubs`, worst === 0, `${worst} nubs`);
   }
 }
+// --- every seat opens on ground it can work --------------------------------
+//
+// The keep pays nothing, so a seam is not a bonus on top of an income, it IS
+// the income — and the scatter that places seams is deliberately unfair. Those
+// two together mean a seat that rolled nothing within marching distance has no
+// opening at all, which is not variance, it is a player who is not in the game.
+// So the pair is a property of every seat on every map and every layout, not a
+// case on one of them: rules.test.js checks one seed on the default map, and
+// this is the sweep that would catch a layout where the ring has no room.
+{
+  const R = cfg.ORE.homeRadius[1] + 0.5;
+  for (const map of Object.keys(cfg.MAPS)) {
+    let worstShort = 0, worstCrowded = 0;
+    for (const teams of [0, 2, 3]) {
+      for (const seed of [21, 99, 404]) {
+        const m = new Match({ started: false, map, seed, ...(teams ? { teams } : {}) });
+        for (const s of m.spawns) {
+          const near = m.ore.filter(o => Math.hypot(s.x - o.x, s.y - o.y) <= R).length;
+          worstShort = Math.max(worstShort, cfg.ORE.homePerPlayer - near);
+          worstCrowded = Math.max(worstCrowded, near - cfg.ORE.homePerPlayer);
+        }
+      }
+    }
+    // Crowded matters as much as short: a third seam inside one border and not
+    // another's is the unfairness the pair exists to put a floor under.
+    check(`${map} opens every seat on exactly its pair of seams`,
+      worstShort === 0 && worstCrowded === 0,
+      `worst seat is ${worstShort} short, ${worstCrowded} over`);
+  }
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall invariants hold');
 process.exit(failures ? 1 : 0);

@@ -1855,16 +1855,16 @@
    "neutral": {
     "camp": {
      "file": "buildings/neutral/camp.png",
-     "w": 96,
-     "h": 96,
-     "anchorX": 48,
-     "anchorY": 96,
-     "footW": 77,
+     "w": 216,
+     "h": 144,
+     "anchorX": 108,
+     "anchorY": 144,
+     "footW": 173,
      "shadow": {
       "file": "buildings/neutral/camp_shadow.png",
-      "w": 129,
-      "h": 19,
-      "anchorX": 48,
+      "w": 265,
+      "h": 29,
+      "anchorX": 108,
       "anchorY": 0
      }
     },

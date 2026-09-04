@@ -4402,6 +4402,196 @@ now happened three times is the argument for `browser.test.js` existing: nothing
 static can see it, and every time it has been caught by a box overlapping a box.
 
 
+### Two seams on every doorstep, and more of them everywhere (2 Sep 2026)
+
+`ORE.count` went from 34 to 44, and on top of that every SEAT is dealt a pair of
+seams inside its own opening border — 5 to 8 tiles out, which is well inside the
+level-1 build radius of 9. A twelve-seat map therefore carries 68 seams where it
+carried 34.
+
+The pair exists because of what "The keep stops paying" did. Gold comes out of
+the ground now and out of nothing else, and `generateOre` scatters seams
+deliberately unfairly — the note in it says so at length, and that reasoning is
+kept. But unfair and unplayable are different things: an empire that rolled no
+seam within marching distance had 150 gold, four workers and nowhere to put
+them, which is not a map you have been dealt, it is a game you are not in. Two
+seams is about six minutes of a full crew and then the border has to move, so
+the floor is under the opening and not under the match.
+
+**Per seat, not per player.** Terrain is generated in the constructor, before
+anybody joins, and the whole point of doing it there is that what every client
+is sent at init never changes underneath them. So all twelve seats get their
+pair whether or not anybody sits in them; an empty seat just leaves two ordinary
+seams on the map.
+
+**Three things went wrong on the way and each one is pinned.**
+
+The first was placement order. The home pair goes down BEFORE the scatter, and
+each one is recorded in `usedSpawns` exactly as `findOpenSpot` records its own —
+so the scatter then spaces itself off them at the full 12 and can neither crowd
+a pair nor add a lucky third. `invariants.test.js` checks *over* as well as
+*short*, because a third seam in one border and not another's is precisely the
+unfairness the pair is there to put a floor under.
+
+The second was that a seam can be placed correctly and still be invisible.
+`CASTLE.footprint` is measured for PLACEMENT — it is where a building may not be
+dropped — and it is a tile narrower and a row shorter than the keep's artwork.
+Scene order is by y, so a seam north of the keep draws BEFORE it and ends up
+behind a tower: cleared, legal, mineable, and not there as far as the player is
+concerned. `ORE.homeClearance` is 2 tiles on top of the footprint, and the check
+that caught it measures against the sprite's own box rather than the footprint.
+
+The third was the finder. It threw darts at the ring — 400 attempts at a random
+angle and radius — which looks fine and then quietly misses on the one seat
+whose ring is half sea, which is exactly the seat that most needed a seam. Under
+clearance 2 that started failing on about one seat in a thousand. It enumerates
+the ring and draws from the candidates now: it finds a spot whenever a spot
+exists, there is no attempt budget to tune, and it runs twelve times per match
+so the cost is nothing. **A sampler that usually works is a sampler that fails on
+the hardest input**, which is the input you wrote it for.
+
+`castleFootprintCovers` was lifted to module level in the same pass and takes an
+optional pad. `Match.inCastleFootprint` is a one-line call to it now: two callers
+need the rule and only one of them has a player object, because `findHomeSeam`
+asks about a seat before anybody has joined.
+**And it made two tests flaky, one of them not its own fault.** A seam blocks
+building, and five `cmdBuild` calls across `interactions.test.js` and
+`smoke.test.js` hard-code an offset 5 or 6 tiles from a keep — which is inside
+the ring the home pair lands in. That tile is now free about 95 times in 100,
+so `interactions.test.js` started failing roughly one run in eight on a bank at
+`baseX-6`. They go through a `freeTile` helper now that nudges outward to ground
+`canBuildAt` accepts, which keeps the case saying "a tower over there" instead of
+naming a tile the map is entitled to have used. Seeding those matches was the
+other option and is worse: it would make the coin-flip land the same way every
+time, which hides the class rather than handling it.
+
+Chasing that turned up a second, older flake in the same file, unrelated to any
+of this: the entangle case marches a group to tile (100,60) on a map generated
+fresh every run, and (100,60) is water or rock about one match in five.
+`cmdMoveArmy` drops an order with an unmarchable destination in silence, so the
+group carried on toward wherever it had been deployed and a case about entangle
+failed about once in forty runs saying nothing whatever about entangle. It picks
+the nearest marchable tile now. Worth knowing generally: a hard-coded map
+coordinate in a test on a generated map is a coin toss with a long period, and it
+will always look like a bug in whatever the test was actually about.
+
+
+### The camp is a Winlu building now (2 Sep 2026)
+
+The AI camp was the last structure on the map still borrowing a silhouette from
+another pack: `cutBuilding(miniBuildingSheet('Wood', 'Keep'), [0,0,32,32])`, a
+32px MiniWorldSprites wood keep blown up to 96x96. Two tiles square, the
+smallest building in the game, guarding ten soldiers.
+
+It is composed by `tools/make-building.js` now like the player's four, lands in
+`assets/buildings-src/camp.png`, and comes through `buildFromSource` — so it can
+be opened and repainted without touching code, same contract as everything else.
+216x144 on the map against a barracks' 144x144 and the keep's 288x364.
+
+**What it is made of, and why each piece.** Roof kind 59 is the dark weathered
+thatch, not the stable's bright straw 67. Wall kind 72 is the log cabin —
+horizontal logs with their cut ends showing at the corners — and no player
+building has a log wall anywhere. The door is `dark`, the pack's patched door of
+crooked boards, in weathered wood; the siege shop has the same door in fresh
+timber, which is the joke, one is a workshop and one is a wreck. There is no
+trade sign because a camp is not selling anything: it hangs `!Flags_banner`'s
+black pennant with the red ring instead, which takes no faction colour. That
+last part matters — a captured camp gets a player pennant drawn over on the
+RIGHT by `drawCamp`, so this one hangs left and the two never sit on each other.
+A weapon rack off C(0, 6-7) stands against the wall on the right, which is the
+artist's own pairing of those two tiles in Map010.
+
+Six tiles wide against the others' four, which is the point of
+`SOURCE_TILES_WIDE.camp = 4.5`: it comes out long and low where a player's
+buildings are tall and narrow, and you can tell a camp from a barracks at a zoom
+where you cannot tell thatch from slate.
+
+**The stockade that was a woodpile.** The first version of this was a log
+palisade with the hut behind it, built on C(8-10, 4-5), which at sheet scale is
+three tiles of upright sharpened logs standing in a bank of rubble. It is a
+WOODPILE. Map008 stands it in a vegetable garden next to a chopping block and a
+haystack — the uprights are stacked timber, the rubble is the cut ends of logs
+laid flat — and the pack's only real fences are the sawn plank runs a garden
+gets, which is a village and not a camp. So the camp gets no wall.
+
+Two things about how that was caught. It was caught by rendering the artist's
+own map and reading the tile ids out of it, which took one command; it was NOT
+caught by staring at the sheet, where the piece is genuinely indistinguishable
+from a palisade. And the same doubt was carried to the weapon rack, which had a
+prior — "weapon racks" that turned out to be fences cost a round-trip once
+before. That one checked out: C(0,6)+C(0,7) really is a rack of axes and swords,
+and Map010 uses exactly that pair.
+
+### The worker swinging at nothing (2 Sep 2026)
+
+Reported off a screenshot: a worker standing a clear two tiles above a rock,
+playing the mining animation. Three causes, and only one of them was the number
+everybody would reach for first.
+
+**The seam was drawn half a tile off the tile it was on.** A tile's coordinate
+in this game is its CENTRE — `terrainOrigin` offsets the whole terrain canvas by
+-0.5 tiles for exactly that reason, and a unit at (x,y) is drawn centred on
+`(x*t, y*t)`. `drawOre` was putting the cell's TOP-LEFT corner there instead, so
+every seam in the game sat half a tile down and right of its own tile, about 34
+diagonal pixels. A crew standing exactly ON a seam was drawn clear of the rock.
+This had been true since seams were added and nobody had looked at it as a
+placement question, because the comment above it — "cells are the tile size
+exactly, so this lands on the grid with no scaling and no anchor maths" — is
+true about the scaling and wrong about the grid.
+
+**The rock was half again the size of the people at it.** 46x40 of ink against a
+worker's 30x36, because the ore sheet is native 48px art and is the one sheet in
+the pipeline copied rather than scaled, so it filled its cell. `ORE_ART_SCALE` is
+0.85 now: 41x35, which is the size of the two-worker crew that stands at it, and
+reads as a boulder somebody could get a pick into rather than as terrain.
+
+It went to 0.7 first and that was too far — 34x30 put a seam at the size of the
+decorative pebble props, and a thing you are meant to spot across a map and fight
+over cannot be scenery either. Worth knowing why the second look was needed: the
+23 stages shrink hard as a seam is worked out, so the seam in the screenshot that
+prompted it was a third mined and about 34x23 on screen. Judging a scale off a
+WORKED seam reads three stages of depletion as a scale that is too small. Compare
+stage 0. It is a resample, and the rule it bends does not apply — that
+rule is about tile art and 9-slices, which have grids a fractional scale
+destroys, and about the sprite packs, which are 16px art blown up x3 into square
+blocks. This is neither; there is no block grid to break.
+
+The scale is applied about the ground line, not the cell centre. Every one of
+the 23 stages has its ink bottom at y=43 and its centre at x=23.5, so one
+transform about that point keeps all 23 registered with each other and leaves
+the rock standing where it stood. `client.test.js` pins that, and pins it
+harder than the size: a per-stage transform taken from each stage's own bounding
+box would make a seam creep around its tile as it is worked out, slowly enough
+that nobody watching one frame would see why.
+
+**And then the reach, which was the smallest part of it.** `ORE.radius` was 2,
+on the reasoning that nobody should have to nudge a group a tile at a time to
+start it earning. Measured: a group ordered at a seam settles at a distance of
+exactly zero, every time, because a seam does not block movement. So the slack
+never bought the ordered case anything and only ever paid for the accidental
+one — a crew parked nearby for some other reason, quietly earning, with nothing
+on screen to say why.
+
+**Which created a fourth thing, from the fix.** With the seam on its own tile and
+the rock down to worker size, a crew ordered at one settled on top of it and hid
+it completely — and a seam you cannot see while it is being worked is a seam
+whose remaining stages you cannot read. That is the same problem `standOffFrom`
+was written for last session, so seams go through it now: a move onto a seam
+lands on the nearest free tile beside it, ring walked nearest-first, exactly as
+for your own buildings. The building half is scoped to your OWN stonework and
+has to be; the seam half needs no scope, because a seam belongs to nobody and
+there is no order whose point is to be on top of one.
+
+**The two changes are coupled and the test says so.** The stand-off ring is
+walked nearest-first, so a crew can land on a diagonal — 1.41 tiles. So the
+reach is 1.5, the seam's tile and the ring of eight, and not 1. The regression
+test happened to settle on a diagonal on its own seed, which is the only reason
+this is written down as a fact rather than as a near miss.
+
+`BUILD_WORK.radius` is still 2 and was left alone: it was not what was reported,
+and a building site is metres across where a seam is a rock.
+
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

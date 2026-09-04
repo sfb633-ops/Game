@@ -868,5 +868,71 @@ if (geomStart > 0 && geomEnd > geomStart) {
     Object.values(manifest.icons || {}).every(i => i.w === i.h),
     Object.values(manifest.icons || {}).map(i => i.w + 'x' + i.h).join(' '));
 }
+// --- a seam is a rock, not a landmark ---------------------------------------
+//
+// The ore sheet is the one thing in the pipeline drawn at native 48px, so its
+// stages filled very nearly the whole cell — 46x40 of ink against a worker's
+// 30x36 — and a seam read as a piece of terrain rather than as something four
+// people could get a pick into. It is scaled on the way in now, which is a
+// resample, which means it is the kind of thing that gets quietly reverted by
+// somebody tidying up a scale factor.
+//
+// Two properties, and the second one matters more than it looks. All 23 stages
+// have to share a ground line and a centre, because they are drawn one after
+// another in the same place as a seam is worked out: if the transform is ever
+// applied per-stage from each stage's own bounding box, the rock will jump
+// around the tile as it shrinks, and it will do it slowly enough that nobody
+// watching a single frame would see why.
+{
+  const manifest = JSON.parse(fs.readFileSync(path.join(SRC, 'assets', 'manifest.json'), 'utf8'));
+  const strip = decodePNG(path.join(SRC, 'assets', manifest.ore.file));
+  const cell = manifest.ore.w;
+  const ink = (f) => {
+    let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
+    for (let y = 0; y < manifest.ore.h; y++) {
+      for (let x = 0; x < cell; x++) {
+        const sx = f * cell + x;
+        if (strip.data[(y * strip.width + sx) * 4 + 3] < 16) continue;
+        if (x < x0) x0 = x; if (x > x1) x1 = x;
+        if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+    }
+    return x1 < 0 ? null : { w: x1 - x0 + 1, h: y1 - y0 + 1, bottom: y1, mid: (x0 + x1) / 2 };
+  };
+  const ink0 = (img) => {
+    let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
+    for (let y = 0; y < Math.min(img.height, cell); y++)
+      for (let x = 0; x < Math.min(img.width, cell); x++) {
+        if (img.data[(y * img.width + x) * 4 + 3] < 16) continue;
+        if (x < x0) x0 = x; if (x > x1) x1 = x;
+        if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+    return { w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  };
+  const boxes = [];
+  for (let f = 0; f < manifest.ore.frames; f++) boxes.push(ink(f));
+  // Measured against the worker's own INK, not its 48px frame: every unit cell
+  // is a tile square and most of it is empty, so the frame says nothing about
+  // how big a person looks. A boulder is allowed to be wider than a person and
+  // has to be no taller — that is what a rock on the ground looks like beside
+  // somebody standing at it — and it must not fill its cell, which is what
+  // catches the scale being quietly reverted to 1.
+  const workerInk = ink0(decodePNG(path.join(SRC, 'assets', manifest.units.human.variants.worker.anims.idle.file)));
+  const full = boxes[0];
+  check('a full seam is a rock beside a person, not a piece of terrain',
+    full.h <= workerInk.h && full.w <= cell * 0.9,
+    `${full.w}x${full.h} of ink in a ${cell}px cell, worker ${workerInk.w}x${workerInk.h}`);
+  const bottoms = new Set(boxes.map(b => b.bottom));
+  const mids = new Set(boxes.map(b => b.mid));
+  check('  and every stage of it stands on the same ground, on the same centre',
+    bottoms.size === 1 && mids.size === 1,
+    `${bottoms.size} ground lines, ${mids.size} centres over ${boxes.length} stages`);
+  // The cell has to stay tile-sized: drawOre centres one cell on the tile and
+  // does no per-stage anchor maths, which only works while the art carries its
+  // own placement inside a cell the size of the ground it stands on.
+  check('  in a cell that is still one tile', cell === manifest.tileSize && manifest.ore.h === manifest.tileSize,
+    `${cell}x${manifest.ore.h} against a ${manifest.tileSize}px tile`);
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall client checks pass');
 process.exit(failures ? 1 : 0);
