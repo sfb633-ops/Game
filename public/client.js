@@ -1727,23 +1727,25 @@ function addApron(b, race) {
   const ts = mapCfg && mapCfg.tileSize;
   const def = ts && Sprites.buildingDef && Sprites.buildingDef(b.type, { race, level: b.level });
   const halfW = (def && def.w) ? Math.round(def.w / 2 / ts) : 1;
-  // Up the whole height of the SPRITE, and then one more.
+  // One tile further back than the plot, and no more.
   //
-  // This used to go one tile up from the plot and no further, which paved the
-  // ground at a building's feet and left the four or five tiles its roof
-  // occupies sitting on whatever was behind them — usually grass. The building
-  // then read as standing in front of a lawn rather than in a paved yard, and
-  // every one of them looked like it was floating. Seth spotted it and said
-  // exactly what it was: the stonework has to carry on above the building.
+  // It was the plot alone, which paved a building's feet and nothing else, so
+  // the ground stopped at its doorstep and the yard read as a small mat under
+  // each building rather than as one surface they all stand on.
   //
-  // It is how his own keep is laid out in Godot, where the ground layer is a
-  // rectangle painted over the WHOLE castle, above the crenellations and out
-  // past the towers — the building sits inside its ground, not on top of it.
+  // The correction to that was wrong in the other direction, and worth writing
+  // down because the mistake is easy to make again: it paved the SPRITE's whole
+  // height. A building is drawn tall because it IS tall, not because it stands
+  // on that many tiles of floor — vertical extent on screen is height, not
+  // depth. The keep is seven tiles of art standing on about two of ground, and
+  // paving eight tiles behind it put a dark slab up the map. Its own
+  // CASTLE.footprint says the same thing: `up: 6` describes what the ART
+  // covers, and nothing in it is about where the castle's floor is.
   //
-  // The side effect is the point: neighbouring buildings' aprons now meet, so a
-  // compound is one paved yard instead of a row of separate mats.
-  const up = (def && def.h) ? Math.round(def.h / ts) + 1 : 2;
-  for (let dy = -up; dy <= 1; dy++)
+  // So: the depth of ground a building occupies, which is shallow for all of
+  // them, and the same for all of them because they all stand on one plot.
+  const APRON_DEPTH = 2;
+  for (let dy = -APRON_DEPTH; dy <= 1; dy++)
     for (let dx = -halfW; dx <= halfW; dx++) apronSet.add((b.x + dx) + ',' + (b.y + dy));
 }
 function addSceneryFootprint(b, race) {

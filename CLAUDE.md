@@ -140,6 +140,21 @@ window.__advance(2)   // push the clock on two seconds and redraw
 Use it before screenshotting anything animated. A hidden tab is not a rendering
 bug.
 
+## Sprite height is not ground depth
+
+The one projection mistake that has been made in both directions. A building is
+drawn tall on screen because it IS tall — vertical extent is height, not depth.
+Its footprint on the ground is shallow and roughly the same for all of them.
+
+The keep is seven tiles of art standing on about two tiles of floor. `addApron`
+was once changed to pave the sprite's whole height, which put an eight-tile dark
+slab up the map behind the castle. `CASTLE.footprint` makes the same distinction:
+`up: 6` describes what the ART covers and says nothing about where the floor is.
+
+Ground extents — aprons, yards, scenery blocking — take the shallow number.
+`APRON_DEPTH` is 2. Only things measured against the artwork, like where a panel
+is placed so it does not cover the building, take the sprite's height.
+
 ## Traps that have cost time
 
 - **Fractional sizes produce garbage, not a rounding error.** A crop of 81.6px
