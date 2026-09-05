@@ -183,6 +183,33 @@ function render(latestState) {
   const t0 = Sprites.terrainOrigin();   // see the note in sprites.js: tile grid, not canvas grid
   ctx.drawImage(terrain, t0, t0);
 
+  // The tracks, over the ground and under everything standing on it — the same
+  // order and the same route the client uses. Without these the still shows a
+  // world with no roads in it, which is not the world the game draws, and a
+  // preview that disagrees with the game is worse than no preview.
+  const paths = new Set();
+  for (const pl of latestState.players) {
+    const keep = pl.buildings.find(b => b.type === 'castle');
+    if (!keep) continue;
+    const radius = config.CASTLE.buildRadius[(keep.level || 1) - 1];
+    const gate = { x: keep.x, y: keep.y + 2 };
+    for (const b of pl.buildings) {
+      if (!b.type || b.type === 'castle' || b.type === 'wall') continue;
+      if (Math.hypot(b.x - keep.x, b.y - keep.y) > radius) continue;
+      let x = b.x, y = b.y + 1, guard = 0;
+      while ((x !== gate.x || y !== gate.y) && guard++ < 80) {
+        if (!blocked.has(x + ',' + y)) paths.add(x + ',' + y);
+        if (Math.abs(gate.x - x) > Math.abs(gate.y - y)) x += Math.sign(gate.x - x);
+        else y += Math.sign(gate.y - y);
+      }
+    }
+  }
+  const onPath = (x, y) => paths.has(x + ',' + y);
+  for (const key of paths) {
+    const c = key.indexOf(',');
+    Sprites.drawPathTile(ctx, +key.slice(0, c), +key.slice(c + 1), onPath, false);
+  }
+
   const wallTiles = new Set();
   for (const p of latestState.players)
     for (const b of p.buildings) if (b.type === 'wall') wallTiles.add(`${b.x},${b.y}`);

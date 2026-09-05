@@ -78,8 +78,10 @@ const Sprites = (function () {
   // Terrain tiles are centred on their coordinate — the canvas is blitted at
   // terrainOrigin(), which is half a tile up and left — so a tile at (tx, ty)
   // covers world pixels from (tx - 0.5) to (tx + 0.5).
-  function drawPathTile(ctx, tx, ty, isPath) {
-    const sheet = manifest.terrain.dirt;
+  // `dark` picks the black paving the dark-stone empires build in, so a track
+  // is laid in the same stone as the keep it runs from.
+  function drawPathTile(ctx, tx, ty, isPath, dark) {
+    const sheet = dark ? manifest.terrain.paveDark : manifest.terrain.pave;
     if (!sheet || !ready(sheet)) return false;
     const t = TILE();
     const mask = ArtDefs.blobMask(isPath, tx, ty);
@@ -123,23 +125,22 @@ const Sprites = (function () {
     // Undergrowth and flowers, laid as ground rather than scattered as objects.
     // They keep off a plateau for the same reason everything else does: the top
     // of one is bare grass and the cliff is the only thing on it.
-    // The apron of laid stone a building stands on. Nothing grows through it,
-    // so undergrowth and flowers are kept off — a building standing in a
-    // flowerbed is the thing this is meant to cure.
-    const apron = (x, y) => inBounds(x, y) && !isRock(x, y) && !isLake(x, y) &&
-      !paved(x, y) && !isEarth(x, y) && !!(isApron && isApron(x, y));
-    // The paving's outermost ring, where it meets whatever it was laid into.
+    // Where a building stands. NOT drawn any more — it lays no stone.
     //
-    // Undergrowth is kept off an apron on purpose — a building standing in a
-    // flowerbed was the thing that rule cured. But keeping it off ALL of the
-    // apron leaves a plant-free zone with a clean boundary around every
-    // building, and a clean boundary is exactly what says "this was dropped on
-    // top of the map" rather than "this has always been here". Weeds come
-    // through at the edge of paving; they do not come through under a wall.
-    const apronEdge = (x, y) => apron(x, y) &&
-      (!apron(x - 1, y) || !apron(x + 1, y) || !apron(x, y - 1) || !apron(x, y + 1));
+    // A building used to bring a rectangle of paving with it, and it always
+    // read as a mat somebody had put down: the ground changed material at the
+    // building's edge, so the building was on top of the map rather than in it.
+    // Buildings stand on whatever is already there now — grass, a dirt patch,
+    // whatever the map made — and the only stone on the ground is the track
+    // that runs door to door.
+    //
+    // What survives of it is the reason it was introduced: undergrowth and
+    // flowers are kept off, because a building standing in a flowerbed is the
+    // thing that cured. It suppresses without painting.
+    const noGrowth = (x, y) => inBounds(x, y) && !isRock(x, y) && !isLake(x, y) &&
+      !paved(x, y) && !isEarth(x, y) && !!(isApron && isApron(x, y));
     const clear = (x, y) => inBounds(x, y) && !isRock(x, y) && !isLake(x, y) &&
-      !paved(x, y) && (!apron(x, y) || apronEdge(x, y));
+      !paved(x, y) && !noGrowth(x, y);
     const isBrush = (x, y) => clear(x, y) && ArtDefs.isBrush(x, y);
     const isBloom = (x, y) => clear(x, y) && ArtDefs.isBloom(x, y);
     const cols = manifest.terrain.sheetCols;
@@ -177,10 +178,6 @@ const Sprites = (function () {
 
     for (const [sheet, same] of [
       [manifest.terrain.dirt, isEarth],
-      // Two aprons, split by whose ground it is. A compound is all one owner,
-      // so the two never meet and neither has to edge against the other.
-      [manifest.terrain.pave, (x, y) => apron(x, y) && !(isDarkCobble && isDarkCobble(x, y))],
-      [manifest.terrain.paveDark, (x, y) => apron(x, y) && !!(isDarkCobble && isDarkCobble(x, y))],
       [manifest.terrain.brush, isBrush],
       [manifest.terrain.bloom, isBloom],
       [manifest.terrain.water, isLake],

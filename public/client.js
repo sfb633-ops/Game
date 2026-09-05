@@ -1779,10 +1779,9 @@ function addSceneryFootprint(b, race) {
 // them to territory, so it should never fire — but a compound is a thing with an
 // edge, and saying so costs one line.
 //
-// **And a track is only laid where there is no paving.** A dirt path across a
-// stone courtyard is not a path, it is a stain. Inside a compound the aprons
-// have already joined up and the ground is continuous; the track appears where
-// that runs out.
+// **The track is the only stone on the ground.** Buildings no longer bring a
+// rectangle of paving with them — they stand on whatever the map made — so the
+// cobble runs door to door and nowhere else, which is what a road is.
 let pathTiles = new Map();       // 'x,y' -> the clock time this tile appears
 const PATH_LAY_STEP = 0.045;     // seconds between one tile going down and the next
 
@@ -1820,8 +1819,10 @@ function rebuildPaths(msg) {
       run.forEach((t, i) => {
         const key = t.x + ',' + t.y;
         if (next.has(key)) return;
-        // Paving already joins these two; a track would be laid over stone.
-        if (apronSet.has(key) || occupiedSet.has(key)) return;
+        // Not under a building, but everywhere else along the run: the ground
+        // no longer carries any paving of its own, so the track is the only
+        // stone there is and it has to reach the door.
+        if (occupiedSet.has(key)) return;
         if (!isMarchable(t.x, t.y)) return;          // never over water or rock
         next.set(key, pathTiles.has(key) ? pathTiles.get(key) : clock + i * PATH_LAY_STEP);
       });
@@ -1838,7 +1839,8 @@ function drawPaths() {
   for (const [key, at] of pathTiles) {
     if (clock < at) continue;
     const c = key.indexOf(',');
-    Sprites.drawPathTile(ctx, +key.slice(0, c), +key.slice(c + 1), inNetwork);
+    const tx = +key.slice(0, c), ty = +key.slice(c + 1);
+    Sprites.drawPathTile(ctx, tx, ty, inNetwork, isDarkCourtyard(tx, ty));
   }
 }
 
