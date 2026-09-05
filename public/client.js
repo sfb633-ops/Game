@@ -4396,6 +4396,26 @@ function logGarrison(me) {
 // Exposed for debugging/testing in the browser console.
 window.__game = { getState: () => latestState, getMapCfg: () => mapCfg, getMyId: () => myId };
 
+// Push the clock on by hand and redraw.
+//
+// A browser tab that is not visible gets no requestAnimationFrame — and a tab
+// driven by automation reports visibilityState 'hidden' even while it is being
+// screenshotted. So `clock` stands still, and everything measured against it
+// stops: fires do not flicker, doors do not swing, dust hangs in the air, and a
+// building part-way through its pop-in draws NOTHING AT ALL, because
+// drawPlayerBuilding returns early until the animation has begun.
+//
+// Two bugs were chased that were only this: a barracks that had vanished and a
+// cloud of dust that would not clear. Both were the clock standing still.
+//
+// So: advance it deliberately before screenshotting anything that moves. This is
+// the only way to see an animation in a tab that is not on screen.
+window.__advance = (seconds = 1) => {
+  clock += Number(seconds) || 0;
+  render();
+  return +clock.toFixed(2);
+};
+
 // ---------- Construction ----------
 
 // How long a building spends rising out of its own dust.
