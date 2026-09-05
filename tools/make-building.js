@@ -480,45 +480,28 @@ const RECIPES = {
   // The pack's only real fences are the sawn plank runs a vegetable patch gets,
   // which is a village and not a camp. So the camp does not get a wall, and
   // the sample map is why. See tools/sample-map.js.
-  // A bandit camp, composed the way the artist composes one.
+  // A bandit camp: a shack in a trodden yard.
   //
-  // The first two attempts were a LINE: hut, fire, fence, barrels, all shoulder
-  // to shoulder on one baseline in a canvas half as tall as it was wide. At map
-  // scale that reads as a row of clutter, because nothing in it is doing what
-  // things in his own maps do. Map012 — the woodsman's cabin — does three:
+  // Built the same way as the yard buildings now — a hipped roof over a wall
+  // whose top rows it covers, so the wall shows through the V as a gable. It had
+  // a flat A3 roof, and A3 cannot do anything but a rectangle: that is the
+  // format, not a limitation of the art. The rest is what makes it a camp rather
+  // than a cottage: no paving, a fire out front with a pot over it, stakes at the
+  // back, and the loot dropped where it landed.
   //
-  //   The building is big and it dominates. Everything else is smaller than it
-  //   and defers to it.
-  //
-  //   Props are SCATTERED, with grass between them. Not one of his touches
-  //   another. The space between is as much of the picture as the props.
-  //
-  //   They sit at different DEPTHS. A woodpile high on the screen and a cart
-  //   low on it are near and far, and that is the whole of the third dimension
-  //   in a view like this one. A row of things at one height is a shelf.
-  //
-  // So: stakes at the back, half-hidden behind the roof. The hut set back and
-  // left, still the biggest thing here. The fire well forward of it and clear
-  // of the door, which makes it the nearest thing and the one your eye lands
-  // on. A log to sit on beside the fire, barrels off to the right with air
-  // round them. The canvas is near enough square, and the whole thing is drawn
-  // back to front so the roof occludes the stakes and they read as standing
-  // behind it rather than floating over it.
-  //
-  // The fire is laid OUT here — stones, logs, a pot on its spit. The flames go
-  // on at draw time and move.
+  // Everything in the yard stands clear of the door's columns, because troops
+  // walk out of it, and auditRecipe refuses the build if anything creeps over.
   camp: (dst) => {
-    stamp(dst, 'C', 8, 10, 3.3, 3.3, 2, 1.5);   // stakes across the back
-    slab(dst, 59, 0, 2, 4, 2);                  // weathered thatch
-    slab(dst, 72, 0.5, 4, 3, 2);                // log walls, inset like every other
-    chunk(dst, '!Flags_banner.png', 4 * TILE, 0, TILE, 2 * TILE, 0.65, 4.05);
-    door(dst, 'dark', 1.7, 6);
-    stamp(dst, 'C', 0, 8, 3.25, 4.4, 1, 2);     // swords, racked at the corner
-    stamp(dst, 'C', 5, 12, 4.2, 4.3, 2, 2);     // barrels, off on their own
-    fire(dst, 'potOut', 2.45, 5.35);            // stones, logs, a pot on a spit
-    stamp(dst, 'D', 14, 5, 3.75, 6.0, 2, 1.05); // a fallen log, dragged up to sit on
-    stamp(dst, 'D', 11, 6, 1.05, 6.15, 1, 1);   // an offcut, kicked aside
-    stamp(dst, 'C', 1, 13, 2.05, 6.75, 1, 1);   // blood on the grass by the fire
+    stamp(dst, 'C', 8, 10, 3.5, 2.4, 2, 1.5);    // stakes across the back
+    slab(dst, 72, 0.15, 2, 3, 3);                // log walls
+    hipRoof(dst, 'wood', 0, 0.4);
+    chunk(dst, '!Flags_banner.png', 4 * TILE, 0, TILE, 2 * TILE, 0.3, 3.5);
+    door(dst, 'dark', 2.05, 5);
+    stamp(dst, 'C', 0, 8, 2.7, 3.6, 1, 2);       // swords, racked at the corner
+    fire(dst, 'potOut', 3.6, 3.5);               // stones, logs, a pot on a spit
+    stamp(dst, 'C', 5, 12, 4.7, 3.4, 2, 2);      // barrels, dropped where they fell
+    stamp(dst, 'D', 14, 5, 4.0, 5.05, 2, 1.05);  // a fallen log to sit on
+    stamp(dst, 'C', 1, 13, 2.6, 5.5, 1, 1);      // blood on the grass
   },
 
   // ---- The four yard buildings -------------------------------------------
