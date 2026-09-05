@@ -8,6 +8,12 @@
 // repainted without touching any code — and running this again will not
 // overwrite one that has been edited unless --force is passed.
 //
+// Before composing anything, read tools/DEPTH.md — how this art expresses
+// depth, what the artist does in his own maps, and what has already been tried
+// and thrown away. And look at art-review/compositions/, which is every
+// structure in the sample maps cut out with the tiles it is made of: copying one
+// of those beats inventing a new one, every time.
+//
 // Why compose rather than draw: a building in this pack is not a sprite, it is
 // a piece of MAP. Reading the artist's own village (Map010) tile by tile, a
 // house is a roof autotile filled over a rectangle, a wall autotile under it,

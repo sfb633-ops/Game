@@ -1,0 +1,111 @@
+# How this art expresses depth
+
+Notes for anyone — me included — composing a building or a scene out of the
+Winlu pieces. Written after building four of them flat and being told so.
+
+Everything here is read off three sources: the pack's own sample maps (mined
+into `art-review/compositions/`), Seth's two hand-made keeps, and general
+pixel-art practice. Where they disagree, the sample maps win: they were drawn by
+the person who drew the tiles.
+
+## The projection
+
+Not isometric and not top-down. It is the JRPG oblique: **horizontal surfaces
+are seen from above, vertical surfaces are seen face-on, and both are in the
+same picture.** A roof shows its slope from above; the wall under it shows its
+front. Nothing is foreshortened along the x axis, so a tile is a square and a
+building is as wide as its footprint.
+
+Two consequences that matter constantly:
+
+- **Higher on the screen means further away.** That is the only depth axis
+  there is. Two things at the same y are at the same distance, which is why a
+  row of props on one baseline reads as a shelf rather than a place.
+- **A sprite is anchored at its feet.** Its bottom edge is where it touches the
+  ground. Draw order is by that y, so something with a larger y is drawn later
+  and covers what is behind it.
+
+Light comes from the **upper left**. Shadows fall down and to the right.
+
+## The depth cues, in order of strength
+
+**1. Occlusion.** One thing overlapping another is worth more than every other
+cue combined. It is also the cheapest: place a prop so it covers the base of
+the thing behind it and both become solid. A prop with clear air all round its
+base looks like a sticker; the same prop overlapping a wall looks like it is
+standing in front of it.
+
+This is why the camp's stakes are drawn *before* the roof — the roof cuts across
+their base, so they stand behind it instead of floating over it.
+
+**2. Overhang plus its cast shadow.** A roof wider than the wall under it, with
+a dark band down the wall where the eave shades it. This is the single change
+that took the four yard buildings from blocks to buildings. The pack's own
+houses overhang by about half a tile each side.
+
+**3. Volume shading.** A cylinder is lit through the middle and falls off to
+both edges; a cone shows two faces meeting at a ridge. Seth's keeps do this and
+it is the biggest thing the composed buildings still lack — their towers are
+round because the stonework curves, not because a round sprite was pasted on.
+
+**4. Visible top surfaces.** Anything horizontal shows its thickness: the top
+face of a crenellation, the tread of a step, the top of a wall. A shape with no
+visible top face reads as a decal.
+
+**5. Recess.** A doorway that is a dark void with its arch stepping inward, not
+a door painted on a flat face. The keep's gate is a recess; our buildings' doors
+are decals on a wall.
+
+**6. Tiering.** Two roofs at different heights on one building. The inn in
+Map010 is `kind 60` over `kind 76` — a main roof and a lower one — and that
+step is most of why it reads as a building rather than a shed.
+
+**7. Breaking the outline.** A chimney, a dormer, ivy over the eaves, a spike.
+A roof that ends in a flat horizontal edge reads as a rectangle whatever is
+drawn on its face.
+
+## Composition
+
+From the woodsman's cabin in Map012, which is the clearest example in the pack:
+
+- **The building dominates.** It is much bigger than anything around it, and
+  everything else defers to it. A camp whose hut is the same size as its barrels
+  is a pile of objects.
+- **Props are scattered, with ground between them.** Not one of his touches
+  another. The space is as much of the picture as the props are.
+- **Props sit at many different depths** — a woodpile high on the screen, a cart
+  low on it. This is what the y axis is for.
+- **The ground is dressed.** His cabin stands on bare earth, not on lawn. A
+  patch of different ground under a structure stops it floating.
+- **Repeats are broken up.** Scatter, recolour, or overlap anything that would
+  otherwise tile visibly.
+
+## Things that do not work, tried and thrown away
+
+- **Hipping an A3 roof by narrowing its top course.** The autotiles draw a
+  complete border around every rectangle, so a narrower course comes out as a
+  second roof stacked on the first — a wedding cake. Use the overhang instead,
+  or the pre-drawn hips on `Fantasy_Roofs`.
+- **A full-height crop of a sheet cell.** Neighbours bleed in. The camp's stakes
+  brought a slice of a well's blue water with them until the crop was cut to
+  1.5 tiles.
+- **A letterboxed canvas.** 6.7 x 4.4 tiles forces everything onto one baseline
+  because there is nowhere else to put it. Compose near square and the depth
+  bands appear on their own.
+
+## The review rule
+
+**No art decision from a magnified render.** Every judgement in the session that
+built these was made on a 2.4x crop, and at 1:1 in fog the result was a smudge.
+
+`node tools/at-scale.js <name> --before` draws it at 1:1 on real ground, beside
+the keep for calibration, with the committed version on the row below and the
+whole thing dimmed as fog dims it underneath. If it looks weak beside the keep,
+it is weak.
+
+## The reference
+
+`node tools/mine-maps.js` extracts every structure from the pack's sample maps
+into `art-review/compositions/` — a picture of each and the tiles it is made of,
+in the arguments `slab()`, `paint()` and `stamp()` already take. Twenty-seven of
+them. Copy from there before inventing anything.
