@@ -790,47 +790,47 @@
     "barracks": {
      "file": "buildings/cyan/barracks.png",
      "w": 144,
-     "h": 152,
+     "h": 194,
      "anchorX": 72,
-     "anchorY": 152,
+     "anchorY": 194,
      "footW": 115,
      "shadow": {
       "file": "buildings/cyan/barracks_shadow.png",
-      "w": 196,
-      "h": 30,
+      "w": 210,
+      "h": 39,
       "anchorX": 72,
       "anchorY": 0
      },
      "door": {
       "file": "buildings/cyan/barracks-door.png",
-      "w": 29,
-      "h": 58,
+      "w": 36,
+      "h": 71,
       "frames": 4,
-      "x": 58,
-      "y": 86
+      "x": 55,
+      "y": 107
      }
     },
     "bank": {
      "file": "buildings/cyan/bank.png",
      "w": 144,
-     "h": 158,
+     "h": 144,
      "anchorX": 72,
-     "anchorY": 158,
+     "anchorY": 144,
      "footW": 115,
      "shadow": {
       "file": "buildings/cyan/bank_shadow.png",
-      "w": 198,
-      "h": 32,
+      "w": 193,
+      "h": 29,
       "anchorX": 72,
       "anchorY": 0
      },
      "door": {
       "file": "buildings/cyan/bank-door.png",
-      "w": 29,
-      "h": 58,
+      "w": 32,
+      "h": 65,
       "frames": 4,
-      "x": 58,
-      "y": 86
+      "x": 55,
+      "y": 79
      }
     },
     "stable": {
@@ -859,24 +859,24 @@
     "siege": {
      "file": "buildings/cyan/siege.png",
      "w": 144,
-     "h": 157,
+     "h": 209,
      "anchorX": 72,
-     "anchorY": 157,
+     "anchorY": 209,
      "footW": 115,
      "shadow": {
       "file": "buildings/cyan/siege_shadow.png",
-      "w": 197,
-      "h": 31,
+      "w": 215,
+      "h": 42,
       "anchorX": 72,
       "anchorY": 0
      },
      "door": {
       "file": "buildings/cyan/siege-door.png",
-      "w": 29,
-      "h": 58,
+      "w": 36,
+      "h": 71,
       "frames": 4,
-      "x": 58,
-      "y": 86
+      "x": 55,
+      "y": 107
      }
     },
     "castle": {
@@ -1089,47 +1089,47 @@
     "barracks": {
      "file": "buildings/red/barracks.png",
      "w": 144,
-     "h": 152,
+     "h": 194,
      "anchorX": 72,
-     "anchorY": 152,
+     "anchorY": 194,
      "footW": 115,
      "shadow": {
       "file": "buildings/red/barracks_shadow.png",
-      "w": 196,
-      "h": 30,
+      "w": 210,
+      "h": 39,
       "anchorX": 72,
       "anchorY": 0
      },
      "door": {
       "file": "buildings/red/barracks-door.png",
-      "w": 29,
-      "h": 58,
+      "w": 36,
+      "h": 71,
       "frames": 4,
-      "x": 58,
-      "y": 86
+      "x": 55,
+      "y": 107
      }
     },
     "bank": {
      "file": "buildings/red/bank.png",
      "w": 144,
-     "h": 158,
+     "h": 144,
      "anchorX": 72,
-     "anchorY": 158,
+     "anchorY": 144,
      "footW": 115,
      "shadow": {
       "file": "buildings/red/bank_shadow.png",
-      "w": 198,
-      "h": 32,
+      "w": 193,
+      "h": 29,
       "anchorX": 72,
       "anchorY": 0
      },
      "door": {
       "file": "buildings/red/bank-door.png",
-      "w": 29,
-      "h": 58,
+      "w": 32,
+      "h": 65,
       "frames": 4,
-      "x": 58,
-      "y": 86
+      "x": 55,
+      "y": 79
      }
     },
     "stable": {
@@ -1158,24 +1158,24 @@
     "siege": {
      "file": "buildings/red/siege.png",
      "w": 144,
-     "h": 157,
+     "h": 209,
      "anchorX": 72,
-     "anchorY": 157,
+     "anchorY": 209,
      "footW": 115,
      "shadow": {
       "file": "buildings/red/siege_shadow.png",
-      "w": 197,
-      "h": 31,
+      "w": 215,
+      "h": 42,
       "anchorX": 72,
       "anchorY": 0
      },
      "door": {
       "file": "buildings/red/siege-door.png",
-      "w": 29,
-      "h": 58,
+      "w": 36,
+      "h": 71,
       "frames": 4,
-      "x": 58,
-      "y": 86
+      "x": 55,
+      "y": 107
      }
     },
     "castle": {
@@ -1388,47 +1388,47 @@
     "barracks": {
      "file": "buildings/lime/barracks.png",
      "w": 144,
-     "h": 152,
+     "h": 194,
      "anchorX": 72,
-     "anchorY": 152,
+     "anchorY": 194,
      "footW": 115,
      "shadow": {
       "file": "buildings/lime/barracks_shadow.png",
-      "w": 196,
-      "h": 30,
+      "w": 210,
+      "h": 39,
       "anchorX": 72,
       "anchorY": 0
      },
      "door": {
       "file": "buildings/lime/barracks-door.png",
-      "w": 29,
-      "h": 58,
+      "w": 36,
+      "h": 71,
       "frames": 4,
-      "x": 58,
-      "y": 86
+      "x": 55,
+      "y": 107
      }
     },
     "bank": {
      "file": "buildings/lime/bank.png",
      "w": 144,
-     "h": 158,
+     "h": 144,
      "anchorX": 72,
-     "anchorY": 158,
+     "anchorY": 144,
      "footW": 115,
      "shadow": {
       "file": "buildings/lime/bank_shadow.png",
-      "w": 198,
-      "h": 32,
+      "w": 193,
+      "h": 29,
       "anchorX": 72,
       "anchorY": 0
      },
      "door": {
       "file": "buildings/lime/bank-door.png",
-      "w": 29,
-      "h": 58,
+      "w": 32,
+      "h": 65,
       "frames": 4,
-      "x": 58,
-      "y": 86
+      "x": 55,
+      "y": 79
      }
     },
     "stable": {
@@ -1457,24 +1457,24 @@
     "siege": {
      "file": "buildings/lime/siege.png",
      "w": 144,
-     "h": 157,
+     "h": 209,
      "anchorX": 72,
-     "anchorY": 157,
+     "anchorY": 209,
      "footW": 115,
      "shadow": {
       "file": "buildings/lime/siege_shadow.png",
-      "w": 197,
-      "h": 31,
+      "w": 215,
+      "h": 42,
       "anchorX": 72,
       "anchorY": 0
      },
      "door": {
       "file": "buildings/lime/siege-door.png",
-      "w": 29,
-      "h": 58,
+      "w": 36,
+      "h": 71,
       "frames": 4,
-      "x": 58,
-      "y": 86
+      "x": 55,
+      "y": 107
      }
     },
     "castle": {
@@ -1687,47 +1687,47 @@
     "barracks": {
      "file": "buildings/purple/barracks.png",
      "w": 144,
-     "h": 152,
+     "h": 194,
      "anchorX": 72,
-     "anchorY": 152,
+     "anchorY": 194,
      "footW": 115,
      "shadow": {
       "file": "buildings/purple/barracks_shadow.png",
-      "w": 196,
-      "h": 30,
+      "w": 210,
+      "h": 39,
       "anchorX": 72,
       "anchorY": 0
      },
      "door": {
       "file": "buildings/purple/barracks-door.png",
-      "w": 29,
-      "h": 58,
+      "w": 36,
+      "h": 71,
       "frames": 4,
-      "x": 58,
-      "y": 86
+      "x": 55,
+      "y": 107
      }
     },
     "bank": {
      "file": "buildings/purple/bank.png",
      "w": 144,
-     "h": 158,
+     "h": 144,
      "anchorX": 72,
-     "anchorY": 158,
+     "anchorY": 144,
      "footW": 115,
      "shadow": {
       "file": "buildings/purple/bank_shadow.png",
-      "w": 198,
-      "h": 32,
+      "w": 193,
+      "h": 29,
       "anchorX": 72,
       "anchorY": 0
      },
      "door": {
       "file": "buildings/purple/bank-door.png",
-      "w": 29,
-      "h": 58,
+      "w": 32,
+      "h": 65,
       "frames": 4,
-      "x": 58,
-      "y": 86
+      "x": 55,
+      "y": 79
      }
     },
     "stable": {
@@ -1756,24 +1756,24 @@
     "siege": {
      "file": "buildings/purple/siege.png",
      "w": 144,
-     "h": 157,
+     "h": 209,
      "anchorX": 72,
-     "anchorY": 157,
+     "anchorY": 209,
      "footW": 115,
      "shadow": {
       "file": "buildings/purple/siege_shadow.png",
-      "w": 197,
-      "h": 31,
+      "w": 215,
+      "h": 42,
       "anchorX": 72,
       "anchorY": 0
      },
      "door": {
       "file": "buildings/purple/siege-door.png",
-      "w": 29,
-      "h": 58,
+      "w": 36,
+      "h": 71,
       "frames": 4,
-      "x": 58,
-      "y": 86
+      "x": 55,
+      "y": 107
      }
     },
     "castle": {

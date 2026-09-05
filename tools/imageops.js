@@ -5,7 +5,13 @@ function blank(width, height) {
   return { width, height, data: Buffer.alloc(width * height * 4) };
 }
 
+// Rounded. A fractional size allocates a fractional buffer and then indexes it
+// with (y * w + x), which lands between pixels and writes noise — stamp() with a
+// 1.7-tile crop put a white striped rectangle across a whole building and
+// nothing complained. Any caller asking for half a pixel has made an arithmetic
+// mistake; rounding here means it comes out a pixel off instead of as garbage.
 function crop(img, sx, sy, w, h) {
+  sx = Math.round(sx); sy = Math.round(sy); w = Math.round(w); h = Math.round(h);
   const out = blank(w, h);
   for (let y = 0; y < h; y++) {
     const py = sy + y;

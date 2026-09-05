@@ -36,6 +36,7 @@ const SHEETS = {
   B: 'Fantasy_Outside_B',
   C: 'Fantasy_Outside_C',
   D: 'Fantasy_Outside_D',
+  E: 'Fantasy_Roofs',
 };
 const loaded = {};
 function sheet(name) {
@@ -167,8 +168,15 @@ function auditRecipe(name) {
   const doors = drawn.filter(d => d.kind === 'door');
   const roofs = drawn.filter(d => d.kind === 'roof');
   for (const d of doors) {
-    for (const o of drawn) {
+    const after = drawn.indexOf(d);
+    for (let i = 0; i < drawn.length; i++) {
+      const o = drawn[i];
       if (o === d || o.kind === 'roof' || o.kind === 'wall') continue;
+      // Only what is drawn AFTER the door can cover it. Anything before is
+      // BEHIND it, and a recessed arch laid under the leaf is exactly the
+      // composition wanted — a rule that refused that would be enforcing a
+      // mistake rather than catching one.
+      if (i < after) continue;
       if (o.y + o.h <= d.y) continue;               // sits entirely above the door
       if (!overlaps(o, d)) continue;
       const ov = (Math.min(o.x + o.w, d.x + d.w) - Math.max(o.x, d.x)) / TILE;
@@ -215,12 +223,16 @@ function stamp(dst, name, col, row, tx, ty, wt = 1, ht = 1) {
 // corner of a neighbour, and several of them sit on their own hard-edged shadow
 // tile — so anything cut off a sheet gets reduced to the one thing that was
 // wanted before it is used.
-function largestIsland(img) {
+// minAlpha exists because every piece on these sheets carries a soft drop
+// shadow, and at a low threshold the shadows BRIDGE neighbouring pieces into
+// one island — so the flood keeps the lot and the helper does nothing. Asking
+// for solid pixels only breaks the bridge.
+function largestIsland(img, minAlpha = 16) {
   const { width: w, height: h } = img;
   const seen = new Uint8Array(w * h);
   let best = null;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    if (seen[y * w + x] || img.data[(y * w + x) * 4 + 3] < 16) continue;
+    if (seen[y * w + x] || img.data[(y * w + x) * 4 + 3] < minAlpha) continue;
     const cells = [], st = [[x, y]];
     seen[y * w + x] = 1;
     while (st.length) {
@@ -230,7 +242,7 @@ function largestIsland(img) {
         const nx = cx + dx, ny = cy + dy;
         if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
         const k = ny * w + nx;
-        if (seen[k] || img.data[k * 4 + 3] < 16) continue;
+        if (seen[k] || img.data[k * 4 + 3] < minAlpha) continue;
         seen[k] = 1; st.push([nx, ny]);
       }
     }
@@ -362,6 +374,39 @@ function dormer(dst, which, tx, ty) {
   record('onroof', 'dormer ' + which, Math.round(tx * TILE) + 18, Math.round(ty * TILE) + 35, 74, 97);
   const [cc, cr] = DORMERS[which] || DORMERS.timber;
   chunk(dst, '!Roof_Windows.png', cc * 96, cr * 144, 96, 144, tx, ty);
+}
+
+// A hipped roof off Fantasy_Roofs, which is the piece that makes a building read
+// as a building rather than as a box with a pattern on it.
+//
+// The A3 roof autotiles are a flat texture: a rectangle of shingle with an edge
+// round it. Laid over a wall you get two stacked rectangles, and no amount of
+// dressing fixes that, because the roof has no SHAPE. Fantasy_Roofs draws the
+// roof as a shape — a ridge post down the middle with two slopes falling away
+// from it, shingles running diagonally to meet at the hip. Under the ridge is a
+// V, and the wall behind shows through it as a gable face. That is how every
+// building in the artist's own town screenshots is built.
+//
+// The rects are measured, not guessed: each chevron was flood-filled from its
+// apex to find where it actually sits. They come off the sheet close enough to
+// their neighbours that a rectangular crop catches a corner of the next one, so
+// each is reduced to its largest island first — which is what that helper has
+// always been for.
+// Tightened by ten pixels on each side. largestIsland cannot separate these:
+// each piece on the sheet carries a soft drop shadow, and the shadows bridge
+// neighbours into one island, so the flood keeps everything. Ten pixels clips
+// nothing of the chevron and excludes the pieces either side of it.
+const HIPS = {
+  wood:   [432, 0, 192, 200],
+  orange: [432, 192, 192, 200],
+  slate:  [432, 384, 192, 200],
+  blue:   [37, 576, 214, 165],
+};
+function hipRoof(dst, which, tx, ty) {
+  const [sx, sy, w, h] = HIPS[which] || HIPS.wood;
+  const cut = largestIsland(ops.crop(sheet('E'), sx, sy, w, h), 140);
+  record('roof', 'hip ' + which, Math.round(tx * TILE), Math.round(ty * TILE), cut.width, cut.height);
+  ops.drawOver(dst, cut, Math.round(tx * TILE), Math.round(ty * TILE));
 }
 
 // A chimney stack off !Fantasy_chimney. That sheet is eight animation frames of
@@ -528,43 +573,40 @@ const RECIPES = {
   // No towers. These are a barracks, a bank, a stable and a workshop — they say
   // what they are with their roof, their walls and one or two small things at the
   // door, the way every building in his village does.
-  // Five tiles across, three rows of roof over two of wall, and the wall face
-  // divided into bays the way a person would divide it:
+  // Five tiles across. The wall is THREE rows and the hipped roof sits over its
+  // top two, so what shows through the V under the ridge is the wall itself,
+  // read as a gable face. The fittings go in the bottom row and a half, which is
+  // the part the roof does not cover:
   //
-  //   x 0-1   the trade sign          x 2-3   the door
-  //   x 1-2   (clear)                 x 3.3   the window
+  //   x 0-1  the trade sign      x 2-3  the door, under the gable
+  //   x 3.3  the window          the yard prop at the foot, clear of the door
   //
-  // The door is the fixed point — troops walk out of it — so everything else is
-  // placed around it and auditRecipe checks that nothing has crept over it. The
-  // yard prop stands at the FOOT, below the wall line and clear of the door's
-  // columns, because that is where the artist puts his: on the ground in front
-  // of a building, not hung on its face.
+  // The door is the fixed point — troops walk out of it — so everything is
+  // placed around it and auditRecipe refuses the build if anything creeps over.
   barracks: (dst) => {
-    slab(dst, 66, 0, 1, 5, 3);                   // dark shingle
-    slab(dst, 88, 0, 4, 5, 2);                   // timber frame on a stone plinth
-    dormer(dst, 'slate', 1.5, 0.75);             // on the roof, over the door
-    door(dst, 'studded', 2.5, 6);
-    stamp(dst, 'B', 1, 0, 3.3, 4, 1, 2);         // window
-    sign(dst, 'sword', 1.0, 4.3);
-    stamp(dst, 'C', 0, 8, 0.35, 4.7, 1, 2);      // swords on a rack at the door
+    slab(dst, 88, 0.04, 2, 4, 3);                // timber frame on a stone plinth
+    hipRoof(dst, 'slate', 0, 0);                 // slate, ridge and two slopes
+    door(dst, 'studded', 2.05, 5);
+    stamp(dst, 'B', 1, 0, 2.75, 3.5, 1, 1.5);    // window
+    sign(dst, 'sword', 0.55, 3.6);
+    stamp(dst, 'C', 0, 8, 0.1, 3.9, 1, 2);       // swords on a rack at the door
   },
 
   // Blue slate over pale ashlar with a gilt course: money should look like money,
-  // and a treasury the player cannot pick out is one they forget to defend. The
-  // dormer is lit, because somebody is up there counting.
+  // and a treasury the player cannot pick out is one they forget to defend.
   bank: (dst) => {
-    slab(dst, 70, 0, 1, 5, 3);                   // blue slate
-    slab(dst, 112, 0, 4, 5, 2);                  // pale ashlar, gilt top and bottom
-    dormer(dst, 'blueLit', 1.5, 0.75);
-    door(dst, 'pale', 2.5, 6);
-    stamp(dst, 'B', 1, 0, 3.3, 4, 1, 2);         // window
-    sign(dst, 'coin', 1.0, 4.3);
-    stamp(dst, 'C', 3, 8, 0.5, 4.9, 1, 1.6);     // a water butt at the door
+    slab(dst, 112, 0.1, 2, 4, 3);                // pale ashlar, gilt top and bottom
+    hipRoof(dst, 'blue', 0, 0.55);
+    door(dst, 'pale', 2.2, 5);
+    stamp(dst, 'B', 1, 0, 3.0, 3.5, 1, 1.5);     // window
+    sign(dst, 'coin', 0.6, 3.6);
+    stamp(dst, 'C', 7, 7, 0.35, 4.0, 1, 1);      // a crate, lodged by the door
   },
 
-  // Thatch and plaster: the one agricultural silhouette in the set, readable
-  // before you have looked at anything hanging on it. The attic window is the
-  // hayloft, which is the reason a stable has a gap in its roof at all.
+  // Thatch keeps its flat roof: a thatched cottage in the artist's own maps is a
+  // flat A3 course, and there is no hipped thatch on the roof sheet. It is the
+  // one agricultural silhouette in the set and reads before you have looked at
+  // anything hanging on it.
   stable: (dst) => {
     slab(dst, 67, 0, 1, 5, 3);                   // straw thatch
     slab(dst, 95, 0, 4, 5, 2);                   // plaster under a timber beam
@@ -575,16 +617,15 @@ const RECIPES = {
     stamp(dst, 'C', 4, 6, 0.45, 4.75, 1, 2);     // a feed barrel at the door
   },
 
-  // A workshop, and the yard does the talking: cut timber at the door and the
-  // forge's chimney sitting on the roof.
+  // A workshop: a timber roof, and the forge's chimney standing off the ridge.
   siege: (dst) => {
-    slab(dst, 68, 0, 1, 5, 3);                   // brown scale tile
-    slab(dst, 89, 0, 4, 5, 2);                   // timber frame
-    chimney(dst, 'stone', 1.6, 1.55);            // a forge, so a chimney
-    door(dst, 'rough', 2.5, 6);
-    stamp(dst, 'B', 1, 0, 3.3, 4, 1, 2);         // window
-    sign(dst, 'anvil', 1.0, 4.3);
-    stamp(dst, 'C', 8, 4, 0.15, 4.75, 1.7, 2);   // cut timber, stacked at the wall
+    slab(dst, 89, 0.04, 2, 4, 3);                // timber frame
+    hipRoof(dst, 'wood', 0, 0);
+    chimney(dst, 'stone', 2.6, 1.35);
+    door(dst, 'rough', 2.05, 5);
+    stamp(dst, 'B', 1, 0, 2.75, 3.5, 1, 1.5);    // window
+    sign(dst, 'anvil', 0.55, 3.6);
+    stamp(dst, 'C', 8, 4, 0.05, 3.9, 1, 2);      // cut timber at the wall
   },
 
   // The keep, put together out of the same pieces as everything else: the
@@ -717,4 +758,4 @@ if (require.main === module) {
 
 // DOORS travels with the recipes: build-assets cuts the opening frames out of
 // the same sheet and has to look them up the same way.
-module.exports = { build, RECIPES, DOORS, FIRES, FIRE_CELL_W, FIRE_CELL_H, FIRE_SHEET: '!Decoration.png', __internals: { slab, paint, stamp, door, sign, chunk, chimney, dormer, fire, statue }, DOOR_SHEET: '!Fantasy_door1.png' };
+module.exports = { build, RECIPES, DOORS, FIRES, FIRE_CELL_W, FIRE_CELL_H, FIRE_SHEET: '!Decoration.png', __internals: { slab, paint, stamp, door, sign, chunk, chimney, dormer, fire, hipRoof, statue }, DOOR_SHEET: '!Fantasy_door1.png' };
