@@ -101,8 +101,18 @@ const Sprites = (function () {
     // flowerbed is the thing this is meant to cure.
     const apron = (x, y) => inBounds(x, y) && !isRock(x, y) && !isLake(x, y) &&
       !paved(x, y) && !isEarth(x, y) && !!(isApron && isApron(x, y));
+    // The paving's outermost ring, where it meets whatever it was laid into.
+    //
+    // Undergrowth is kept off an apron on purpose — a building standing in a
+    // flowerbed was the thing that rule cured. But keeping it off ALL of the
+    // apron leaves a plant-free zone with a clean boundary around every
+    // building, and a clean boundary is exactly what says "this was dropped on
+    // top of the map" rather than "this has always been here". Weeds come
+    // through at the edge of paving; they do not come through under a wall.
+    const apronEdge = (x, y) => apron(x, y) &&
+      (!apron(x - 1, y) || !apron(x + 1, y) || !apron(x, y - 1) || !apron(x, y + 1));
     const clear = (x, y) => inBounds(x, y) && !isRock(x, y) && !isLake(x, y) &&
-      !paved(x, y) && !apron(x, y);
+      !paved(x, y) && (!apron(x, y) || apronEdge(x, y));
     const isBrush = (x, y) => clear(x, y) && ArtDefs.isBrush(x, y);
     const isBloom = (x, y) => clear(x, y) && ArtDefs.isBloom(x, y);
     const cols = manifest.terrain.sheetCols;

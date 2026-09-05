@@ -68,13 +68,28 @@ function spritesFor(assetDir) {
     makeFetchShim(assetDir), ArtDefs, console);
 }
 
-// --- ground ------------------------------------------------------------------
-// Real terrain rather than flat green: a building is judged against the grass,
-// the scatter and the shadows it will actually sit in.
-function ground(Sprites, wTiles, hTiles) {
+// The ground each building will actually stand on, aprons included.
+//
+// This used to pass `no` for the apron, so every building in the sheet was drawn
+// on bare grass — and the one thing the sheet exists to judge, whether a placed
+// building reads as part of the map, was the one thing it could not show. A
+// harness that hides the question it was built to answer is worse than none.
+//
+// The apron is worked out the same way the client works it out: the sprite's
+// width, and APRON_DEPTH tiles of ground behind the plot.
+const APRON_DEPTH = 2;
+function ground(Sprites, wTiles, hTiles, plots) {
   const no = () => false;
-  const canvas = Sprites.buildTerrainCanvas(wTiles, hTiles, no, no, no, no, no, null, no);
-  return canvas;
+  const apron = new Set();
+  for (const p of plots || []) {
+    const def = Sprites.buildingDef(p.type, p.opts || {});
+    if (!def || !def.w) continue;
+    const halfW = Math.round(def.w / 2 / TILE);
+    for (let dy = -APRON_DEPTH; dy <= 1; dy++)
+      for (let dx = -halfW; dx <= halfW; dx++) apron.add((p.tx + dx) + ',' + (p.ty + dy));
+  }
+  return Sprites.buildTerrainCanvas(wTiles, hTiles, no, no, no, no,
+    (x, y) => apron.has(x + ',' + y), null, no);
 }
 
 // --- the strip ---------------------------------------------------------------
@@ -83,17 +98,29 @@ function ground(Sprites, wTiles, hTiles) {
 function strip(Sprites, names, wTiles, hTiles) {
   const cv = new Canvas(wTiles * TILE, hTiles * TILE);
   const ctx = cv.getContext('2d');
-  const t = ground(Sprites, wTiles, hTiles);
-  const o = Sprites.terrainOrigin();
-  ctx.drawImage(t, o, o);
 
+  // Where each thing will stand, worked out BEFORE the ground is drawn, so the
+  // aprons can be laid under them. A building drawn on bare grass is not the
+  // thing being judged — the question is whether it reads as part of the map.
   const baseY = (hTiles - 1.6) * TILE;
+  const ty = Math.round(baseY / TILE);
+  const layout = [];
   let x = TILE * 1.2;
-  const placed = [];
   for (const spec of names) {
     const def = Sprites.buildingDef(spec.type, spec.opts || {});
     const w = def ? def.w : TILE;
-    const cx = x + w / 2;
+    layout.push({ spec, x, w, cx: x + w / 2, tx: Math.round((x + w / 2) / TILE), ty });
+    x += w + TILE * 1.1;
+  }
+
+  const t = ground(Sprites, wTiles, hTiles,
+    layout.filter(l => l.spec.kind !== 'unit' && l.spec.kind !== 'prop')
+      .map(l => ({ type: l.spec.type, opts: l.spec.opts, tx: l.tx, ty: l.ty })));
+  const o = Sprites.terrainOrigin();
+  ctx.drawImage(t, o, o);
+
+  const placed = [];
+  for (const { spec, x: px, w, cx } of layout) {
     if (spec.kind === 'unit') {
       Sprites.drawUnit(ctx, spec.race, spec.unit, 'idle', 'down', 0.35, cx, baseY);
     } else if (spec.kind === 'prop') {
@@ -102,8 +129,7 @@ function strip(Sprites, names, wTiles, hTiles) {
       Sprites.drawBuilding(ctx, spec.type, cx, baseY, spec.opts || {});
       if (spec.fire) Sprites.drawBuildingFire(ctx, spec.type, cx, baseY, { time: 0.35 });
     }
-    placed.push({ label: spec.label, x: Math.round(x), w: Math.round(w) });
-    x += w + TILE * 1.1;
+    placed.push({ label: spec.label, x: Math.round(px), w: Math.round(w) });
   }
   return { cv, placed, usedW: Math.ceil(x / TILE) };
 }
