@@ -1985,33 +1985,33 @@
    "neutral": {
     "camp": {
      "file": "buildings/neutral/camp.png",
-     "w": 216,
-     "h": 142,
-     "anchorX": 108,
-     "anchorY": 142,
-     "footW": 173,
+     "w": 240,
+     "h": 219,
+     "anchorX": 120,
+     "anchorY": 219,
+     "footW": 192,
      "shadow": {
       "file": "buildings/neutral/camp_shadow.png",
-      "w": 264,
-      "h": 28,
-      "anchorX": 108,
+      "w": 314,
+      "h": 44,
+      "anchorX": 120,
       "anchorY": 0
      },
      "door": {
       "file": "buildings/neutral/camp-door.png",
-      "w": 32,
-      "h": 64,
+      "w": 39,
+      "h": 78,
       "frames": 4,
-      "x": 48,
-      "y": 64
+      "x": 47,
+      "y": 78
      },
      "fire": {
       "file": "buildings/neutral/camp-fire.png",
-      "w": 32,
-      "h": 64,
+      "w": 39,
+      "h": 78,
       "frames": 3,
-      "x": 106,
-      "y": 66
+      "x": 96,
+      "y": 131
      }
     },
     "shrine": {

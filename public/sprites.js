@@ -66,7 +66,7 @@ const Sprites = (function () {
   // Paint the whole static map into an offscreen canvas: grass, then earth
   // patches and rock blended over it by autotile, then scenery. Redrawn only
   // when the map itself changes, and blitted with a camera offset each frame.
-  function buildTerrainCanvas(width, height, isMountain, isWater, isCobble, isOccupied, isApron, isDarkCobble) {
+  function buildTerrainCanvas(width, height, isMountain, isWater, isCobble, isOccupied, isApron, isDarkCobble, isCampYard) {
     const t = TILE();
     const canvas = document.createElement('canvas');
     canvas.width = (width + TERRAIN_PAD * 2) * t;
@@ -85,7 +85,14 @@ const Sprites = (function () {
     const isLake = (x, y) => inBounds(x, y) && !!(isWater && isWater(x, y));
     // Bare-earth patches are cosmetic and only belong on open ground.
     const paved = (x, y) => !!(isCobble && isCobble(x, y));
-    const isEarth = (x, y) => inBounds(x, y) && !isRock(x, y) && !isLake(x, y) && !paved(x, y) && ArtDefs.isDirt(x, y);
+    // Bare earth is scattered over the map at random AND trodden flat under a
+    // bandit camp. Both are the same layer on purpose: a camp's yard is dirt
+    // that happens to be where the camp is, so it autotiles into any patch it
+    // lands on instead of drawing a second shape with its own rim. Nobody
+    // paved a camp — it stood on the player's own municipal cobble before,
+    // which argued with everything else about who put it there.
+    const isEarth = (x, y) => inBounds(x, y) && !isRock(x, y) && !isLake(x, y) && !paved(x, y) &&
+      (ArtDefs.isDirt(x, y) || !!(isCampYard && isCampYard(x, y)));
     // Undergrowth and flowers, laid as ground rather than scattered as objects.
     // They keep off a plateau for the same reason everything else does: the top
     // of one is bare grass and the cliff is the only thing on it.
@@ -93,7 +100,7 @@ const Sprites = (function () {
     // so undergrowth and flowers are kept off — a building standing in a
     // flowerbed is the thing this is meant to cure.
     const apron = (x, y) => inBounds(x, y) && !isRock(x, y) && !isLake(x, y) &&
-      !paved(x, y) && !!(isApron && isApron(x, y));
+      !paved(x, y) && !isEarth(x, y) && !!(isApron && isApron(x, y));
     const clear = (x, y) => inBounds(x, y) && !isRock(x, y) && !isLake(x, y) &&
       !paved(x, y) && !apron(x, y);
     const isBrush = (x, y) => clear(x, y) && ArtDefs.isBrush(x, y);

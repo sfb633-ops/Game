@@ -669,7 +669,7 @@ function fitW(img, px) { return ops.resize(img, px, Math.max(1, Math.round(img.h
 // as a second castle.
 // A camp is 4.5 against the player buildings' 3: it is a hall rather than a
 // house, and the extra width is most of what tells the two apart at a glance.
-const SOURCE_TILES_WIDE = { barracks: 3, bank: 3, stable: 3, siege: 3, camp: 4.5 };
+const SOURCE_TILES_WIDE = { barracks: 3, bank: 3, stable: 3, siege: 3, camp: 5 };
 // The door recipes, so the opening frames are cut from the same cells the
 // shut one was. make-building owns that table; importing it beats copying it.
 const MAKE = require('./make-building');

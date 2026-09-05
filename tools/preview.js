@@ -163,11 +163,21 @@ function render(latestState) {
       if (c.shrine) apronFor(c.x, c.y, 'shrine', {});   // camps are not paved
     }
 
+  // The ground the camps have trodden flat, same as the client works it out.
+  const yard = new Set();
+  for (const c of state.aiCamps) {
+    if (c.shrine) continue;
+    const d = Sprites.buildingDef('camp', {});
+    const hw = d ? Math.round(d.w / 2 / TILE) : 2, up = d ? Math.round(d.h / TILE) - 1 : 2;
+    for (let dy = -up; dy <= 1; dy++) for (let dx = -hw; dx <= hw; dx++) yard.add((c.x + dx) + ',' + (c.y + dy));
+  }
   const terrain = Sprites.buildTerrainCanvas(W, H,
     (x, y) => match.terrain[y][x] === 1, (x, y) => match.terrain[y][x] === 2,
     (x, y) => match.terrain[y][x] === 3,
     (x, y) => blocked.has(x + ',' + y),
-    (x, y) => apron.has(x + ',' + y));
+    (x, y) => apron.has(x + ',' + y),
+    null,
+    (x, y) => yard.has(x + ',' + y));
   const t0 = Sprites.terrainOrigin();   // see the note in sprites.js: tile grid, not canvas grid
   ctx.drawImage(terrain, t0, t0);
 
@@ -194,14 +204,21 @@ function render(latestState) {
       Sprites.drawOre(ctx, item.o.x, item.o.y, item.o.left);
     } else if (item.kind === 'camp') {
       const px = item.camp.x * TILE, py = item.camp.y * TILE;
-      Sprites.drawBuilding(ctx, 'camp', px, py);
-      // Its fire, caught mid-burn, so the still shows what the map shows.
-      Sprites.drawBuildingFire(ctx, 'camp', px, py, { time: t });
-      // At the door, the way the client places them — see drawCamp.
-      const cd = Sprites.buildingDef('camp', {});
-      const dcx = cd && cd.door ? cd.door.x + cd.door.w / 2 - cd.anchorX : 0;
-      Sprites.drawUnit(ctx, 'bandit', 'swordsman', 'idle', 'down', t, px + dcx - 14, py + 5);
-      Sprites.drawUnit(ctx, 'bandit', 'swordsman', 'idle', 'left', t, px + dcx + 13, py + 8, { phase: 2.5 });
+      // Shrines are not camps. This drew every aiCamp in the camp's own art, so
+      // a shrine came out as a bandit hut standing on the shrine's paving —
+      // which sent me looking for a bug in the game that was only ever here. A
+      // preview that lies about what the map looks like is worse than none.
+      const art = item.camp.shrine ? 'shrine' : 'camp';
+      Sprites.drawBuilding(ctx, art, px, py);
+      if (!item.camp.shrine) {
+        // Its fire, caught mid-burn, so the still shows what the map shows.
+        Sprites.drawBuildingFire(ctx, 'camp', px, py, { time: t });
+        // At the door, the way the client places them — see drawCamp.
+        const cd = Sprites.buildingDef('camp', {});
+        const dcx = cd && cd.door ? cd.door.x + cd.door.w / 2 - cd.anchorX : 0;
+        Sprites.drawUnit(ctx, 'bandit', 'swordsman', 'idle', 'down', t, px + dcx - 14, py + 5);
+        Sprites.drawUnit(ctx, 'bandit', 'swordsman', 'idle', 'left', t, px + dcx + 13, py + 8, { phase: 2.5 });
+      }
     } else if (item.kind === 'building') {
       const px = item.b.x * TILE, py = item.b.y * TILE;
       if (item.b.type === 'wall') Sprites.drawWall(ctx, item.b.x, item.b.y, hasWall, { race: item.p.race });

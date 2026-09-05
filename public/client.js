@@ -1650,7 +1650,8 @@ function buildTerrainLayer() {
     (x, y) => terrain[y][x] === 3,        // cobbles: a compound's courtyard
     (x, y) => sceneryBlock.has(x + ',' + y),
     (x, y) => apronSet.has(x + ',' + y),
-    isDarkCourtyard);
+    isDarkCourtyard,
+    (x, y) => campYardSet.has(x + ',' + y));
 
   terrainChunks = [];
   for (let y = 0; y < whole.height; y += TERRAIN_CHUNK) {
@@ -1711,6 +1712,17 @@ let sceneryBlock = new Set();
 // tile it sits on — the point is to blend the building into the map, not to
 // give it a courtyard.
 let apronSet = new Set();
+// The ground a camp has trodden flat. Wider than the apron and one row deeper,
+// because a camp is a yard rather than a building with a step round it.
+let campYardSet = new Set();
+function addCampYard(b) {
+  const ts = mapCfg && mapCfg.tileSize;
+  const def = ts && Sprites.buildingDef && Sprites.buildingDef('camp', {});
+  const halfW = (def && def.w) ? Math.round(def.w / 2 / ts) : 2;
+  const up = (def && def.h) ? Math.round(def.h / ts) - 1 : 2;
+  for (let dy = -up; dy <= 1; dy++)
+    for (let dx = -halfW; dx <= halfW; dx++) campYardSet.add((b.x + dx) + ',' + (b.y + dy));
+}
 function addApron(b, race) {
   const ts = mapCfg && mapCfg.tileSize;
   const def = ts && Sprites.buildingDef && Sprites.buildingDef(b.type, { race, level: b.level });
@@ -1731,7 +1743,7 @@ function addSceneryFootprint(b, race) {
 
 function rebuildTileSets(msg) {
   wallSet = new Set(); occupiedSet = new Set(); rubbleSet = new Set();
-  sceneryBlock = new Set(); apronSet = new Set();
+  sceneryBlock = new Set(); apronSet = new Set(); campYardSet = new Set();
   for (const p of msg.players) {
     for (const b of p.buildings) {
       if (!b.type) continue;
@@ -1756,6 +1768,7 @@ function rebuildTileSets(msg) {
     // grey the player's own yard gets, and it argued with everything the camp
     // is meant to say about who put it there.
     if (c.shrine) addApron({ x: c.x, y: c.y, type: 'shrine' }, null);
+    else addCampYard(c);
   }
   for (const r of msg.rubble || []) rubbleSet.add(`${r.x},${r.y}`);
 }
