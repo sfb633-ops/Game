@@ -24,7 +24,7 @@ const fs = require('fs');
 const path = require('path');
 const { decodePNG, encodePNG } = require('./png');
 const ops = require('./imageops');
-const { WALL, findSheet } = require('./sample-map.js');
+const { WALL, FLOOR, findSheet } = require('./sample-map.js');
 
 const TILE = 48;
 const SRC = 'C:/Users/seth/Desktop/assets';
@@ -47,19 +47,39 @@ function sheet(name) {
   return loaded[name];
 }
 
-// Where an autotile's 2x2 block sits on its sheet, in half-tile units. This is
-// RPG Maker's own arithmetic — see sample-map.js, which uses the same for maps.
+// Where an autotile's block sits on its sheet, in half-tile units. This is RPG
+// Maker's own arithmetic — see sample-map.js, which uses the same for maps.
+//
+// A4 alternates down the sheet: a section of wall CAP and a section of wall
+// FACE. The cap sections autotile like floors and the faces like walls, which is
+// why each needs its own quadrant table. This used to refuse the cap sections
+// outright, on the grounds that a wall top is not a wall — and that threw away
+// the piece the artist builds his cottages out of. His wall under a roof is
+// k87, a cap section: a dark beam with the wall hanging under it, which is
+// exactly the under-eave band that separates a roof from what it sits on.
 function blockOf(kind) {
   const tx = kind % 8, ty = Math.floor(kind / 8);
-  if (kind >= 48 && kind < 80) return { sheet: 'A3', bx: tx * 2, by: (ty - 6) * 2 };
-  // A4 alternates: even rows are wall TOPS and autotile like floors, odd rows
-  // are the wall itself. Only the odd ones are any use as the face of a house.
+  if (kind >= 48 && kind < 80) return { sheet: 'A3', bx: tx * 2, by: (ty - 6) * 2, floor: false };
   if (kind >= 80) {
-    if (ty % 2 === 0) throw new Error('A4 kind ' + kind + ' is a wall top, not a wall');
-    return { sheet: 'A4', bx: tx * 2, by: Math.floor((ty - 10) * 2.5 + 0.5) };
+    const cap = ty % 2 === 0;
+    return {
+      sheet: 'A4', bx: tx * 2,
+      by: Math.floor((ty - 10) * 2.5 + (cap ? 0 : 0.5)),
+      floor: cap,
+    };
   }
   throw new Error('kind ' + kind + ' is not a roof or a wall');
 }
+
+// A rectangle's edges, as the two autotile families index them. The wall family
+// takes the four-bit exposure mask straight; the floor family has 48 shapes and
+// wants its own numbers, and these are the ones read off the artist's own maps —
+// his cottage wall runs 34,20,20,20,36 over 40,28,28,28,38, which is exactly
+// top-left, top, top-right over bottom-left, bottom, bottom-right.
+const FLOOR_SHAPE = {
+  0: 0, 1: 24, 2: 20, 3: 34, 4: 16, 5: 32, 6: 36,
+  8: 28, 9: 40, 10: 22, 12: 38, 15: 46,
+};
 
 // One autotiled tile, its shape taken from which of its four sides are exposed.
 //
@@ -70,10 +90,13 @@ function blockOf(kind) {
 // grid and are exact; anything else is now at worst a pixel off instead of
 // somewhere else entirely.
 function drawAuto(dst, kind, shape, dx, dy) {
-  const { sheet: name, bx, by } = blockOf(kind);
+  const { sheet: name, bx, by, floor } = blockOf(kind);
   const src = sheet(name);
   const h1 = TILE / 2;
-  const quad = WALL[shape];
+  // Cap sections index the floor table, faces the wall one — the two families
+  // cut their quadrants out of the block differently.
+  const table = floor ? FLOOR : WALL;
+  const quad = table[floor ? (FLOOR_SHAPE[shape] || 0) : shape];
   const ox = Math.round(dx), oy = Math.round(dy);
   for (let i = 0; i < 4; i++) {
     const [qsx, qsy] = quad[i];
@@ -421,78 +444,81 @@ const RECIPES = {
   // A hipped top was tried and thrown away: the A3 autotiles draw a complete
   // border around every rectangle, so a narrower top course comes out as a
   // second roof stacked on the first — a wedding cake, not a hip.
-  // The barracks: a hall with the yard's kit standing in front of it.
+  // ---- The four yard buildings -------------------------------------------
   //
-  // It had a castle tower bolted to its side for one commit. The tower was real
-  // — `B` (13,0), pre-shaded, and the technique behind it was right — but a
-  // defensive turret taller and wider than the hall it is attached to is not a
-  // barracks, it is a keep with a shed glued on. The depth cue was sound and the
-  // object was nonsense; those are separate questions and I answered only one.
+  // Built the way the artist builds a cottage, which was finally read off his
+  // own map data rather than guessed at. Map015, five tiles wide:
   //
-  // So the same trick with the right furniture: a rack of swords against the
-  // wall and a training dummy standing forward of it, cutting the near corner.
-  // Anything that overlaps the base of what is behind it makes both solid, and a
-  // pell is a thing a barracks actually has.
+  //   row 7   A3k60s3  A3k60s2  A3k60s2  A3k60s2  A3k60s6     roof
+  //   row 9   A3k60s9  A3k60s8  A3k60s8  A3k60s8  A3k60s12
+  //   row 10  A4k87s34 A4k87s20 A4k87s20 A4k87s20 A4k87s36    wall, SAME columns
+  //   row 11  A4k87s40 A4k87s28 A4k87s28 A4k87s28 A4k87s38
+  //
+  // Three things in that, all of which we had wrong:
+  //
+  //   The roof and the wall are THE SAME WIDTH, stacked directly. There is no
+  //   inset. Half a tile of manual overhang was making a step the art was never
+  //   drawn for; the overhang is already in the tiles.
+  //
+  //   The wall is k87 — a CAP section of A4, which our composer used to refuse
+  //   outright as "a wall top, not a wall". Cap sections carry a dark beam along
+  //   their top edge, and that beam IS the under-eave band that separates a roof
+  //   from what it stands on. Our barracks and bank were built on k90 and k92,
+  //   plain stone with no beam, which is exactly why they read as two rectangles
+  //   rather than as a roof over a wall.
+  //
+  //   Three rows of roof over two of wall, five wide. Measured across eighteen of
+  //   his buildings: mean five and a half wide, and about as wide as tall.
+  //
+  // No towers. These are a barracks, a bank, a stable and a workshop — they say
+  // what they are with their roof, their walls and one or two small things at the
+  // door, the way every building in his village does.
   barracks: (dst) => {
-    slab(dst, 71, 2, 2, 4, 2);                   // dark shingle
-    slab(dst, 90, 2.5, 4, 3, 2);                 // grey stone, inset under the eave
-    dormer(dst, 'slate', 4.0, 1.15);             // breaks the ridge
-    stamp(dst, 'B', 0, 10, 3.4, 3.78, 1, 2);     // arched opening, head above the leaf
-    door(dst, 'studded', 3.9, 6);
-    stamp(dst, 'B', 1, 0, 4.5, 4.2, 1, 2);       // window
-    sign(dst, 'sword', 4.9, 4.35);
-    stamp(dst, 'B', 2, 12, 5.3, 3.45, 1, 2);     // ivy down the right eave
-    stamp(dst, 'C', 0, 8, 2.45, 4.45, 1, 2);     // swords, racked against the wall
-    stamp(dst, 'C', 0, 10, 1.85, 4.62, 1, 2);    // the pell, standing forward
+    slab(dst, 66, 0, 1, 5, 3);                   // dark shingle
+    slab(dst, 88, 0, 4, 5, 2);                   // timber frame on a stone plinth
+    dormer(dst, 'slate', 3.3, 0.15);             // breaks the ridge
+    door(dst, 'studded', 2.5, 6);
+    stamp(dst, 'B', 1, 0, 3.4, 4, 1, 2);         // window
+    sign(dst, 'sword', 1.75, 4.2);
+    stamp(dst, 'C', 0, 8, 0.5, 4.45, 1, 2);      // swords on a rack by the door
   },
 
-  // The bank. Blue slate, because money should look like money and a treasury
-  // the player cannot pick out is one they forget to defend. Its lit dormer says
-  // somebody is up there counting; the barrels and the strongbox stand in front
-  // of it and cut its corner, which is the barracks' tower trick at a smaller
-  // size — anything overlapping the base of the thing behind it makes both solid.
+  // Blue slate over pale ashlar with a gilt course: money should look like money,
+  // and a treasury the player cannot pick out is one they forget to defend. The
+  // dormer is lit, because somebody is up there counting.
   bank: (dst) => {
-    slab(dst, 70, 2, 2, 4, 2);                   // blue slate
-    slab(dst, 92, 2.5, 4, 3, 2);                 // tan ashlar, inset under the eave
-    dormer(dst, 'blueLit', 4.0, 1.15);
-    stamp(dst, 'B', 0, 10, 3.4, 3.78, 1, 2);     // arched opening, head above the leaf
-    door(dst, 'pale', 3.9, 6);
-    stamp(dst, 'B', 1, 0, 4.5, 4.2, 1, 2);       // window
-    sign(dst, 'coin', 4.9, 4.35);
-    stamp(dst, 'B', 2, 12, 5.3, 3.45, 1, 2);     // ivy down the right eave
-    stamp(dst, 'C', 5, 12, 1.9, 4.55, 2, 2);     // barrels, cutting the near corner
-    stamp(dst, 'C', 3, 8, 3.15, 5.35, 1, 1.4);   // a water butt by the door
+    slab(dst, 70, 0, 1, 5, 3);                   // blue slate
+    slab(dst, 112, 0, 4, 5, 2);                  // pale ashlar, gilt top and bottom
+    dormer(dst, 'blueLit', 3.3, 0.15);
+    door(dst, 'pale', 2.5, 6);
+    stamp(dst, 'B', 1, 0, 3.4, 4, 1, 2);         // window
+    sign(dst, 'coin', 1.75, 4.2);
+    stamp(dst, 'C', 5, 12, 0.35, 4.5, 2, 2);     // barrels by the door
   },
 
   // Thatch and plaster: the one agricultural silhouette in the set, readable
   // before you have looked at anything hanging on it. The attic window is the
-  // hayloft. A rail fence runs across the front, which is what a stable has and
-  // what puts something between the viewer and its wall.
+  // hayloft, which is the reason a stable has a gap in its roof at all.
   stable: (dst) => {
-    slab(dst, 67, 2, 2, 4, 2);                   // straw thatch
-    slab(dst, 95, 2.5, 4, 3, 2);                 // plaster over stone, timbered
-    dormer(dst, 'attic', 4.0, 1.15);
-    stamp(dst, 'B', 0, 10, 3.4, 3.78, 1, 2);     // arched opening
-    door(dst, 'plank', 3.9, 6);
-    stamp(dst, 'B', 1, 0, 4.5, 4.2, 1, 2);       // window
-    sign(dst, 'horseshoe', 4.9, 4.35);
-    stamp(dst, 'C', 13, 10, 1.5, 4.35, 2, 2);    // a haystack against the gable
-    stamp(dst, 'C', 8, 10, 1.85, 5.1, 2, 1.5);   // rail fence, clear of the doorway
+    slab(dst, 67, 0, 1, 5, 3);                   // straw thatch
+    slab(dst, 95, 0, 4, 5, 2);                   // plaster under a timber beam
+    dormer(dst, 'attic', 3.3, 0.15);
+    door(dst, 'plank', 2.5, 6);
+    stamp(dst, 'B', 1, 0, 3.4, 4, 1, 2);         // window
+    sign(dst, 'horseshoe', 1.75, 4.2);
+    stamp(dst, 'C', 13, 10, 0.15, 4.35, 2, 2);   // a haystack at the gable end
   },
 
-  // A workshop, and the yard does the talking: cut timber, a spare cartwheel,
-  // and the forge's chimney standing proud of the ridge. Siege engines are made
-  // of exactly those things, and the timber stacked in front cuts the wall.
+  // A workshop, and the yard does the talking: cut timber by the door and the
+  // forge's chimney standing proud of the ridge.
   siege: (dst) => {
-    slab(dst, 57, 2, 2, 4, 2);                   // log roof
-    slab(dst, 89, 2.5, 4, 3, 2);                 // timber frame
-    chimney(dst, 'stone', 4.4, 1.55);            // a forge, so a chimney
-    stamp(dst, 'B', 0, 10, 3.4, 3.78, 1, 2);     // arched opening
-    door(dst, 'rough', 3.9, 6);
-    stamp(dst, 'B', 1, 0, 4.5, 4.2, 1, 2);       // window
-    sign(dst, 'anvil', 4.9, 4.35);
-    stamp(dst, 'C', 12, 4, 1.35, 4.4, 2, 2);     // cut timber, clear of the doorway
-    stamp(dst, 'C', 13, 5, 3.1, 5.25, 1, 1.5);   // the chopping block, axe still in it
+    slab(dst, 68, 0, 1, 5, 3);                   // brown scale tile
+    slab(dst, 89, 0, 4, 5, 2);                   // timber frame
+    chimney(dst, 'stone', 2.9, 0.6);             // a forge, so a chimney
+    door(dst, 'rough', 2.5, 6);
+    stamp(dst, 'B', 1, 0, 3.4, 4, 1, 2);         // window
+    sign(dst, 'anvil', 1.75, 4.2);
+    stamp(dst, 'C', 12, 4, 0.3, 4.5, 2, 2);      // cut timber, stacked
   },
 
   // The keep, put together out of the same pieces as everything else: the

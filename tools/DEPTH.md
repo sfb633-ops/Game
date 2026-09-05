@@ -38,10 +38,11 @@ standing in front of it.
 This is why the camp's stakes are drawn *before* the roof — the roof cuts across
 their base, so they stand behind it instead of floating over it.
 
-**2. Overhang plus its cast shadow.** A roof wider than the wall under it, with
-a dark band down the wall where the eave shades it. This is the single change
-that took the four yard buildings from blocks to buildings. The pack's own
-houses overhang by about half a tile each side.
+**2. The wall cap beam.** A dark horizontal band between roof and wall, drawn
+into the wall autotile itself. This is what the artist uses and it is the single
+strongest thing separating a roof plane from a wall plane. See the section below
+— it replaced a hand-made half-tile inset that was making a step the art was
+never drawn for.
 
 **3. Volume, which is borrowed and not painted.** A cylinder lit through the
 middle and falling off to both edges; a cone showing two faces at a ridge.
@@ -82,6 +83,47 @@ step is most of why it reads as a building rather than a shed.
 A roof that ends in a flat horizontal edge reads as a rectangle whatever is
 drawn on its face.
 
+## How a building is actually built
+
+Read off the artist's map data, not inferred. Map015, a cottage five tiles wide:
+
+```
+row  7   A3k60s3  A3k60s2  A3k60s2  A3k60s2  A3k60s6      roof, top course
+row  9   A3k60s9  A3k60s8  A3k60s8  A3k60s8  A3k60s12     roof, bottom course
+row 10   A4k87s34 A4k87s20 A4k87s20 A4k87s20 A4k87s36     wall, SAME columns
+row 11   A4k87s40 A4k87s28 A4k87s28 A4k87s28 A4k87s38
+```
+
+**The roof and the wall are the same width and stacked directly.** There is no
+inset and no manual overhang. Half a tile of hand-made overhang was tried and it
+is wrong: it makes a step the art was never drawn for. The overhang is already
+in the tiles.
+
+**The wall carries a cap beam, and the cap beam is the whole trick.** A4 is laid
+out as alternating sections down the sheet — a wall CAP and a wall FACE — and the
+caps have a dark beam along their top edge. That beam is what separates a roof
+from what it stands on. Kinds with one: 80, 81, 82, 85-89, 94, 95, 101, 102, 112,
+117, 125. Kinds without: 90, 91, 92, 93 — plain stone, which is what the barracks
+and the bank were built on, and exactly why they read as two stacked rectangles.
+
+Cap sections autotile like FLOORS, not like walls: a different quadrant table and
+a different shape numbering. `drawAuto` handles both; `blockOf` used to refuse the
+caps outright as "a wall top, not a wall", which threw away every piece the
+artist builds cottages out of.
+
+**Proportions**, measured across eighteen of his buildings: mean five and a half
+tiles wide, roof about as deep as the wall, and about as wide as tall. A cottage
+is five wide, three of roof over two of wall. Ours are that now.
+
+**Something breaks the ridge** — a dormer or a chimney — and one or two SMALL
+things stand at the door. Not a mass, not a tower. His props are barrels, a
+bale, a rack, a woodpile: they read at a glance and they never compete with the
+building.
+
+Run `node tools/kinds.js` equivalents from the catalogue in art-review if a
+recipe needs a different material — every roof and wall autotile rendered as the
+same slab, so one can be picked by looking instead of by guessing at a number.
+
 ## Composition
 
 From the woodsman's cabin in Map012, which is the clearest example in the pack:
@@ -107,6 +149,8 @@ From the woodsman's cabin in Map012, which is the clearest example in the pack:
 - **A full-height crop of a sheet cell.** Neighbours bleed in. The camp's stakes
   brought a slice of a well's blue water with them until the crop was cut to
   1.5 tiles.
+- **Insetting the wall by hand to fake an overhang.** The tiles already have it,
+  and the step reads as two stacked boxes. Use a cap-beam wall kind instead.
 - **A letterboxed canvas.** 6.7 x 4.4 tiles forces everything onto one baseline
   because there is nowhere else to put it. Compose near square and the depth
   bands appear on their own.
