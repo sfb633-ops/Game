@@ -421,45 +421,29 @@ const RECIPES = {
   // A hipped top was tried and thrown away: the A3 autotiles draw a complete
   // border around every rectangle, so a narrower top course comes out as a
   // second roof stacked on the first — a wedding cake, not a hip.
-  // The barracks: a hall with a watchtower standing in front of its end.
+  // The barracks: a hall with the yard's kit standing in front of it.
   //
-  // Built the way Seth built the keeps — which is the way this pack is meant to
-  // be used, and not something Godot gave him that we lack. The volume is
-  // already drawn into the sheets; the work is knowing which cells hold it and
-  // what order to lay them in.
+  // It had a castle tower bolted to its side for one commit. The tower was real
+  // — `B` (13,0), pre-shaded, and the technique behind it was right — but a
+  // defensive turret taller and wider than the hall it is attached to is not a
+  // barracks, it is a keep with a shed glued on. The depth cue was sound and the
+  // object was nonsense; those are separate questions and I answered only one.
   //
-  //   The tower is `B` (13,0): a finished cylinder, shaded through the middle
-  //   and falling off to both edges, with a crenellated rim, its hollow inside
-  //   in shadow, and a flared base. Eight tiles as it sits on the sheet, taken
-  //   here as its top four and its bottom two — the shaft between repeats, so
-  //   cutting it out shortens the tower without showing a seam.
-  //
-  //   It is stamped LAST and its base sits lower than the hall's. Later means
-  //   on top, and lower means nearer, so it stands in FRONT of the hall and cuts
-  //   across its corner. That one overlap is worth more than every other depth
-  //   cue put together, and it is the whole of what three tile layers were doing
-  //   in the Godot scene.
-  //
-  //   The doorway is `B` (0,10), an arched opening with the stone stepping in
-  //   around a dark void, laid under the door leaf so a rim of shadow shows
-  //   round it. A door painted flat on a wall is a decal; a door standing in a
-  //   hole is a door.
-  //
-  //   Ivy off `B` (2,12) over the eave, because a roof that ends in a straight
-  //   horizontal line reads as a rectangle whatever is drawn on its face — and
-  //   ivy is what the artist himself breaks his own rooflines with in Map010.
+  // So the same trick with the right furniture: a rack of swords against the
+  // wall and a training dummy standing forward of it, cutting the near corner.
+  // Anything that overlaps the base of what is behind it makes both solid, and a
+  // pell is a thing a barracks actually has.
   barracks: (dst) => {
     slab(dst, 71, 2, 2, 4, 2);                   // dark shingle
     slab(dst, 90, 2.5, 4, 3, 2);                 // grey stone, inset under the eave
     dormer(dst, 'slate', 4.0, 1.15);             // breaks the ridge
-    stamp(dst, 'B', 0, 10, 3.4, 3.78, 1, 2);     // arched opening, its head above the leaf
+    stamp(dst, 'B', 0, 10, 3.4, 3.78, 1, 2);     // arched opening, head above the leaf
     door(dst, 'studded', 3.9, 6);
     stamp(dst, 'B', 1, 0, 4.5, 4.2, 1, 2);       // window
-    stamp(dst, 'B', 2, 12, 5.3, 3.45, 1, 2);     // ivy down the right eave
     sign(dst, 'sword', 4.9, 4.35);
-    // Last, and standing lower than the hall: in front of it.
-    stamp(dst, 'B', 13, 0, 1.0, 1.0, 2, 4);      // tower: rim and shaft
-    stamp(dst, 'B', 13, 5, 1.0, 5.0, 2, 2);      // tower: shaft and its grassy base
+    stamp(dst, 'B', 2, 12, 5.3, 3.45, 1, 2);     // ivy down the right eave
+    stamp(dst, 'C', 0, 8, 2.45, 4.45, 1, 2);     // swords, racked against the wall
+    stamp(dst, 'C', 0, 10, 1.85, 4.62, 1, 2);    // the pell, standing forward
   },
 
   // The bank. Blue slate, because money should look like money and a treasury

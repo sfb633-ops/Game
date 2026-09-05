@@ -464,8 +464,18 @@ function buildShadow(img, ...outParts) {
     cur = next;
   }
   const out = ops.blank(w, h);
-  for (let i = 0; i < w * h; i++) {
-    out.data[i * 4 + 3] = Math.round(Math.min(1, cur[i]) * 255 * SHADOW_ALPHA);
+  // Fade with distance from the foot. A shadow is darkest and sharpest where the
+  // thing touches the ground and washes out as it runs away from it; drawn at
+  // one flat opacity it comes out as a grey slab with a straight edge, which is
+  // what a flat roofline projects to and what it looked like on the map. The
+  // falloff costs nothing and is the difference between a shadow and a shape.
+  for (let sy = 0; sy < h; sy++) {
+    const far = sy / Math.max(1, h - 1);
+    const fade = 1 - far * far * 0.55;
+    for (let sx = 0; sx < w; sx++) {
+      const i = sy * w + sx;
+      out.data[i * 4 + 3] = Math.round(Math.min(1, cur[i]) * 255 * SHADOW_ALPHA * fade);
+    }
   }
   return {
     file: write(out, ...outParts),
@@ -669,7 +679,7 @@ function fitW(img, px) { return ops.resize(img, px, Math.max(1, Math.round(img.h
 // as a second castle.
 // A camp is 4.5 against the player buildings' 3: it is a hall rather than a
 // house, and the extra width is most of what tells the two apart at a glance.
-const SOURCE_TILES_WIDE = { barracks: 3.5, bank: 3, stable: 3, siege: 3, camp: 5 };
+const SOURCE_TILES_WIDE = { barracks: 3, bank: 3, stable: 3, siege: 3, camp: 5 };
 // The door recipes, so the opening frames are cut from the same cells the
 // shut one was. make-building owns that table; importing it beats copying it.
 const MAKE = require('./make-building');

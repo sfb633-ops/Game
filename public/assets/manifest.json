@@ -789,25 +789,25 @@
    "cyan": {
     "barracks": {
      "file": "buildings/cyan/barracks.png",
-     "w": 168,
-     "h": 176,
-     "anchorX": 84,
-     "anchorY": 176,
-     "footW": 134,
+     "w": 144,
+     "h": 146,
+     "anchorX": 72,
+     "anchorY": 146,
+     "footW": 115,
      "shadow": {
       "file": "buildings/cyan/barracks_shadow.png",
-      "w": 228,
-      "h": 35,
-      "anchorX": 84,
+      "w": 194,
+      "h": 29,
+      "anchorX": 72,
       "anchorY": 0
      },
      "door": {
       "file": "buildings/cyan/barracks-door.png",
       "w": 32,
-      "h": 63,
+      "h": 65,
       "frames": 4,
-      "x": 76,
-      "y": 81
+      "x": 50,
+      "y": 69
      }
     },
     "bank": {
@@ -1088,25 +1088,25 @@
    "red": {
     "barracks": {
      "file": "buildings/red/barracks.png",
-     "w": 168,
-     "h": 176,
-     "anchorX": 84,
-     "anchorY": 176,
-     "footW": 134,
+     "w": 144,
+     "h": 146,
+     "anchorX": 72,
+     "anchorY": 146,
+     "footW": 115,
      "shadow": {
       "file": "buildings/red/barracks_shadow.png",
-      "w": 228,
-      "h": 35,
-      "anchorX": 84,
+      "w": 194,
+      "h": 29,
+      "anchorX": 72,
       "anchorY": 0
      },
      "door": {
       "file": "buildings/red/barracks-door.png",
       "w": 32,
-      "h": 63,
+      "h": 65,
       "frames": 4,
-      "x": 76,
-      "y": 81
+      "x": 50,
+      "y": 69
      }
     },
     "bank": {
@@ -1387,25 +1387,25 @@
    "lime": {
     "barracks": {
      "file": "buildings/lime/barracks.png",
-     "w": 168,
-     "h": 176,
-     "anchorX": 84,
-     "anchorY": 176,
-     "footW": 134,
+     "w": 144,
+     "h": 146,
+     "anchorX": 72,
+     "anchorY": 146,
+     "footW": 115,
      "shadow": {
       "file": "buildings/lime/barracks_shadow.png",
-      "w": 228,
-      "h": 35,
-      "anchorX": 84,
+      "w": 194,
+      "h": 29,
+      "anchorX": 72,
       "anchorY": 0
      },
      "door": {
       "file": "buildings/lime/barracks-door.png",
       "w": 32,
-      "h": 63,
+      "h": 65,
       "frames": 4,
-      "x": 76,
-      "y": 81
+      "x": 50,
+      "y": 69
      }
     },
     "bank": {
@@ -1686,25 +1686,25 @@
    "purple": {
     "barracks": {
      "file": "buildings/purple/barracks.png",
-     "w": 168,
-     "h": 176,
-     "anchorX": 84,
-     "anchorY": 176,
-     "footW": 134,
+     "w": 144,
+     "h": 146,
+     "anchorX": 72,
+     "anchorY": 146,
+     "footW": 115,
      "shadow": {
       "file": "buildings/purple/barracks_shadow.png",
-      "w": 228,
-      "h": 35,
-      "anchorX": 84,
+      "w": 194,
+      "h": 29,
+      "anchorX": 72,
       "anchorY": 0
      },
      "door": {
       "file": "buildings/purple/barracks-door.png",
       "w": 32,
-      "h": 63,
+      "h": 65,
       "frames": 4,
-      "x": 76,
-      "y": 81
+      "x": 50,
+      "y": 69
      }
     },
     "bank": {
