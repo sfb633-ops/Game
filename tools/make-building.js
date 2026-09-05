@@ -232,6 +232,40 @@ function chunk(dst, file, sx, sy, sw, sh, tx, ty) {
     Math.round(tx * TILE), Math.round(ty * TILE));
 }
 
+// A dormer off !Roof_Windows: a little gabled window standing out of a roof
+// slope. The sheet is laid out as RPG Maker characters, 96x144 a cell, four
+// roofing materials down and, across each row, an unlit window, a lit one, and
+// the two halves of a plain eave. Columns 2-3 of the timber row are a second
+// shape: a flat-fronted attic window, which is what a hayloft has.
+//
+// It earns its place by breaking the ridge line. A roof that ends in a flat
+// horizontal edge reads as a rectangle whatever is drawn on it; anything that
+// stands proud of that edge reads as a roof, and this is the piece the artist
+// uses for exactly that in his own village.
+const DORMERS = {
+  timber: [0, 0], timberLit: [1, 0], attic: [2, 0], atticLit: [3, 0],
+  slate: [0, 1], slateLit: [1, 1], blue: [0, 2], blueLit: [1, 2],
+  tile: [0, 3], tileLit: [1, 3],
+};
+function dormer(dst, which, tx, ty) {
+  const [cc, cr] = DORMERS[which] || DORMERS.timber;
+  chunk(dst, '!Roof_Windows.png', cc * 96, cr * 144, 96, 144, tx, ty);
+}
+
+// A chimney stack off !Fantasy_chimney. That sheet is eight animation frames of
+// a smoking chimney, 48x144 each: the bottom 43px are the stack itself and
+// everything above it is the smoke plume. Only the stack is baked in — a frozen
+// puff of smoke on a still building reads as a mistake — and it is placed so it
+// stands proud of the ridge, because breaking the top edge is most of what it
+// is here to do.
+const CHIMNEYS = { stone: 0, tan: 4, brick: 6 };
+const CHIMNEY_STACK_H = 43;
+function chimney(dst, which, tx, ty) {
+  const col = CHIMNEYS[which] != null ? CHIMNEYS[which] : CHIMNEYS.stone;
+  chunk(dst, '!Fantasy_chimney.png', col * TILE, 144 - CHIMNEY_STACK_H,
+    TILE, CHIMNEY_STACK_H, tx, ty);
+}
+
 // The stone gateway, off !$Gate_Stone1.png — a portcullis in twelve frames,
 // three across and four down, each 144x192 (three tiles by four). Frame (0,0)
 // is the gate SHUT, which is the one a keep wants standing in its wall.
@@ -296,44 +330,73 @@ const RECIPES = {
     stamp(dst, 'C', 0, 6, 4.3, 2.44, 1, 2);  // weapon rack, axes and swords
   },
 
+  // ---- The four yard buildings -------------------------------------------
+  //
+  // All built the same way, and the shape is the point. Each was a roof
+  // rectangle sitting on a wall rectangle of the SAME WIDTH, which made the
+  // whole building one hard-edged block — 192x192 with not a transparent pixel
+  // in it and all four corners square. Beside the keep, which has a real
+  // outline, five of those in a row read as elevations pasted onto the map
+  // rather than as buildings standing on it.
+  //
+  // Two changes, both taken from the artist's own village (Map010):
+  //
+  //   The wall is inset half a tile on each side, so the roof OVERHANGS it.
+  //   That is how his houses are built — the eave sticks out past the wall and
+  //   throws a shadow down it — and it is the whole of the silhouette: the
+  //   outline now steps in at the eaves instead of running straight down.
+  //
+  //   Something stands proud of the ridge. A roof that ends in a flat
+  //   horizontal edge reads as a rectangle whatever is drawn on its face, and
+  //   a dormer or a chimney breaking that line is what his roofs have.
+  //
+  // A hipped top was tried and thrown away: the A3 autotiles draw a complete
+  // border around every rectangle, so a narrower top course comes out as a
+  // second roof stacked on the first — a wedding cake, not a hip.
   barracks: (dst) => {
-    slab(dst, 71, 0, 0, 4, 2);            // dark shingle
-    slab(dst, 90, 0, 2, 4, 2);            // grey stone
-    door(dst, 'studded', 1.5, 4);
-    stamp(dst, 'B', 1, 0, 2, 2, 1, 2);    // window
-    sign(dst, 'sword', 2.55, 2.15);
+    slab(dst, 71, 0, 2, 4, 2);            // dark shingle
+    slab(dst, 90, 0.5, 4, 3, 2);          // grey stone, half a tile in on each side
+    dormer(dst, 'slate', 2.1, 0.95);      // slate to match the shingle
+    door(dst, 'studded', 1.5, 6);
+    stamp(dst, 'B', 1, 0, 2, 4, 1, 2);    // window
+    sign(dst, 'sword', 2.4, 4.15);
   },
 
   // The only building on the map that is not grey, brown or thatched, because
   // money should look like money and a treasury the player cannot pick out is
-  // one they forget to defend.
+  // one they forget to defend. Its dormer is lit: somebody is up there counting.
   bank: (dst) => {
-    slab(dst, 70, 0, 0, 4, 2);            // blue slate
-    slab(dst, 92, 0, 2, 4, 2);            // tan ashlar
-    door(dst, 'pale', 1.5, 4);
-    stamp(dst, 'B', 1, 0, 2, 2, 1, 2);    // window
-    sign(dst, 'coin', 2.55, 2.15);
+    slab(dst, 70, 0, 2, 4, 2);            // blue slate
+    slab(dst, 92, 0.5, 4, 3, 2);          // tan ashlar
+    dormer(dst, 'blueLit', 2.1, 0.95);
+    door(dst, 'pale', 1.5, 6);
+    stamp(dst, 'B', 1, 0, 2, 4, 1, 2);    // window
+    sign(dst, 'coin', 2.4, 4.15);
   },
 
   // Thatch and plaster: the one agricultural silhouette in the set, readable
-  // before you have looked at anything hanging on it.
+  // before you have looked at anything hanging on it. The attic window is the
+  // hayloft, which is the reason a stable has a gap in its roof at all.
   stable: (dst) => {
-    slab(dst, 67, 0, 0, 4, 2);            // straw thatch
-    slab(dst, 95, 0, 2, 4, 2);            // plaster over stone, timbered
-    door(dst, 'plank', 1.5, 4);
-    stamp(dst, 'B', 1, 0, 2, 2, 1, 2);    // window
-    sign(dst, 'horseshoe', 2.55, 2.15);
+    slab(dst, 67, 0, 2, 4, 2);            // straw thatch
+    slab(dst, 95, 0.5, 4, 3, 2);          // plaster over stone, timbered
+    dormer(dst, 'attic', 2.1, 0.95);
+    door(dst, 'plank', 1.5, 6);
+    stamp(dst, 'B', 1, 0, 2, 4, 1, 2);    // window
+    sign(dst, 'horseshoe', 2.4, 4.15);
   },
 
   // A workshop, and the yard does the talking: a chopping block with the axe
   // still in it, cut timber, a spare cartwheel. Siege engines are made of
   // exactly those things.
   siege: (dst) => {
-    slab(dst, 57, 0, 0, 4, 2);            // log roof
-    slab(dst, 89, 0, 2, 4, 2);            // timber frame
-    door(dst, 'rough', 1.5, 4);
-    stamp(dst, 'B', 1, 0, 2, 2, 1, 2);    // window
-    sign(dst, 'anvil', 2.55, 2.15);
+    slab(dst, 57, 0, 2, 4, 2);            // log roof
+    slab(dst, 89, 0.5, 4, 3, 2);          // timber frame
+    // A forge, so it gets a chimney rather than a window in its roof.
+    chimney(dst, 'stone', 2.7, 1.55);
+    door(dst, 'rough', 1.5, 6);
+    stamp(dst, 'B', 1, 0, 2, 4, 1, 2);    // window
+    sign(dst, 'anvil', 2.4, 4.15);
   },
 
   // The keep, put together out of the same pieces as everything else: the
@@ -444,4 +507,4 @@ if (require.main === module) {
 
 // DOORS travels with the recipes: build-assets cuts the opening frames out of
 // the same sheet and has to look them up the same way.
-module.exports = { build, RECIPES, DOORS, DOOR_SHEET: '!Fantasy_door1.png' };
+module.exports = { build, RECIPES, DOORS, __internals: { slab, paint, stamp, door, sign, chunk, chimney, dormer, statue }, DOOR_SHEET: '!Fantasy_door1.png' };

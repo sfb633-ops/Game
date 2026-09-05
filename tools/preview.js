@@ -110,6 +110,14 @@ for (const player of match.players.values()) {
 // Let the armies march clear of their castles so they're actually visible.
 for (let i = 0; i < 12; i++) match.tick(0.2);
 const state = match.serialize();
+// Where everything ended up, so a crop can be aimed at it. The output is one
+// image of the whole map at 11520x7680; without this, finding the base you
+// wanted to look at is a hunt.
+for (const pl of state.players) {
+  const k = pl.buildings.find(b => b.type === 'castle');
+  console.log(`base ${pl.race} tile ${k.x},${k.y} px ${k.x * config.MAP.tileSize},${k.y * config.MAP.tileSize}`);
+}
+for (const c of state.aiCamps) console.log(`${c.shrine ? 'shrine' : 'camp'} tile ${c.x},${c.y} px ${c.x * config.MAP.tileSize},${c.y * config.MAP.tileSize}`);
 
 Sprites.load(() => render(state), (e) => { throw e; });
 
