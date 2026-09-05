@@ -91,12 +91,21 @@ for (const player of match.players.values()) {
   for (let d = -4; d <= 4; d++) wall.push({ x: player.baseX + d, y: player.baseY + 5 });
   for (let d = 1; d <= 3; d++) wall.push({ x: player.baseX - 4, y: player.baseY + 5 + d });
   match.cmdBuildWall(player.id, wall);
-  player.idleUnits.swordsman = 6;
-  player.idleUnits.knight = 3;
-  player.idleUnits.catapult = 2;
-  match.cmdDeployUnits(player.id, { swordsman: 4, knight: 2, catapult: 1 },
-    Math.min(config.MAP.width - 3, player.baseX + 6),
-    Math.min(config.MAP.height - 3, player.baseY + 5));
+  // Troops stand in the building that trained them and come out of its door,
+  // so the way to get some on the ground is to stock a trainer and deploy it.
+  // This used to set player.idleUnits, which no longer exists — the preview
+  // threw on the line, and a render tool that does not run is a visual pass
+  // nobody does.
+  for (const [type, n] of [['swordsman', 4], ['knight', 2], ['catapult', 1]]) {
+    const trainer = Object.values(player.buildings).find(b => match.trainsType(b.type) === type);
+    if (!trainer) continue;
+    trainer.underConstruction = false;
+    trainer.remainingSec = 0;
+    trainer.ready = n;
+    match.cmdDeployFrom(player.id, trainer.x, trainer.y, n,
+      Math.min(config.MAP.width - 3, player.baseX + 6),
+      Math.min(config.MAP.height - 3, player.baseY + 5));
+  }
 }
 // Let the armies march clear of their castles so they're actually visible.
 for (let i = 0; i < 12; i++) match.tick(0.2);
