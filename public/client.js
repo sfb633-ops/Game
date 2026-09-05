@@ -1751,7 +1751,11 @@ function rebuildTileSets(msg) {
   for (const c of msg.aiCamps) if (!c.defeated || c.capturedBy) {
     occupiedSet.add(`${c.x},${c.y}`);
     addSceneryFootprint({ x: c.x, y: c.y, type: c.shrine ? 'shrine' : 'camp' }, null);
-    addApron({ x: c.x, y: c.y, type: c.shrine ? 'shrine' : 'camp' }, null);
+    // A shrine is dressed stone and stands on laid stone. A bandit camp does
+    // not: nobody paved it. The cobble apron under one was the same municipal
+    // grey the player's own yard gets, and it argued with everything the camp
+    // is meant to say about who put it there.
+    if (c.shrine) addApron({ x: c.x, y: c.y, type: 'shrine' }, null);
   }
   for (const r of msg.rubble || []) rubbleSet.add(`${r.x},${r.y}`);
 }
@@ -1799,6 +1803,9 @@ function drawBuilding(b, px, py, color, hasWall, race, pop) {
   // at rest is invisible work rather than a seam.
   const swing = doorOpenAt(b.x, b.y);
   if (swing > 0) Sprites.drawBuildingDoor(ctx, b.type, px, py, art, swing);
+  // And the fire, for anything that has one. art.time is the clock, so every
+  // camp on the map burns in step — which is what a tileset animation does.
+  Sprites.drawBuildingFire(ctx, b.type, px, py, art);
 
   // A tower's archer is a separate sprite standing in its gallery. He watches
   // the last thing the tower shot at and plays his loose while the arrow is
@@ -2279,9 +2286,20 @@ function drawCamp(camp, ts) {
   // something lit behind it, and that glow is the whole reason it reads as a
   // different sort of place — two guards planted in front of it hide exactly
   // the part worth seeing.
+  //
+  // At a camp they stand at its DOOR, worked out from where the door actually
+  // is rather than from the middle of the sprite. The camp used to be one wide
+  // hall whose middle was its door, so the two were the same tile and nobody
+  // had to say which was meant. It is a hut with a yard beside it now, its
+  // middle is the campfire, and two goblins planted on the anchor stood in the
+  // fire — hiding the one thing in the whole picture that moves.
+  const def = Sprites.buildingDef(art, {});
+  const doorCx = (!camp.shrine && def && def.door)
+    ? def.door.x + def.door.w / 2 - def.anchorX
+    : 0;
   const guards = camp.shrine
     ? [{ x: -26, y: 12 }, { x: 25, y: 14 }]
-    : [{ x: -13, y: 5 }, { x: 12, y: 8 }];
+    : [{ x: doorCx - 14, y: 5 }, { x: doorCx + 13, y: 8 }];
   guards.forEach((g, i) => {
     Sprites.drawUnit(ctx, 'bandit', 'swordsman', 'idle', i ? 'left' : 'down', clock,
       px + g.x, py + g.y, { phase: i * 2.5 });

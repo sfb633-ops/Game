@@ -711,6 +711,36 @@ function buildDoorStrip(type, setName, spec, scale) {
   };
 }
 
+// The campfire, as a strip of the frames it burns through.
+//
+// The same shape as the door strip and for the same reasons: cut from the sheet
+// the recipe used, scaled exactly as the building was scaled, and dropped onto
+// the sprite at the recorded offset with no arithmetic at draw time. The
+// difference is what drives it — a door's frame is chosen by how open it is,
+// and a fire's by the clock.
+//
+// !Decoration is an RPG Maker character sheet: 48x96 a cell, three frames
+// across per object. The recipe baked the fire OUT into the building and wrote
+// down where; these are the three frames of it burning.
+const FIRE_FRAMES = 3;
+function buildFireStrip(type, setName, spec, scale) {
+  const [cc, cr] = MAKE.FIRES[spec.lit] || MAKE.FIRES.lit;
+  const sheet = decodePNG(need(path.join(WINLU, 'characters', MAKE.FIRE_SHEET)));
+  const w = Math.max(1, Math.round(spec.w * scale));
+  const h = Math.max(1, Math.round(spec.h * scale));
+  const strip = ops.blank(w * FIRE_FRAMES, h);
+  for (let f = 0; f < FIRE_FRAMES; f++) {
+    const cell = ops.crop(sheet, (cc + f) * MAKE.FIRE_CELL_W, cr * MAKE.FIRE_CELL_H,
+      MAKE.FIRE_CELL_W, MAKE.FIRE_CELL_H);
+    ops.blit(strip, ops.resize(cell, w, h), f * w, 0);
+  }
+  return {
+    file: write(strip, 'buildings', setName, type + '-fire.png'),
+    w, h, frames: FIRE_FRAMES,
+    x: Math.round(spec.x * scale), y: Math.round(spec.y * scale),
+  };
+}
+
 function buildFromSource(type, setName) {
   const file = path.join(SRC, BUILDING_SRC_DIR, type + '.png');
   if (!fs.existsSync(file)) return null;
@@ -729,6 +759,15 @@ function buildFromSource(type, setName) {
     if (spec) {
       const shifted = { ...spec, x: spec.x - (box ? box.x0 : 0), y: spec.y - (box ? box.y0 : 0) };
       out.door = buildDoorStrip(type, setName, shifted, target / cropped);
+    }
+  }
+  // And the fires, which ride the same crop and the same scale.
+  const fireMeta = path.join(SRC, BUILDING_SRC_DIR, type + '.fires.json');
+  if (fs.existsSync(fireMeta)) {
+    const spec = JSON.parse(fs.readFileSync(fireMeta, 'utf8'))[0];
+    if (spec) {
+      const shifted = { ...spec, x: spec.x - (box ? box.x0 : 0), y: spec.y - (box ? box.y0 : 0) };
+      out.fire = buildFireStrip(type, setName, shifted, target / cropped);
     }
   }
   return out;

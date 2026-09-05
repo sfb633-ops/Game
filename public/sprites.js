@@ -449,6 +449,30 @@ const Sprites = (function () {
     return true;
   }
 
+  // The campfire, burning. Same strip mechanism as the door and drawn the same
+  // way — over the building, because the fire OUT is baked into the sprite and
+  // these frames cover it.
+  //
+  // What differs is what picks the frame. A door's is chosen by how far open it
+  // is, so it can sit still; a fire's comes off the clock, so it never does.
+  // Three frames at about eight a second, which is the rate the pack's own maps
+  // run these at.
+  const FIRE_FPS = 8;
+  function drawBuildingFire(ctx, type, worldX, worldY, opts) {
+    const def = buildingDef(type, opts || {});
+    const f = def && def.fire;
+    if (!f || !ready(f.file)) return false;
+    const t = (opts && opts.time) || 0;
+    const frame = Math.floor(t * FIRE_FPS) % f.frames;
+    const x = Math.round(worldX - def.anchorX) + f.x;
+    const y = Math.round(buildingBase(worldY) - def.anchorY - ((opts && opts.lift) || 0)) + f.y;
+    ctx.save();
+    if (opts && opts.alpha != null) ctx.globalAlpha = opts.alpha;
+    ctx.drawImage(get(f.file), frame * f.w, 0, f.w, f.h, x, y, f.w, f.h);
+    ctx.restore();
+    return true;
+  }
+
   function drawBuilding(ctx, type, worldX, worldY, opts = {}) {
     const def = buildingDef(type, opts);
     if (!def || !ready(def.file)) return false;
@@ -914,7 +938,7 @@ const Sprites = (function () {
     image: get,
     isReady: ready,
     buildTerrainCanvas, terrainOrigin,
-    drawBuilding, drawBuildingDoor, drawBanner, buildingDef, drawWall, groundShadow,
+    drawBuilding, drawBuildingDoor, drawBuildingFire, drawBanner, buildingDef, drawWall, groundShadow,
     drawUnit, drawArmy,
     drawSmoke,
     drawSpellEffect,

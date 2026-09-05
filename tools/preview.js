@@ -160,7 +160,7 @@ function render(latestState) {
   for (const c of latestState.aiCamps || [])
     if (!c.defeated) {
       blockSprite(c.x, c.y, c.shrine ? 'shrine' : 'camp', {});
-      apronFor(c.x, c.y, c.shrine ? 'shrine' : 'camp', {});
+      if (c.shrine) apronFor(c.x, c.y, 'shrine', {});   // camps are not paved
     }
 
   const terrain = Sprites.buildTerrainCanvas(W, H,
@@ -195,8 +195,13 @@ function render(latestState) {
     } else if (item.kind === 'camp') {
       const px = item.camp.x * TILE, py = item.camp.y * TILE;
       Sprites.drawBuilding(ctx, 'camp', px, py);
-      Sprites.drawUnit(ctx, 'bandit', 'swordsman', 'idle', 'down', t, px - 13, py + 5);
-      Sprites.drawUnit(ctx, 'bandit', 'swordsman', 'idle', 'left', t, px + 12, py + 8, { phase: 2.5 });
+      // Its fire, caught mid-burn, so the still shows what the map shows.
+      Sprites.drawBuildingFire(ctx, 'camp', px, py, { time: t });
+      // At the door, the way the client places them — see drawCamp.
+      const cd = Sprites.buildingDef('camp', {});
+      const dcx = cd && cd.door ? cd.door.x + cd.door.w / 2 - cd.anchorX : 0;
+      Sprites.drawUnit(ctx, 'bandit', 'swordsman', 'idle', 'down', t, px + dcx - 14, py + 5);
+      Sprites.drawUnit(ctx, 'bandit', 'swordsman', 'idle', 'left', t, px + dcx + 13, py + 8, { phase: 2.5 });
     } else if (item.kind === 'building') {
       const px = item.b.x * TILE, py = item.b.y * TILE;
       if (item.b.type === 'wall') Sprites.drawWall(ctx, item.b.x, item.b.y, hasWall, { race: item.p.race });

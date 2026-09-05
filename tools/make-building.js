@@ -232,6 +232,27 @@ function chunk(dst, file, sx, sy, sw, sh, tx, ty) {
     Math.round(tx * TILE), Math.round(ty * TILE));
 }
 
+// The campfire, off !Decoration — the pack's own animated fires, 48x96 a cell
+// and three frames each. What gets baked into the building is the fire OUT: a
+// ring of stones with logs laid in it. The flames are an overlay, drawn on top
+// at this exact spot and cycled by the clock, for the same reason the chimney's
+// smoke is not baked either — a still flame reads as a mistake, and a fire that
+// never moves is worse than no fire.
+//
+// Recorded the way the door is, and for the same reason: only the recipe knows
+// where it put it, so it writes it down rather than leaving build-assets to
+// hunt for a ring of stones in a finished sprite.
+const FIRE_CELL_W = 48, FIRE_CELL_H = 96;
+const FIRES = { out: [3, 1], lit: [6, 1], pot: [6, 2], potOut: [6, 3] };
+let lastFires = [];
+function fire(dst, which, tx, ty) {
+  const [cc, cr] = FIRES[which] || FIRES.out;
+  const x = Math.round(tx * TILE), y = Math.round(ty * TILE);
+  chunk(dst, '!Decoration.png', cc * FIRE_CELL_W, cr * FIRE_CELL_H,
+    FIRE_CELL_W, FIRE_CELL_H, tx, ty);
+  lastFires.push({ lit: which === 'potOut' ? 'pot' : 'lit', x, y, w: FIRE_CELL_W, h: FIRE_CELL_H });
+}
+
 // A dormer off !Roof_Windows: a little gabled window standing out of a roof
 // slope. The sheet is laid out as RPG Maker characters, 96x144 a cell, four
 // roofing materials down and, across each row, an unlit window, a lit one, and
@@ -322,12 +343,40 @@ const RECIPES = {
   // The pack's only real fences are the sawn plank runs a vegetable patch gets,
   // which is a village and not a camp. So the camp does not get a wall, and
   // the sample map is why. See tools/sample-map.js.
+  // A bandit camp, which is a CAMP and not a house.
+  //
+  // It used to be a thatched longhouse with a skull banner on it: one roof
+  // rectangle, one wall rectangle, edge to edge, not a transparent pixel in it.
+  // Rendered beside a village it read as a barn somebody had flown a flag from.
+  // What tells you a camp is a camp is not the building, it is the ground round
+  // it — so the hall is a shack now, pushed into the left third, and the rest of
+  // the width is yard: a fire with a pot over it, cut logs, the loot stacked
+  // where it was dropped, and a rack of somebody else's weapons.
+  //
+  // Everything in the yard stands on the hut's own base line or above it, so
+  // the whole thing reads as one place seen from one angle rather than a
+  // building with scenery parked behind it. Nothing extends below that line
+  // either: troops walk out of the door and two tiles south, and props down
+  // there would be props they walk through.
+  //
+  // The fire is laid OUT here — a ring of stones, logs, and a pot on its spit.
+  // The flames go on at draw time and move.
   camp: (dst) => {
-    slab(dst, 59, 0, 0, 6, 2);            // weathered thatch
-    slab(dst, 72, 0, 2, 6, 2);            // log cabin
-    chunk(dst, '!Flags_banner.png', 4 * TILE, 0, TILE, 2 * TILE, 1.1, 2.05);
-    door(dst, 'dark', 3, 4);
-    stamp(dst, 'C', 0, 6, 4.3, 2.44, 1, 2);  // weapon rack, axes and swords
+    slab(dst, 59, 0, 2, 3, 2);                // weathered thatch, three wide
+    slab(dst, 72, 0.5, 4, 2, 2);              // log walls, inset like every other
+    chunk(dst, '!Flags_banner.png', 4 * TILE, 0, TILE, 2 * TILE, 0.55, 4.05);
+    door(dst, 'dark', 2.0, 6);
+    stamp(dst, 'C', 0, 8, 2.45, 4.5, 1, 2);   // swords, racked against the corner
+
+    // A run of stakes across the back of the yard. It is the one piece here
+    // that says somebody MEANT to hold this ground.
+    // Half a tile short of the full cell: the two below it on the sheet are
+    // wells, and a full-height crop brings a slice of blue water with it.
+    stamp(dst, 'C', 8, 10, 4.1, 3.3, 2, 1.5);
+    fire(dst, 'potOut', 3.3, 4.05);           // stones, logs, and a pot on a spit
+    stamp(dst, 'C', 5, 12, 4.45, 4.0, 2, 2);  // barrels, dropped where they landed
+    stamp(dst, 'C', 5, 11, 4.7, 5.15, 2, 1);  // sacks
+    stamp(dst, 'C', 1, 13, 2.55, 5.55, 1, 1); // blood on the grass
   },
 
   // ---- The four yard buildings -------------------------------------------
@@ -477,7 +526,7 @@ function build(name, force) {
   // afterwards, so an oversized canvas costs nothing and a small one silently
   // clips — the keep lost its right-hand tower to a six-tile canvas.
   const canvas = ops.blank(12 * TILE, 13 * TILE);
-  lastDoors = [];
+  lastDoors = []; lastFires = [];
   make(canvas);
   const box = ops.bbox(canvas);
   const img = box ? ops.crop(canvas, box.x0, box.y0, box.w, box.h) : canvas;
@@ -489,6 +538,15 @@ function build(name, force) {
   // somebody nudges one.
   const dx = box ? box.x0 : 0, dy = box ? box.y0 : 0;
   const doors = lastDoors.map(d => ({ ...d, x: d.x - dx, y: d.y - dy }));
+  // The fires travel the same way. Same crop, same sidecar, different file.
+  const fires = lastFires.map(f => ({ ...f, x: f.x - dx, y: f.y - dy }));
+  const fireMeta = path.join(OUT_DIR, name + '.fires.json');
+  if (fires.length) {
+    fs.writeFileSync(fireMeta, JSON.stringify(fires, null, 2));
+    console.log(`  and ${fires.length} fire${fires.length === 1 ? '' : 's'} -> ${path.basename(fireMeta)}`);
+  } else if (fs.existsSync(fireMeta)) {
+    fs.unlinkSync(fireMeta);
+  }
   const meta = path.join(OUT_DIR, name + '.doors.json');
   if (doors.length) {
     fs.writeFileSync(meta, JSON.stringify(doors, null, 2));
@@ -507,4 +565,4 @@ if (require.main === module) {
 
 // DOORS travels with the recipes: build-assets cuts the opening frames out of
 // the same sheet and has to look them up the same way.
-module.exports = { build, RECIPES, DOORS, __internals: { slab, paint, stamp, door, sign, chunk, chimney, dormer, statue }, DOOR_SHEET: '!Fantasy_door1.png' };
+module.exports = { build, RECIPES, DOORS, FIRES, FIRE_CELL_W, FIRE_CELL_H, FIRE_SHEET: '!Decoration.png', __internals: { slab, paint, stamp, door, sign, chunk, chimney, dormer, fire, statue }, DOOR_SHEET: '!Fantasy_door1.png' };
