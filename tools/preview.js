@@ -135,10 +135,14 @@ function render(latestState) {
   // how that bug got past several rounds of looking at previews.
   const blocked = new Set();
   const apron = new Set();
+  // Up the whole height of the sprite and one more, the way the client does —
+  // see the note on addApron. Paving only the plot left every roof standing on
+  // grass, which is what made the buildings look like they were floating.
   const apronFor = (x, y, type, opts) => {
     const def = Sprites.buildingDef(type, opts || {});
     const halfW = (def && def.w) ? Math.round(def.w / 2 / TILE) : 1;
-    for (let dy = -1; dy <= 1; dy++)
+    const up = (def && def.h) ? Math.round(def.h / TILE) + 1 : 2;
+    for (let dy = -up; dy <= 1; dy++)
       for (let dx = -halfW; dx <= halfW; dx++) apron.add((x + dx) + ',' + (y + dy));
   };
   const blockSprite = (x, y, type, opts) => {

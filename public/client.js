@@ -1727,7 +1727,23 @@ function addApron(b, race) {
   const ts = mapCfg && mapCfg.tileSize;
   const def = ts && Sprites.buildingDef && Sprites.buildingDef(b.type, { race, level: b.level });
   const halfW = (def && def.w) ? Math.round(def.w / 2 / ts) : 1;
-  for (let dy = -1; dy <= 1; dy++)
+  // Up the whole height of the SPRITE, and then one more.
+  //
+  // This used to go one tile up from the plot and no further, which paved the
+  // ground at a building's feet and left the four or five tiles its roof
+  // occupies sitting on whatever was behind them — usually grass. The building
+  // then read as standing in front of a lawn rather than in a paved yard, and
+  // every one of them looked like it was floating. Seth spotted it and said
+  // exactly what it was: the stonework has to carry on above the building.
+  //
+  // It is how his own keep is laid out in Godot, where the ground layer is a
+  // rectangle painted over the WHOLE castle, above the crenellations and out
+  // past the towers — the building sits inside its ground, not on top of it.
+  //
+  // The side effect is the point: neighbouring buildings' aprons now meet, so a
+  // compound is one paved yard instead of a row of separate mats.
+  const up = (def && def.h) ? Math.round(def.h / ts) + 1 : 2;
+  for (let dy = -up; dy <= 1; dy++)
     for (let dx = -halfW; dx <= halfW; dx++) apronSet.add((b.x + dx) + ',' + (b.y + dy));
 }
 function addSceneryFootprint(b, race) {

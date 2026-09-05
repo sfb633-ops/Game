@@ -556,59 +556,55 @@ const RECIPES = {
   // No towers. These are a barracks, a bank, a stable and a workshop — they say
   // what they are with their roof, their walls and one or two small things at the
   // door, the way every building in his village does.
-  // Five tiles across. The wall is THREE rows and the hipped roof sits over its
-  // top two, so what shows through the V under the ridge is the wall itself,
-  // read as a gable face. The fittings go in the bottom row and a half, which is
-  // the part the roof does not cover:
+  // Four rows of wall, not three. A hipped roof covers its top two, so three
+  // leaves barely a row showing at the sides — and a window put in that band
+  // sits ON the ground line with no wall under it, which is what a window never
+  // does. Four leaves the fittings somewhere to stand:
   //
-  //   x 0-1  the trade sign      x 2-3  the door, under the gable
-  //   x 3.3  the window          the yard prop at the foot, clear of the door
-  //
-  // The door is the fixed point — troops walk out of it — so everything is
-  // placed around it and auditRecipe refuses the build if anything creeps over.
+  //   the gable centre  the door, two rows, under the ridge
+  //   the side bays     the sign and the window, with wall below them
+  //   the foot          the yard prop, on the ground and clear of the door
   barracks: (dst) => {
-    slab(dst, 88, 0.04, 2, 4, 3);                // timber frame on a stone plinth
+    slab(dst, 88, 0.04, 2, 4, 4);                // timber frame on a stone plinth
     hipRoof(dst, 'slate', 0, 0);                 // slate, ridge and two slopes
-    door(dst, 'studded', 2.05, 5);
-    stamp(dst, 'B', 1, 0, 2.75, 3.5, 1, 1.5);    // window
-    sign(dst, 'sword', 0.55, 3.6);
-    stamp(dst, 'C', 0, 8, 0.1, 3.9, 1, 2);       // swords on a rack at the door
+    door(dst, 'studded', 2.05, 6);
+    stamp(dst, 'B', 1, 0, 2.8, 4.15, 1, 1.4);    // window, wall under it
+    sign(dst, 'sword', 0.5, 4.2);
+    stamp(dst, 'C', 0, 8, 0.15, 4.5, 1, 2);      // swords on a rack by the door
   },
 
   // Blue slate over pale ashlar with a gilt course: money should look like money,
   // and a treasury the player cannot pick out is one they forget to defend.
   bank: (dst) => {
-    slab(dst, 112, 0.1, 2, 4, 3);                // pale ashlar, gilt top and bottom
+    slab(dst, 112, 0.1, 2, 4, 4);                // pale ashlar, gilt top and bottom
     hipRoof(dst, 'blue', 0, 0.55);
-    door(dst, 'pale', 2.2, 5);
-    stamp(dst, 'B', 1, 0, 3.0, 3.5, 1, 1.5);     // window
-    sign(dst, 'coin', 0.6, 3.6);
-    stamp(dst, 'C', 7, 7, 0.35, 4.0, 1, 1);      // a crate, lodged by the door
+    door(dst, 'pale', 2.2, 6);
+    stamp(dst, 'B', 1, 0, 3.0, 4.15, 1, 1.4);    // window
+    sign(dst, 'coin', 0.65, 4.2);
+    stamp(dst, 'C', 7, 7, 0.5, 5.05, 1, 1);      // a crate, lodged by the door
   },
 
   // Thatch keeps its flat roof: a thatched cottage in the artist's own maps is a
-  // flat A3 course, and there is no hipped thatch on the roof sheet. It is the
-  // one agricultural silhouette in the set and reads before you have looked at
-  // anything hanging on it.
+  // flat A3 course, and there is no hipped thatch on the roof sheet.
   stable: (dst) => {
     slab(dst, 67, 0, 1, 5, 3);                   // straw thatch
     slab(dst, 95, 0, 4, 5, 2);                   // plaster under a timber beam
     dormer(dst, 'attic', 1.5, 0.75);
     door(dst, 'plank', 2.5, 6);
-    stamp(dst, 'B', 1, 0, 3.3, 4, 1, 2);         // window
-    sign(dst, 'horseshoe', 1.0, 4.3);
-    stamp(dst, 'C', 4, 6, 0.45, 4.75, 1, 2);     // a feed barrel at the door
+    stamp(dst, 'B', 1, 0, 3.3, 4.15, 1, 1.4);    // window, wall under it
+    sign(dst, 'horseshoe', 1.0, 4.2);
+    stamp(dst, 'C', 4, 6, 0.4, 4.7, 1, 2);       // a feed barrel by the door
   },
 
   // A workshop: a timber roof, and the forge's chimney standing off the ridge.
   siege: (dst) => {
-    slab(dst, 89, 0.04, 2, 4, 3);                // timber frame
+    slab(dst, 89, 0.04, 2, 4, 4);                // timber frame
     hipRoof(dst, 'wood', 0, 0);
     chimney(dst, 'stone', 2.6, 1.35);
-    door(dst, 'rough', 2.05, 5);
-    stamp(dst, 'B', 1, 0, 2.75, 3.5, 1, 1.5);    // window
-    sign(dst, 'anvil', 0.55, 3.6);
-    stamp(dst, 'C', 8, 4, 0.05, 3.9, 1, 2);      // cut timber at the wall
+    door(dst, 'rough', 2.05, 6);
+    stamp(dst, 'B', 1, 0, 2.8, 4.15, 1, 1.4);    // window
+    sign(dst, 'anvil', 0.5, 4.2);
+    stamp(dst, 'C', 8, 4, 0.1, 4.5, 1, 2);       // cut timber by the door
   },
 
   // The keep, put together out of the same pieces as everything else: the
