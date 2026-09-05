@@ -22,3 +22,6 @@ art-review/at-scale/
 art-review/maps/
 art-review/roofs.png
 art-review/walls.png
+
+# The detached server writes here; it is machine-local noise.
+server.log
