@@ -43,10 +43,28 @@ a dark band down the wall where the eave shades it. This is the single change
 that took the four yard buildings from blocks to buildings. The pack's own
 houses overhang by about half a tile each side.
 
-**3. Volume shading.** A cylinder is lit through the middle and falls off to
-both edges; a cone shows two faces meeting at a ridge. Seth's keeps do this and
-it is the biggest thing the composed buildings still lack — their towers are
-round because the stonework curves, not because a round sprite was pasted on.
+**3. Volume, which is borrowed and not painted.** A cylinder lit through the
+middle and falling off to both edges; a cone showing two faces at a ridge.
+
+I had this down as the ceiling — Seth's keeps have it, our composed buildings do
+not, and I assumed his were drawn while ours are assembled out of square tiles.
+Wrong. His were assembled too, in Godot, out of these same sheets: three stacked
+TileMapLayers and the right cells picked out of the atlas. The keeps' round
+towers are `Fantasy_Outside_B` columns 13-14, rows 0-7 — a finished tower,
+already shaded, eight tiles tall, with a crenellated rim, its hollow interior in
+shadow and a flared base. It is one `stamp('B', 13, 0, tx, ty, 2, 8)`.
+
+So the rule is not "we cannot do volume". It is: **the volume is already in the
+sheets, and the work is knowing which cells hold it.** Nothing in the keeps needs
+a pixel that is not already in the pack.
+
+**3b. Layering IS the technique.** Godot gave the keeps three tile layers and
+that is where the depth came from — wall on one, towers over it on the next,
+statues and crenellations on the third. `make-building.js` has the same thing
+for free: recipes draw in call order, so what is stamped later covers what was
+stamped earlier. Order the calls back to front and the layering is identical.
+The camp's stakes already rely on this, drawn before the roof so the roof cuts
+their base.
 
 **4. Visible top surfaces.** Anything horizontal shows its thickness: the top
 face of a crenellation, the tread of a step, the top of a wall. A shape with no
@@ -109,3 +127,31 @@ it is weak.
 into `art-review/compositions/` — a picture of each and the tiles it is made of,
 in the arguments `slab()`, `paint()` and `stamp()` already take. Twenty-seven of
 them. Copy from there before inventing anything.
+
+## The pieces that carry the weight
+
+Found by looking, and written down because finding them again is the expensive
+part. Sheet letters are make-building's own: `B`/`C`/`D` are the object sheets,
+the rest are character sheets loaded by name.
+
+| piece | where | size |
+| --- | --- | --- |
+| round tower, shaded, hollow top | `B` (13,0) | 2x8 tiles |
+| tower side, arrow-slit face | `B` (15,2) | 1x5 |
+| wall corner with crenellations | `B` (13,8) | 2x2 |
+| arcade arches | `B` (12,10) | 4x3 |
+| heraldic shield on wall | `B` (12,3) | 1x2 |
+| gabled roofs, five colourways | `Fantasy_Roofs` (8,0), (8,4), (8,8), (0,12) | ~6x4 |
+| timber gable ends | `Fantasy_Roofs` (0,9), (4,9) | 3x3 |
+| dormers, four roofing materials | `!Roof_Windows`, 96x144 cells | rows 0-3 |
+| chimney stack, no smoke | `!Fantasy_chimney` col 0/4/6, bottom 43px | 1x0.9 |
+| campfire lit / out, 3 frames | `!Decoration` (6,1) / (3,1), 48x96 cells | 1x2 |
+| campfire with cooking pot | `!Decoration` (6,2) / (6,3) | 1x2 |
+| torches and lanterns, 3 frames | `!Decoration` cols 9-11 | 1x2 |
+| weapon racks, axes and swords | `C` (0,6) and (0,8) | 2x2 |
+| barrels, crates, sacks, carts | `C` cols 2-11, rows 4-13 | various |
+| haystacks and hay cart | `C` (13,10), (10,8) | 2-3 wide |
+| stakes / palisade | `C` (8,10) | 2x1.5 |
+| blood on the ground | `C` (1,13) | 1x1 |
+| fallen logs, stumps, offcuts | `D` cols 11-15, rows 4-7 | various |
+| market awnings | `!$Big_Misc` | 192x192 cells |
