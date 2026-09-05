@@ -183,6 +183,33 @@ function auditRecipe(name) {
       out.push(`${name}: ${o.label} covers the door by ${ov.toFixed(2)} tiles`);
     }
   }
+  // Two things hung on the same wall.
+  //
+  // The trade sign was drawn straight through the weapon rack on the barracks:
+  // both were placed against the door's left bay and nobody compared them. The
+  // door rule above would never have caught it — neither touches the door.
+  //
+  // Props are ALLOWED to overlap: a barrel in front of a haystack is how depth
+  // is made, and half the composition rules in DEPTH.md depend on it. What is
+  // not allowed is two SMALL things sharing much of their area, which is not
+  // occlusion, it is a collision. A third of the smaller one is the line — the
+  // sign lying across the barracks rack shared 45% and a half-share missed it.
+  for (let i = 0; i < drawn.length; i++) {
+    for (let j = i + 1; j < drawn.length; j++) {
+      const a = drawn[i], b = drawn[j];
+      if (a.kind !== 'prop' || b.kind !== 'prop') continue;
+      if (!overlaps(a, b)) continue;
+      const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+      const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+      const smaller = Math.min(a.w * a.h, b.w * b.h);
+      const share = (w * h) / smaller;
+      if (share > 0.33) {
+        out.push(`${name}: ${a.label} and ${b.label} are on top of each other ` +
+          `(${(share * 100).toFixed(0)}% of the smaller one)`);
+      }
+    }
+  }
+
   if (roofs.length) {
     const rx0 = Math.min(...roofs.map(r => r.x)), rx1 = Math.max(...roofs.map(r => r.x + r.w));
     const ry1 = Math.max(...roofs.map(r => r.y + r.h));
@@ -567,10 +594,10 @@ const RECIPES = {
   barracks: (dst) => {
     slab(dst, 88, 0.04, 2, 4, 4);                // timber frame on a stone plinth
     hipRoof(dst, 'slate', 0, 0);                 // slate, ridge and two slopes
-    door(dst, 'studded', 2.05, 6);
-    stamp(dst, 'B', 1, 0, 2.8, 4.15, 1, 1.4);    // window, wall under it
-    sign(dst, 'sword', 0.5, 4.2);
-    stamp(dst, 'C', 0, 8, 0.15, 4.5, 1, 2);      // swords on a rack by the door
+    door(dst, 'studded', 2.65, 6);
+    stamp(dst, 'B', 1, 0, 3.2, 4.15, 1, 1.4);    // window, wall under it
+    sign(dst, 'sword', 1.15, 4.15);
+    stamp(dst, 'C', 0, 8, 0.1, 4.35, 1, 2);       // swords on a rack by the door
   },
 
   // Blue slate over pale ashlar with a gilt course: money should look like money,
@@ -601,10 +628,10 @@ const RECIPES = {
     slab(dst, 89, 0.04, 2, 4, 4);                // timber frame
     hipRoof(dst, 'wood', 0, 0);
     chimney(dst, 'stone', 2.6, 1.35);
-    door(dst, 'rough', 2.05, 6);
-    stamp(dst, 'B', 1, 0, 2.8, 4.15, 1, 1.4);    // window
-    sign(dst, 'anvil', 0.5, 4.2);
-    stamp(dst, 'C', 8, 4, 0.1, 4.5, 1, 2);       // cut timber by the door
+    door(dst, 'rough', 2.65, 6);
+    stamp(dst, 'B', 1, 0, 3.2, 4.15, 1, 1.4);    // window
+    sign(dst, 'anvil', 1.15, 4.15);
+    stamp(dst, 'C', 8, 4, 0.1, 4.35, 1, 2);      // cut timber by the door
   },
 
   // The keep, put together out of the same pieces as everything else: the

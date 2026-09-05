@@ -1815,14 +1815,19 @@ function rebuildPaths(msg) {
     for (const b of p.buildings) {
       if (!b.type || b.type === 'castle' || b.type === 'wall' || b.builtin) continue;
       if (Math.hypot(b.x - keep.x, b.y - keep.y) > radius) continue;
+      // From the doorstep to the gate step, both ends included. It used to
+      // drop any tile a building stood on, which took a bite out of BOTH ends
+      // — the road stopped a tile short of the door it was supposed to reach
+      // and a tile short of the gate it came from, so it floated in the middle
+      // joining nothing to nothing.
       const run = trackBetween({ x: b.x, y: b.y + 1 }, gate);
       run.forEach((t, i) => {
         const key = t.x + ',' + t.y;
         if (next.has(key)) return;
-        // Not under a building, but everywhere else along the run: the ground
-        // no longer carries any paving of its own, so the track is the only
-        // stone there is and it has to reach the door.
-        if (occupiedSet.has(key)) return;
+        // The doorstep and the gate step are the two ends of the road and both
+        // sit on a building's own plot, so they must NOT be dropped as occupied.
+        const isEnd = i === 0 || i === run.length - 1;
+        if (!isEnd && occupiedSet.has(key)) return;
         if (!isMarchable(t.x, t.y)) return;          // never over water or rock
         next.set(key, pathTiles.has(key) ? pathTiles.get(key) : clock + i * PATH_LAY_STEP);
       });
@@ -2453,8 +2458,15 @@ function drawPlayerBuilding(b, p, ts, hasWall) {
   // you whether they are working it.
   if (b.underConstruction || b.upgrading) constructionBars.push({ b, px, py });
   if (b.type === 'castle') {
-    if (p.alive) drawHpBar(px - ts / 2, py - ts * 1.15, ts, b.hp, b.maxHp, color);
-    else {
+    // No health bar over the keep. The top of the screen carries one already,
+    // and this one was drawn in the OWNER'S colour rather than by how hurt it
+    // is — so a red empire's untouched keep wore a full red bar and read as
+    // nearly dead. Two readings of the same number, and the wrong one was the
+    // one lying across the artwork.
+    //
+    // The cross for a fallen keep stays: that is not a measurement, it is the
+    // one thing that has to be legible from across the map.
+    if (!p.alive) {
       ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.beginPath();
       ctx.moveTo(px - ts / 2, py - ts / 2); ctx.lineTo(px + ts / 2, py + ts / 2);
       ctx.moveTo(px + ts / 2, py - ts / 2); ctx.lineTo(px - ts / 2, py + ts / 2);

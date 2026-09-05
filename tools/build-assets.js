@@ -310,21 +310,22 @@ function buildTerrain() {
     // did when the three were recolours of a single hand-classified tileset.
     lookup = built.lookup;
     files[name] = write(built.sheet, 'terrain', name + '.png');
-    // The apron a building stands on, again in the black stone the dark keeps
-    // are built from.
+    // The dark empires' stone, for the road they lay.
     //
-    // Darkened rather than cut from another block, and that is not laziness.
-    // The apron is A2 kind 18 — cobble drawn INTO grass, so its edge quadrants
-    // carry grass and a patch of it feathers away instead of ending on a
-    // rectangle. Every dark paving in A2 is solid to the edge: laid as an apron
-    // one would put a hard-edged slab on the lawn, which is the exact thing the
-    // apron exists to avoid. So it is the same stone in less light, by the same
-    // numbers the dark castle's gate is taken down by, which is what makes the
-    // floor and the keep standing on it agree.
+    // It was taken down by the same numbers the dark castle's gate is — half
+    // light — which was right while this was a COURTYARD, lying against black
+    // stonework where it belonged. As a road across open grass it was a hole:
+    // measured, luma 60 against the grass's 125, less than half as bright. It
+    // read as a pit somebody had dug, not as a path.
+    //
+    // A road has to sit near the ground it crosses. The pale paving is luma 117
+    // against grass at 125, which is why it disappears into a lawn properly.
+    // This keeps the cool tint that says whose stone it is and lands around 90 —
+    // clearly darker, still a surface.
     if (name === 'pave') {
       files.paveDark = write(
         ops.mapPixels(built.sheet, (r, g, b, a) => [
-          Math.round(r * 0.5), Math.round(g * 0.52), Math.round(b * 0.56), a]),
+          Math.round(r * 0.78), Math.round(g * 0.80), Math.round(b * 0.86), a]),
         'terrain', 'pave-dark.png');
     }
   }
