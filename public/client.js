@@ -3059,13 +3059,24 @@ function renderBuildingPopup() {
 
   // Anchored to the building, then kept on screen. A panel pinned to something
   // on the map has to follow it, or it is lying about which building it is for.
+  //
+  // It sits BESIDE and ABOVE the base line, never below it. Troops come out of
+  // the door and stand two tiles south, which is precisely the ground a panel
+  // centred on the building covers — so the first thing you did after training
+  // a worker was hide him behind the window you trained him in, and the only
+  // evidence anything had happened was the gold going down.
   el.classList.remove('hidden');
   const pos = buildingScreenPos(b);
   const w = el.offsetWidth || 220, h = el.offsetHeight || 160;
+  const ts = mapCfg.tileSize * zoom;
   const pad = 8;
-  let left = pos.x + mapCfg.tileSize * zoom * 0.7;
-  let top = pos.y - h / 2;
-  if (left + w + pad > canvas.width) left = pos.x - w - mapCfg.tileSize * zoom * 0.7;
+  let left = pos.x + ts * 0.8;
+  if (left + w + pad > canvas.width) left = pos.x - w - ts * 0.8;
+  // Bottom edge a little above the doorstep.
+  let top = pos.y - h - ts * 0.35;
+  // If that puts it off the top — a building near the top of the view — drop it
+  // below the exit instead of over it.
+  if (top < pad) top = pos.y + ts * 2.6;
   el.style.left = Math.max(pad, Math.min(canvas.width - w - pad, left)) + 'px';
   el.style.top = Math.max(pad, Math.min(canvas.height - h - pad, top)) + 'px';
 }
