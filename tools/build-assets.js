@@ -439,7 +439,12 @@ function buildShadow(img, ...outParts) {
   // BELOW the base line on screen, not above it.
   for (let sy = 0; sy < h; sy++) {
     const height = sy / SHADOW_SQUASH;       // how high up the sprite this came from
-    const srcY = Math.round(H - height);
+    // H is one past the sprite's last opaque row, so row 0 of the shadow was
+    // sampling a row BELOW the building and finding nothing. The shadow was
+    // missing exactly where it matters — at the foot, where the thing touches
+    // the ground — which is most of why buildings read as floating on the
+    // cobble rather than standing on it.
+    const srcY = Math.round(H - 1 - height);
     if (srcY < 0 || srcY >= img.height) continue;
     const shift = Math.round(height * SHADOW_SHEAR);
     for (let sx = 0; sx < w; sx++) {

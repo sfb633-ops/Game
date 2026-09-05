@@ -139,9 +139,59 @@ function paint(dst, rows, legend, ox = 0, oy = 0) {
   }
 }
 
+// ---- what a recipe drew, and whether it makes sense ------------------------
+//
+// Every draw records its rectangle. build() then checks the things a person
+// would check last and I kept not checking at all:
+//
+//   Nothing is laid over the door. A trade sign is a 48px tile drawn from its
+//   top-left, so sign(..., 1.75, ..) covers x 1.75 to 2.75 and a door centred on
+//   2.5 covers 2.0 to 3.0. They overlapped by three quarters of a tile on three
+//   buildings at once, and it is arithmetic — there is no reason for a person to
+//   be the one who notices.
+//
+//   Nothing on the roof hangs off it. A dormer whose cell starts inside the roof
+//   can still put its far edge past the eave.
+//
+//   Nothing floats. Anything drawn above the wall's foot has to touch something.
+//
+// These are warnings rather than errors: a recipe is allowed to break one on
+// purpose, but it has to be on purpose.
+let drawn = [];
+function record(kind, label, x, y, w, h) { drawn.push({ kind, label, x, y, w, h }); }
+const overlaps = (a, b) =>
+  a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+function auditRecipe(name) {
+  const out = [];
+  const doors = drawn.filter(d => d.kind === 'door');
+  const roofs = drawn.filter(d => d.kind === 'roof');
+  for (const d of doors) {
+    for (const o of drawn) {
+      if (o === d || o.kind === 'roof' || o.kind === 'wall') continue;
+      if (o.y + o.h <= d.y) continue;               // sits entirely above the door
+      if (!overlaps(o, d)) continue;
+      const ov = (Math.min(o.x + o.w, d.x + d.w) - Math.max(o.x, d.x)) / TILE;
+      out.push(`${name}: ${o.label} covers the door by ${ov.toFixed(2)} tiles`);
+    }
+  }
+  if (roofs.length) {
+    const rx0 = Math.min(...roofs.map(r => r.x)), rx1 = Math.max(...roofs.map(r => r.x + r.w));
+    const ry1 = Math.max(...roofs.map(r => r.y + r.h));
+    for (const o of drawn) {
+      if (o.kind !== 'onroof') continue;
+      if (o.x < rx0 - 2 || o.x + o.w > rx1 + 2)
+        out.push(`${name}: ${o.label} hangs off the roof (${((o.x + o.w - rx1) / TILE).toFixed(2)} tiles past the eave)`);
+      if (o.y > ry1) out.push(`${name}: ${o.label} is below the roof entirely`);
+    }
+  }
+  return out;
+}
+
 // A filled rectangle of one autotile: every tile's shape is decided by whether
 // it is on an edge of the rectangle. A one-line paint() for the common case.
 function slab(dst, kind, tx, ty, w, h) {
+  record(kind >= 48 && kind < 72 ? 'roof' : 'wall', 'kind ' + kind, tx * TILE, ty * TILE, w * TILE, h * TILE);
   for (let j = 0; j < h; j++)
     for (let i = 0; i < w; i++) {
       const shape = (i === 0 ? 1 : 0) | (j === 0 ? 2 : 0) |
@@ -155,6 +205,7 @@ function slab(dst, kind, tx, ty, w, h) {
 // centre something — and a fractional destination silently draws nothing. The
 // keep's steps went missing exactly that way at ty 9.4, having been fine at 10.
 function stamp(dst, name, col, row, tx, ty, wt = 1, ht = 1) {
+  record('prop', name + '(' + col + ',' + row + ')', Math.round(tx * TILE), Math.round(ty * TILE), wt * TILE, ht * TILE);
   ops.drawOver(dst, ops.crop(sheet(name), col * TILE, row * TILE, wt * TILE, ht * TILE),
     Math.round(tx * TILE), Math.round(ty * TILE));
 }
@@ -231,6 +282,7 @@ function door(dst, which, footTx, footTy) {
   const x = Math.round(footTx * TILE - img.width / 2);
   const y = Math.round(footTy * TILE - img.height);
   lastDoors.push({ style: which in DOORS ? which : 'plank', x, y, w: img.width, h: img.height });
+  record('door', 'door ' + which, x, y, img.width, img.height);
   ops.drawOver(dst, img, x, y);
 }
 
@@ -243,6 +295,7 @@ const SIGNS = { anvil: [0, 0], scales: [1, 0], sword: [2, 0], armour: [3, 0],
                 bow: [8, 0], scroll: [9, 0], ring: [10, 0], star: [11, 0],
                 shears: [0, 1], horseshoe: [1, 1] };
 function sign(dst, which, tx, ty) {
+  record('prop', 'sign ' + which, Math.round(tx * TILE), Math.round(ty * TILE), TILE, TILE);
   const [c, r] = SIGNS[which] || SIGNS.star;
   const img = ops.crop(charSheet('!Signs.png'), c * TILE, r * TILE, TILE, TILE);
   ops.drawOver(dst, img, Math.round(tx * TILE), Math.round(ty * TILE));
@@ -306,6 +359,7 @@ const DORMERS = {
   tile: [0, 3], tileLit: [1, 3],
 };
 function dormer(dst, which, tx, ty) {
+  record('onroof', 'dormer ' + which, Math.round(tx * TILE) + 18, Math.round(ty * TILE) + 35, 74, 97);
   const [cc, cr] = DORMERS[which] || DORMERS.timber;
   chunk(dst, '!Roof_Windows.png', cc * 96, cr * 144, 96, 144, tx, ty);
 }
@@ -319,6 +373,7 @@ function dormer(dst, which, tx, ty) {
 const CHIMNEYS = { stone: 0, tan: 4, brick: 6 };
 const CHIMNEY_STACK_H = 43;
 function chimney(dst, which, tx, ty) {
+  record('onroof', 'chimney ' + which, Math.round(tx * TILE), Math.round(ty * TILE), TILE, CHIMNEY_STACK_H);
   const col = CHIMNEYS[which] != null ? CHIMNEYS[which] : CHIMNEYS.stone;
   chunk(dst, '!Fantasy_chimney.png', col * TILE, 144 - CHIMNEY_STACK_H,
     TILE, CHIMNEY_STACK_H, tx, ty);
@@ -473,14 +528,25 @@ const RECIPES = {
   // No towers. These are a barracks, a bank, a stable and a workshop — they say
   // what they are with their roof, their walls and one or two small things at the
   // door, the way every building in his village does.
+  // Five tiles across, three rows of roof over two of wall, and the wall face
+  // divided into bays the way a person would divide it:
+  //
+  //   x 0-1   the trade sign          x 2-3   the door
+  //   x 1-2   (clear)                 x 3.3   the window
+  //
+  // The door is the fixed point — troops walk out of it — so everything else is
+  // placed around it and auditRecipe checks that nothing has crept over it. The
+  // yard prop stands at the FOOT, below the wall line and clear of the door's
+  // columns, because that is where the artist puts his: on the ground in front
+  // of a building, not hung on its face.
   barracks: (dst) => {
     slab(dst, 66, 0, 1, 5, 3);                   // dark shingle
     slab(dst, 88, 0, 4, 5, 2);                   // timber frame on a stone plinth
-    dormer(dst, 'slate', 3.3, 0.15);             // breaks the ridge
+    dormer(dst, 'slate', 1.5, 0.75);             // on the roof, over the door
     door(dst, 'studded', 2.5, 6);
-    stamp(dst, 'B', 1, 0, 3.4, 4, 1, 2);         // window
-    sign(dst, 'sword', 1.75, 4.2);
-    stamp(dst, 'C', 0, 8, 0.5, 4.45, 1, 2);      // swords on a rack by the door
+    stamp(dst, 'B', 1, 0, 3.3, 4, 1, 2);         // window
+    sign(dst, 'sword', 1.0, 4.3);
+    stamp(dst, 'C', 0, 8, 0.35, 4.7, 1, 2);      // swords on a rack at the door
   },
 
   // Blue slate over pale ashlar with a gilt course: money should look like money,
@@ -489,11 +555,11 @@ const RECIPES = {
   bank: (dst) => {
     slab(dst, 70, 0, 1, 5, 3);                   // blue slate
     slab(dst, 112, 0, 4, 5, 2);                  // pale ashlar, gilt top and bottom
-    dormer(dst, 'blueLit', 3.3, 0.15);
+    dormer(dst, 'blueLit', 1.5, 0.75);
     door(dst, 'pale', 2.5, 6);
-    stamp(dst, 'B', 1, 0, 3.4, 4, 1, 2);         // window
-    sign(dst, 'coin', 1.75, 4.2);
-    stamp(dst, 'C', 5, 12, 0.35, 4.5, 2, 2);     // barrels by the door
+    stamp(dst, 'B', 1, 0, 3.3, 4, 1, 2);         // window
+    sign(dst, 'coin', 1.0, 4.3);
+    stamp(dst, 'C', 3, 8, 0.5, 4.9, 1, 1.6);     // a water butt at the door
   },
 
   // Thatch and plaster: the one agricultural silhouette in the set, readable
@@ -502,23 +568,23 @@ const RECIPES = {
   stable: (dst) => {
     slab(dst, 67, 0, 1, 5, 3);                   // straw thatch
     slab(dst, 95, 0, 4, 5, 2);                   // plaster under a timber beam
-    dormer(dst, 'attic', 3.3, 0.15);
+    dormer(dst, 'attic', 1.5, 0.75);
     door(dst, 'plank', 2.5, 6);
-    stamp(dst, 'B', 1, 0, 3.4, 4, 1, 2);         // window
-    sign(dst, 'horseshoe', 1.75, 4.2);
-    stamp(dst, 'C', 13, 10, 0.15, 4.35, 2, 2);   // a haystack at the gable end
+    stamp(dst, 'B', 1, 0, 3.3, 4, 1, 2);         // window
+    sign(dst, 'horseshoe', 1.0, 4.3);
+    stamp(dst, 'C', 4, 6, 0.45, 4.75, 1, 2);     // a feed barrel at the door
   },
 
-  // A workshop, and the yard does the talking: cut timber by the door and the
-  // forge's chimney standing proud of the ridge.
+  // A workshop, and the yard does the talking: cut timber at the door and the
+  // forge's chimney sitting on the roof.
   siege: (dst) => {
     slab(dst, 68, 0, 1, 5, 3);                   // brown scale tile
     slab(dst, 89, 0, 4, 5, 2);                   // timber frame
-    chimney(dst, 'stone', 2.9, 0.6);             // a forge, so a chimney
+    chimney(dst, 'stone', 1.6, 1.55);            // a forge, so a chimney
     door(dst, 'rough', 2.5, 6);
-    stamp(dst, 'B', 1, 0, 3.4, 4, 1, 2);         // window
-    sign(dst, 'anvil', 1.75, 4.2);
-    stamp(dst, 'C', 12, 4, 0.3, 4.5, 2, 2);      // cut timber, stacked
+    stamp(dst, 'B', 1, 0, 3.3, 4, 1, 2);         // window
+    sign(dst, 'anvil', 1.0, 4.3);
+    stamp(dst, 'C', 8, 4, 0.15, 4.75, 1.7, 2);   // cut timber, stacked at the wall
   },
 
   // The keep, put together out of the same pieces as everything else: the
@@ -599,8 +665,21 @@ function build(name, force) {
   // afterwards, so an oversized canvas costs nothing and a small one silently
   // clips — the keep lost its right-hand tower to a six-tile canvas.
   const canvas = ops.blank(12 * TILE, 13 * TILE);
-  lastDoors = []; lastFires = [];
+  lastDoors = []; lastFires = []; drawn = [];
   make(canvas);
+  // Refused, not warned about. A warning printed above a "wrote" line is a
+  // warning nobody reads — three buildings shipped with their trade sign over
+  // their own door because the arithmetic was never checked by anything.
+  // --allow builds one anyway, for the case where the overlap is the point.
+  const problems = auditRecipe(name);
+  if (problems.length) {
+    for (const w of problems) console.log('  !! ' + w);
+    if (!process.argv.includes('--allow')) {
+      console.log('  not written. Fix the placement, or pass --allow if it is deliberate.');
+      process.exitCode = 1;
+      return;
+    }
+  }
   const box = ops.bbox(canvas);
   const img = box ? ops.crop(canvas, box.x0, box.y0, box.w, box.h) : canvas;
   fs.writeFileSync(out, encodePNG(img));
