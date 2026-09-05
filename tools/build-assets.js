@@ -669,7 +669,7 @@ function fitW(img, px) { return ops.resize(img, px, Math.max(1, Math.round(img.h
 // as a second castle.
 // A camp is 4.5 against the player buildings' 3: it is a hall rather than a
 // house, and the extra width is most of what tells the two apart at a glance.
-const SOURCE_TILES_WIDE = { barracks: 3, bank: 3, stable: 3, siege: 3, camp: 5 };
+const SOURCE_TILES_WIDE = { barracks: 3.5, bank: 3, stable: 3, siege: 3, camp: 5 };
 // The door recipes, so the opening frames are cut from the same cells the
 // shut one was. make-building owns that table; importing it beats copying it.
 const MAKE = require('./make-building');
@@ -748,7 +748,10 @@ function buildFromSource(type, setName) {
   const box = ops.bbox(img);
   if (box) img = ops.crop(img, box.x0, box.y0, box.w, box.h);
   const cropped = img.width;
-  const target = (SOURCE_TILES_WIDE[type] || 3) * TILE;
+  // Rounded. A width in tiles that is not a multiple of a quarter — 3.6 was —
+  // gives a fractional pixel target, and resizing to 172.8 wrote a PNG that no
+  // decoder would read back. The building silently did not draw.
+  const target = Math.round((SOURCE_TILES_WIDE[type] || 3) * TILE);
   img = fitW(img, target);
   const out = describeBuilding(img, 'buildings', setName, type + '.png');
   // The door rides through the same crop and the same scale the sprite did.

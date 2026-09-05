@@ -62,15 +62,23 @@ function blockOf(kind) {
 }
 
 // One autotiled tile, its shape taken from which of its four sides are exposed.
+//
+// The destination is ROUNDED, as stamp()'s is and for the same reason: a
+// fractional pixel position does not draw where it was asked to. slab() at tx
+// 1.9 put a whole roof nine tiles from where the recipe said, silently, and the
+// recipe looked right. Half-tile positions land on the autotile's own quadrant
+// grid and are exact; anything else is now at worst a pixel off instead of
+// somewhere else entirely.
 function drawAuto(dst, kind, shape, dx, dy) {
   const { sheet: name, bx, by } = blockOf(kind);
   const src = sheet(name);
   const h1 = TILE / 2;
   const quad = WALL[shape];
+  const ox = Math.round(dx), oy = Math.round(dy);
   for (let i = 0; i < 4; i++) {
     const [qsx, qsy] = quad[i];
     ops.blit(dst, ops.crop(src, (bx * 2 + qsx) * h1, (by * 2 + qsy) * h1, h1, h1),
-      dx + (i % 2) * h1, dy + Math.floor(i / 2) * h1);
+      ox + (i % 2) * h1, oy + Math.floor(i / 2) * h1);
   }
 }
 
@@ -413,50 +421,94 @@ const RECIPES = {
   // A hipped top was tried and thrown away: the A3 autotiles draw a complete
   // border around every rectangle, so a narrower top course comes out as a
   // second roof stacked on the first — a wedding cake, not a hip.
+  // The barracks: a hall with a watchtower standing in front of its end.
+  //
+  // Built the way Seth built the keeps — which is the way this pack is meant to
+  // be used, and not something Godot gave him that we lack. The volume is
+  // already drawn into the sheets; the work is knowing which cells hold it and
+  // what order to lay them in.
+  //
+  //   The tower is `B` (13,0): a finished cylinder, shaded through the middle
+  //   and falling off to both edges, with a crenellated rim, its hollow inside
+  //   in shadow, and a flared base. Eight tiles as it sits on the sheet, taken
+  //   here as its top four and its bottom two — the shaft between repeats, so
+  //   cutting it out shortens the tower without showing a seam.
+  //
+  //   It is stamped LAST and its base sits lower than the hall's. Later means
+  //   on top, and lower means nearer, so it stands in FRONT of the hall and cuts
+  //   across its corner. That one overlap is worth more than every other depth
+  //   cue put together, and it is the whole of what three tile layers were doing
+  //   in the Godot scene.
+  //
+  //   The doorway is `B` (0,10), an arched opening with the stone stepping in
+  //   around a dark void, laid under the door leaf so a rim of shadow shows
+  //   round it. A door painted flat on a wall is a decal; a door standing in a
+  //   hole is a door.
+  //
+  //   Ivy off `B` (2,12) over the eave, because a roof that ends in a straight
+  //   horizontal line reads as a rectangle whatever is drawn on its face — and
+  //   ivy is what the artist himself breaks his own rooflines with in Map010.
   barracks: (dst) => {
-    slab(dst, 71, 0, 2, 4, 2);            // dark shingle
-    slab(dst, 90, 0.5, 4, 3, 2);          // grey stone, half a tile in on each side
-    dormer(dst, 'slate', 2.1, 0.95);      // slate to match the shingle
-    door(dst, 'studded', 1.5, 6);
-    stamp(dst, 'B', 1, 0, 2, 4, 1, 2);    // window
-    sign(dst, 'sword', 2.4, 4.15);
+    slab(dst, 71, 2, 2, 4, 2);                   // dark shingle
+    slab(dst, 90, 2.5, 4, 3, 2);                 // grey stone, inset under the eave
+    dormer(dst, 'slate', 4.0, 1.15);             // breaks the ridge
+    stamp(dst, 'B', 0, 10, 3.4, 3.78, 1, 2);     // arched opening, its head above the leaf
+    door(dst, 'studded', 3.9, 6);
+    stamp(dst, 'B', 1, 0, 4.5, 4.2, 1, 2);       // window
+    stamp(dst, 'B', 2, 12, 5.3, 3.45, 1, 2);     // ivy down the right eave
+    sign(dst, 'sword', 4.9, 4.35);
+    // Last, and standing lower than the hall: in front of it.
+    stamp(dst, 'B', 13, 0, 1.0, 1.0, 2, 4);      // tower: rim and shaft
+    stamp(dst, 'B', 13, 5, 1.0, 5.0, 2, 2);      // tower: shaft and its grassy base
   },
 
-  // The only building on the map that is not grey, brown or thatched, because
-  // money should look like money and a treasury the player cannot pick out is
-  // one they forget to defend. Its dormer is lit: somebody is up there counting.
+  // The bank. Blue slate, because money should look like money and a treasury
+  // the player cannot pick out is one they forget to defend. Its lit dormer says
+  // somebody is up there counting; the barrels and the strongbox stand in front
+  // of it and cut its corner, which is the barracks' tower trick at a smaller
+  // size — anything overlapping the base of the thing behind it makes both solid.
   bank: (dst) => {
-    slab(dst, 70, 0, 2, 4, 2);            // blue slate
-    slab(dst, 92, 0.5, 4, 3, 2);          // tan ashlar
-    dormer(dst, 'blueLit', 2.1, 0.95);
-    door(dst, 'pale', 1.5, 6);
-    stamp(dst, 'B', 1, 0, 2, 4, 1, 2);    // window
-    sign(dst, 'coin', 2.4, 4.15);
+    slab(dst, 70, 2, 2, 4, 2);                   // blue slate
+    slab(dst, 92, 2.5, 4, 3, 2);                 // tan ashlar, inset under the eave
+    dormer(dst, 'blueLit', 4.0, 1.15);
+    stamp(dst, 'B', 0, 10, 3.4, 3.78, 1, 2);     // arched opening, head above the leaf
+    door(dst, 'pale', 3.9, 6);
+    stamp(dst, 'B', 1, 0, 4.5, 4.2, 1, 2);       // window
+    sign(dst, 'coin', 4.9, 4.35);
+    stamp(dst, 'B', 2, 12, 5.3, 3.45, 1, 2);     // ivy down the right eave
+    stamp(dst, 'C', 5, 12, 1.9, 4.55, 2, 2);     // barrels, cutting the near corner
+    stamp(dst, 'C', 3, 8, 3.15, 5.35, 1, 1.4);   // a water butt by the door
   },
 
   // Thatch and plaster: the one agricultural silhouette in the set, readable
   // before you have looked at anything hanging on it. The attic window is the
-  // hayloft, which is the reason a stable has a gap in its roof at all.
+  // hayloft. A rail fence runs across the front, which is what a stable has and
+  // what puts something between the viewer and its wall.
   stable: (dst) => {
-    slab(dst, 67, 0, 2, 4, 2);            // straw thatch
-    slab(dst, 95, 0.5, 4, 3, 2);          // plaster over stone, timbered
-    dormer(dst, 'attic', 2.1, 0.95);
-    door(dst, 'plank', 1.5, 6);
-    stamp(dst, 'B', 1, 0, 2, 4, 1, 2);    // window
-    sign(dst, 'horseshoe', 2.4, 4.15);
+    slab(dst, 67, 2, 2, 4, 2);                   // straw thatch
+    slab(dst, 95, 2.5, 4, 3, 2);                 // plaster over stone, timbered
+    dormer(dst, 'attic', 4.0, 1.15);
+    stamp(dst, 'B', 0, 10, 3.4, 3.78, 1, 2);     // arched opening
+    door(dst, 'plank', 3.9, 6);
+    stamp(dst, 'B', 1, 0, 4.5, 4.2, 1, 2);       // window
+    sign(dst, 'horseshoe', 4.9, 4.35);
+    stamp(dst, 'C', 13, 10, 1.5, 4.35, 2, 2);    // a haystack against the gable
+    stamp(dst, 'C', 8, 10, 1.85, 5.1, 2, 1.5);   // rail fence, clear of the doorway
   },
 
-  // A workshop, and the yard does the talking: a chopping block with the axe
-  // still in it, cut timber, a spare cartwheel. Siege engines are made of
-  // exactly those things.
+  // A workshop, and the yard does the talking: cut timber, a spare cartwheel,
+  // and the forge's chimney standing proud of the ridge. Siege engines are made
+  // of exactly those things, and the timber stacked in front cuts the wall.
   siege: (dst) => {
-    slab(dst, 57, 0, 2, 4, 2);            // log roof
-    slab(dst, 89, 0.5, 4, 3, 2);          // timber frame
-    // A forge, so it gets a chimney rather than a window in its roof.
-    chimney(dst, 'stone', 2.7, 1.55);
-    door(dst, 'rough', 1.5, 6);
-    stamp(dst, 'B', 1, 0, 2, 4, 1, 2);    // window
-    sign(dst, 'anvil', 2.4, 4.15);
+    slab(dst, 57, 2, 2, 4, 2);                   // log roof
+    slab(dst, 89, 2.5, 4, 3, 2);                 // timber frame
+    chimney(dst, 'stone', 4.4, 1.55);            // a forge, so a chimney
+    stamp(dst, 'B', 0, 10, 3.4, 3.78, 1, 2);     // arched opening
+    door(dst, 'rough', 3.9, 6);
+    stamp(dst, 'B', 1, 0, 4.5, 4.2, 1, 2);       // window
+    sign(dst, 'anvil', 4.9, 4.35);
+    stamp(dst, 'C', 12, 4, 1.35, 4.4, 2, 2);     // cut timber, clear of the doorway
+    stamp(dst, 'C', 13, 5, 3.1, 5.25, 1, 1.5);   // the chopping block, axe still in it
   },
 
   // The keep, put together out of the same pieces as everything else: the
