@@ -47,6 +47,9 @@ let mapCfg = null, terrain = null, buildCfg = null;
 // guessing low here draws one frame of a world at the wrong scale.
 const MAP_TILE_FALLBACK = 48;
 let buildingTypes = null, unitTypes = null, castleCfg = null, raceDefs = null;
+// How many a single building will hold, from the server — the panel draws one
+// slot per place, so the row IS the queue rather than a picture of one.
+let trainQueueMax = 5;
 let terrainClearCost = 0;  // gold per tile of rock or water bought back
 let latestState = null;
 let armedClear = false;    // buying a tile of rock or water back as open ground
@@ -856,6 +859,7 @@ function onInit(msg) {
   // build in black stone, and their compound floor follows their keep.
   raceDefs = msg.races;
   unitTypes = msg.unitTypes;
+  if (msg.trainQueueMax) trainQueueMax = msg.trainQueueMax;
   castleCfg = msg.castle;
   cardDefs = msg.cards;
   abilityDefs = msg.raceAbilities || null;
@@ -2991,7 +2995,6 @@ let bpKey = null;        // which building the skeleton was built for
 let bpCount = 1;         // the Send slider's value, remembered across frames
 let bpDragging = false;  // ...and held still while a thumb is on it
 
-const BP_QUEUE_SLOTS = 5;
 
 function bpUnitName(type) {
   return (unitTypes && unitTypes[type] && unitTypes[type].name) || type;
@@ -3009,12 +3012,16 @@ function buildingScreenPos(b) {
   return { x: (b.x * ts - camera.x) * zoom, y: (b.y * ts - camera.y) * zoom };
 }
 
+// Named, so registering it on the window is idempotent: addEventListener with
+// the same reference twice adds one listener, not two.
+function bpEndDrag() { bpDragging = false; }
+
 function buildPopupSkeleton(b) {
   const body = document.getElementById('bp-body');
   const trains = trainsWhat(b.type);
   const isKeep = b.type === 'castle';
   let slots = '';
-  for (let i = 0; i < BP_QUEUE_SLOTS; i++) slots += '<i class="bp-slot"></i>';
+  for (let i = 0; i < trainQueueMax; i++) slots += '<i class="bp-slot"></i>';
   const make = trains
     ? '<div class="bp-make">' +
         '<div class="bp-makerow">' +
@@ -3059,12 +3066,20 @@ function buildPopupSkeleton(b) {
   if (dem) dem.onclick = () => { send({ type: 'demolish', x: at.x, y: at.y }); closeBuildingPopup(); };
   const slider = document.getElementById('bp-count');
   slider.addEventListener('pointerdown', () => { bpDragging = true; });
-  window.addEventListener('pointerup', () => { bpDragging = false; });
+  // The listeners above go with the element they are on. This one is on the
+  // window, so it has to be registered once rather than once per selection —
+  // it was adding a new closure every time a building was clicked.
+  window.addEventListener('pointerup', bpEndDrag);
   slider.addEventListener('input', () => {
     bpCount = Number(slider.value) || 1;
     document.getElementById('bp-count-out').textContent = bpCount;
     paintRange(slider);
   });
+  // The ✕ had a tooltip, an aria-label and nothing behind it. Esc closed the
+  // panel and clicking the building again closed it; the button itself did
+  // nothing at all.
+  const close = document.getElementById('bp-close');
+  if (close) close.onclick = closeBuildingPopup;
   document.getElementById('bp-deploy').onclick = () => {
     if (at.type === 'bank') send({ type: 'releaseFromBank', x: at.x, y: at.y, count: bpCount });
     else send({ type: 'deployFrom', bx: at.x, by: at.y, count: bpCount });
@@ -3106,12 +3121,23 @@ function renderBuildingPopup() {
     const st = (me.training && me.training[trains]) || {};
     document.getElementById('bp-trainname').textContent = bpUnitName(trains);
     document.getElementById('bp-cost').textContent = cost + 'g';
+    // Why it is off, in the order the player would hit them. The empire-wide
+    // st.full is not enough on its own: with two barracks and one of them
+    // full, the empire has room and the full one still refuses the order, so
+    // the button stayed lit and the click vanished.
+    const queuedHere = b.trainQueueLen || 0;
+    const why = b.underConstruction ? 'Still going up'
+      : queuedHere >= trainQueueMax ? `Queue full — ${trainQueueMax} at a time`
+      : st.full ? 'Every building of this kind is full'
+      : me.gold < cost ? `Not enough gold — ${cost}g`
+      : '';
     const t = document.getElementById('bp-train');
-    t.disabled = !!b.underConstruction || me.gold < cost || !!st.full;
+    t.disabled = !!why;
+    t.title = why || `Train a ${bpUnitName(trains)}`;
 
     // The queue as slots, the way a production building shows it: one lit per
     // thing waiting, so its depth is a shape rather than a number to read.
-    const queued = b.trainQueueLen || 0;
+    const queued = queuedHere;
     const slots = document.getElementById('bp-queue').children;
     for (let i = 0; i < slots.length; i++) slots[i].classList.toggle('on', i < queued);
 
@@ -3134,16 +3160,24 @@ function renderBuildingPopup() {
   // on the building, and nothing on screen would otherwise suggest it exists —
   // the feature is invisible until somebody happens to try the one gesture.
   const room = isBank ? ((def && def.holds) || 0) - inside : 0;
+  // Through the empire's income modifier, and rounded the way the server
+  // rounds it. Printing the raw 2-a-head said 4/s beside a top bar reading
+  // 4.5/s, which is the panel and the treasury disagreeing about the one
+  // number the building exists to produce.
+  const earns = Math.round(inside * ((def && def.incomePerWorker) || 0) * modOf('incomeMult') * 10) / 10;
   insideEl.innerHTML = isBank
     ? '<b>' + inside + '</b> of ' + ((def && def.holds) || 0) + ' villagers inside, earning <b>' +
-      (inside * ((def && def.incomePerWorker) || 0)) + '/s</b>' +
+      earns + '/s</b>' +
       (room > 0 ? '<span class="bp-hint">Right-click the bank with villagers selected to send them in.</span>' : '')
     : '<b>' + inside + '</b> waiting inside';
   insideEl.hidden = !trains && !isBank;
 
   const sendRow = document.getElementById('bp-sendrow');
   const deployRow = document.getElementById('bp-deployrow');
-  sendRow.hidden = deployRow.hidden = inside <= 0;
+  deployRow.hidden = inside <= 0;
+  // One to send is not a choice. A range input with min === max draws a thumb
+  // that will not move, which reads as broken rather than as settled.
+  sendRow.hidden = inside <= 1;
   if (inside > 0 && !bpDragging) {
     // Never moved while a thumb is on it: a max that changes under a drag is
     // how a slider ends up fighting the hand holding it.
@@ -3179,8 +3213,18 @@ function renderBuildingPopup() {
   const w = el.offsetWidth || 236, h = el.offsetHeight || 200;
   const ts = mapCfg.tileSize * zoom;
   const pad = 8;
-  let left = pos.x + ts * 0.8;
-  if (left + w + pad > canvas.width) left = pos.x - w - ts * 0.8;
+  // Clear of the building ART, not of its anchor tile. The keep is six tiles
+  // wide and its anchor is the doorstep, so a panel eight tenths of a tile to
+  // the right of that stood on its own gatehouse — covering the building you
+  // had just clicked in order to look at it.
+  // The keep declares its footprint in tiles; everything else is one tile of
+  // ground under a sprite that is wider than it, so the art is what has to be
+  // cleared and footprintOf is the only thing that knows how wide that is.
+  const fp = (b.type === 'castle' && castleCfg && castleCfg.footprint) || null;
+  const half = fp ? 0 : (footprintOf(b, (me.race || null)) / mapCfg.tileSize) / 2;
+  const outR = (fp ? fp.right : half) + 1.2, outL = (fp ? fp.left : half) + 1.2;
+  let left = pos.x + ts * outR;
+  if (left + w + pad > canvas.width) left = pos.x - w - ts * outL;
   let top = pos.y - h - ts * 0.35;
   if (top < pad) top = pos.y + ts * 2.6;
   el.style.left = Math.max(pad, Math.min(canvas.width - w - pad, left)) + 'px';

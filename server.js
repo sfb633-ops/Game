@@ -348,6 +348,10 @@ function sendInit(ws, room, playerId) {
     raceAbilities: config.RACE_ABILITIES,
     buildingTypes: config.BUILDING_TYPES,
     unitTypes: config.UNIT_TYPES,
+    // What ONE building will hold. The panel draws a slot per place in the
+    // queue and greys the button when they are all taken, and it cannot know
+    // either without this.
+    trainQueueMax: config.TRAIN_QUEUE_MAX,
     castle: config.CASTLE,
     cards: config.CARDS,
     cardDraft: config.CARD_DRAFT,

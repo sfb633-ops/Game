@@ -2653,7 +2653,10 @@ class Match {
     if (!unitDef || !trains || trains !== unitType) return;
     // One building never holds more than the base queue on its own, and the
     // empire never queues more than its buildings between them have earned.
-    if (plot.trainQueue.length >= TRAIN_QUEUE_MAX) return;
+    if (plot.trainQueue.length >= TRAIN_QUEUE_MAX) {
+      this.emit(playerId, `That queue is full — it holds ${TRAIN_QUEUE_MAX}.`);
+      return;
+    }
     if (this.queuedFor(player, unitType) >= this.trainCapacity(player, unitType)) return;
     const mods = player.mods;
     const cost = Math.round(unitDef.cost * mods.costMult);
@@ -3718,14 +3721,20 @@ class Match {
   // still turns its people out somewhere they can stand; the ring is the last
   // resort and only for a building that is walled in on every side.
   deployExit(player, plot) {
-    for (let d = 2; d <= 4; d++) {
-      const y = plot.y + d;
-      if (this.validMoveTile(plot.x, y) && !this.tileOccupied(plot.x, y)) return { x: plot.x, y };
-    }
-    for (let d = 2; d <= 4; d++) {
-      for (const dx of [-1, 1, -2, 2]) {
-        const x = plot.x + dx, y = plot.y + d;
-        if (this.validMoveTile(x, y) && !this.tileOccupied(x, y)) return { x, y };
+    const usable = (x, y) => this.validMoveTile(x, y) && !this.tileOccupied(x, y);
+    // Inside the empire first. A building on the border faces its door out over
+    // the line, and troops that walked out of their own barracks belong on
+    // their own ground if there is any to be had.
+    for (const mine of [true, false]) {
+      for (let d = 2; d <= 4; d++) {
+        const y = plot.y + d;
+        if (usable(plot.x, y) && (!mine || this.inTerritory(player, plot.x, y))) return { x: plot.x, y };
+      }
+      for (let d = 2; d <= 4; d++) {
+        for (const dx of [-1, 1, -2, 2]) {
+          const x = plot.x + dx, y = plot.y + d;
+          if (usable(x, y) && (!mine || this.inTerritory(player, x, y))) return { x, y };
+        }
       }
     }
     return this.standOffFrom({ ownerId: player.id, x: plot.x, y: plot.y }, plot.x, plot.y);
@@ -3747,11 +3756,18 @@ class Match {
     // No destination given: out of the door and a step clear of it, which is
     // what the Deploy button on its own means. That is the ordinary case now —
     // troops come out where they were made and you march them on from there.
-    if (x == null || y == null) { const spot = this.deployExit(player, plot); x = spot.x; y = spot.y; }
+    const chosen = x != null && y != null;
+    if (!chosen) { const spot = this.deployExit(player, plot); x = spot.x; y = spot.y; }
     x = finiteOr(x); y = finiteOr(y);
     if (x === null || y === null) return;
     if (!this.validMoveTile(x, y)) return;
-    if (!this.inTerritory(player, Math.round(x), Math.round(y))) {
+    // Where you SEND them has to be your own ground. Where their own door puts
+    // them does not, and the two were the same check: a building near the
+    // border faces its door over the line, so pressing Deploy on it was
+    // answered with "only inside your own territory" — about a step the player
+    // never asked for. 17% of the legal barracks tiles on a map could not put
+    // anybody out at all.
+    if (chosen && !this.inTerritory(player, Math.round(x), Math.round(y))) {
       this.emit(playerId, 'Troops can only be deployed inside your own territory.');
       return;
     }

@@ -66,6 +66,22 @@ for (const [fn, where, source] of [
   check(`${where} calls ${fn}`, source.includes(`${fn}(`));
 }
 
+// No button in the page that the client never mentions.
+//
+// #bp-close shipped with a title, an aria-label and nothing behind it. It sat in
+// the corner of the building panel looking exactly like the way to close the
+// building panel, and clicking it did nothing — Esc worked, and clicking the
+// building again worked, and the one control drawn for the job did not.
+// Referenced-by-id is a weak test for "has a handler" and a sufficient one for
+// this: a button the client has never heard of cannot possibly do anything.
+{
+  const html = fs.readFileSync(path.join(SRC, 'index.html'), 'utf8');
+  const ids = [...html.matchAll(/<button[^>]*\bid="([^"]+)"/g)].map(m => m[1]);
+  const dead = ids.filter(id => !client.includes(`'${id}'`) && !client.includes(`"${id}"`));
+  check('every button in the page is one the client knows about', dead.length === 0,
+    dead.length ? `never mentioned: ${dead.join(', ')}` : `${ids.length} buttons`);
+}
+
 // The stylesheet does not contain a copy of itself.
 //
 // A bad write doubled style.css — the whole file again, minus its first two

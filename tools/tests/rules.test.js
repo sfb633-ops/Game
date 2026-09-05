@@ -4701,5 +4701,65 @@ function fightOut(m, ours, theirs) {
     !m.effects.some(e => e.kind === 'door'), m.effects.map(e => e.kind).join(',') || 'nothing');
 }
 
+
+// --- a building on the border still puts its people out --------------------
+//
+// The Deploy button sends no destination: the server picks the step outside the
+// door. That step was then run through the same "inside your own territory"
+// rule as a destination the player had chosen, and a building near the edge
+// faces its door over the line — so pressing Deploy answered with a refusal
+// about a tile nobody had asked for. Across twelve maps, 431 of 2508 legal
+// barracks tiles could not put anybody out at all.
+{
+  let refused = 0, tried = 0, sample = '';
+  for (let seed = 0; seed < 12; seed++) {
+    const m = new Match();
+    const p = m.addPlayer('p', 'human', 'P');
+    p.draft = null; p.gold = 100000;
+    const said = [];
+    m.emit = (id, text) => said.push(text);
+    const spots = [];
+    for (let dy = -14; dy <= 14; dy++) for (let dx = -14; dx <= 14; dx++) {
+      const x = p.baseX + dx, y = p.baseY + dy;
+      if (m.canBuildAt(p, x, y)) spots.push({ x, y });
+    }
+    // Southernmost first: the door is on the south face, so those are the ones
+    // whose doorstep falls outside the empire.
+    spots.sort((a, b) => b.y - a.y);
+    for (const s of spots.slice(0, 40)) {
+      const def = cfg.BUILDING_TYPES.barracks;
+      const plot = m.placeBuilding(p, { x: s.x, y: s.y, type: 'barracks', maxHp: def.hp,
+        hp: def.hp, underConstruction: false, remainingSec: 0, trainQueue: [], ready: 3,
+        builtin: true });
+      const before = m.armies.size;
+      said.length = 0;
+      tried++;
+      m.cmdDeployFrom('p', plot.x, plot.y, 1);          // the button: no destination
+      if (m.armies.size === before) { refused++; if (!sample) sample = said.join(' / ') || 'silence'; }
+      delete p.buildings[`${plot.x},${plot.y}`];
+      for (const a of [...m.armies.values()]) m.armies.delete(a.id);
+    }
+  }
+  check('every building deploys through its own door, border or not',
+    refused === 0, refused ? `${refused}/${tried} refused — "${sample}"` : `${tried} placements`);
+}
+
+// ...but a destination the player NAMES still has to be their own ground.
+{
+  const m = new Match();
+  const p = m.addPlayer('p', 'human', 'P');
+  p.draft = null; p.gold = 100000;
+  const said = [];
+  m.emit = (id, text) => said.push(text);
+  const barracks = trainerOf(m, p, 'swordsman');
+  barracks.ready = 5;
+  const far = { x: p.baseX, y: p.baseY + 40 };
+  const before = m.armies.size;
+  m.cmdDeployFrom('p', barracks.x, barracks.y, 1, far.x, far.y);
+  check('  and a destination outside the empire is still refused',
+    m.armies.size === before && said.some(t => /territory/.test(t)),
+    said.join(' / ') || 'silence');
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall regression checks pass');
 process.exit(failures ? 1 : 0);
