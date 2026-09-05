@@ -216,7 +216,14 @@ function CARD(id) { return cfg.CARDS[id]; }
   deployFrom(m, 'a', 'swordsman', 10, a.baseX, a.baseY + 3);
   deployFrom(m, 'b', 'swordsman', 10, b.baseX, b.baseY + 3);
   const [A, B] = [...m.armies.values()];
-  A.x = 60; A.y = 60; B.x = 61; B.y = 60;
+// Standing them on open ground rather than on the tile (60, 60), which is water
+// or rock on about one openfield map in 250. A group on an impassable tile
+// cannot be given a march at all: the order is dropped and it holds where it is,
+// so the check for "it moved again after the roots let go" failed having never
+// been able to move in the first place. marchTo is exactly the snap-to-walkable
+// this needed.
+  const [gx, gy] = marchTo(m, 60, 60);
+  A.x = gx; A.y = gy; B.x = gx + 1; B.y = gy;
   a.ability = { cooldownRemaining: 0, activeRemaining: 0 };
   m.cmdUseAbility('a', a.baseX, a.baseY);
   m.cmdAttackArmy('a', A.id, 'army', B.id);
@@ -235,11 +242,12 @@ function CARD(id) { return cfg.CARDS[id]; }
   stock(m, b, 'swordsman', 5);
   deployFrom(m, 'b', 'swordsman', 5, b.baseX, b.baseY + 3);
   const B = [...m.armies.values()][0];
-  B.x = 60; B.y = 60;
+  const [gx, gy] = marchTo(m, 60, 60);   // walkable ground, see the note above
+  B.x = gx; B.y = gy;
   m.cmdMoveArmy('b', B.id, ...marchTo(m, 100, 60));
   m.tick(0.2);
   const x0 = B.x;
-  m.cmdCastSpell('a', 'entangle', 60, 60);
+  m.cmdCastSpell('a', 'entangle', gx, gy);
   for (let t = 0; t < 10; t++) m.tick(0.2);
   check('entangle roots a marching group where it stands',
     Math.abs(B.x - x0) < 0.5, x0.toFixed(1) + ' -> ' + B.x.toFixed(1));
