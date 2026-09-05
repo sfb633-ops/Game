@@ -5142,6 +5142,15 @@ class Match {
           stored: b.stored || 0,
           // Trained and waiting inside. The building's own popup deploys them.
           ready: b.ready || 0,
+          // This building's own queue and how long the one at the front has to
+          // go. trainingStatus is per EMPIRE and sums every barracks together,
+          // which is the wrong number to print on one of them: a panel showing
+          // a building has to show that building's clock.
+          trainRemaining: b.trainQueue && b.trainQueue[0]
+            ? Math.max(0, b.trainQueue[0].remainingSec) : 0,
+          trainTotal: b.trainQueue && b.trainQueue[0]
+            ? (UNIT_TYPES[b.trainQueue[0].unitType] || {}).trainTimeSec *
+              (this.players.get(p.id) ? p.mods.buildTimeMult : 1) : 0,
           hp: Math.max(0, Math.round(b.hp)), maxHp: b.maxHp,
           underConstruction: b.underConstruction,
           remainingSec: Math.max(0, Math.ceil(b.remainingSec || 0)),

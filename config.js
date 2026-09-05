@@ -160,8 +160,19 @@ const BUILD = {
 // second disc of ground its conqueror can build inside, half the size of the
 // border they started with. Captured camps never respawn.
 const OUTPOST = {
-  // A razed camp is a disc of ground half the size the old starting border was.
-  radius: 3.5,
+  // A razed camp is a disc of ground around it.
+  //
+  // 5.25, up from 3.5. The camp's own artwork is four and a half tiles across
+  // and three deep, so at 3.5 the disc it granted was very nearly the building
+  // standing in it: a ring of ground you could see round the edges and not
+  // enough of it to put anything on. The prize for taking a camp is meant to be
+  // ROOM, and it was being cancelled out by the size of the thing you took.
+  //
+  // One and a half times, which is the smallest step that clears the camp on
+  // every side and leaves a usable band: 10.5 tiles across against a 4.5-tile
+  // building, so there are three clear tiles either side of it rather than
+  // half of one.
+  radius: 5.25,
   // ...and room to actually use it. An outpost handed over a disc of ground and
   // no permission to fill it: the building limit is set by the town center
   // alone, so unless you happened to be under it, a captured camp was ground
@@ -234,9 +245,13 @@ const OUTPOST = {
 // than the soldier it stands opposite.
 const RACES = {
   human:  { name: 'Human',  incomeMult: 1.00, attackMult: 1.00, hpMult: 1.00, buildTimeMult: 1.00, costMult: 1.00, speedMult: 1.00 },
-  orc:    { name: 'Orc',    incomeMult: 0.97, attackMult: 1.09, hpMult: 0.96, buildTimeMult: 1.00, costMult: 1.00, speedMult: 0.95 },
+  // darkStone: this empire builds in the pack's black stone, so its keep takes
+  // the dark castle and its courtyard takes the dark paving. One flag rather
+  // than two lists — tools/build-assets.js reads it to decide which colour sets
+  // get the black castle, and the client reads it to floor the compound.
+  orc:    { name: 'Orc',    incomeMult: 0.97, attackMult: 1.09, hpMult: 0.96, buildTimeMult: 1.00, costMult: 1.00, speedMult: 0.95, darkStone: true },
   elf:    { name: 'Elf',    incomeMult: 1.01, attackMult: 1.00, hpMult: 0.98, buildTimeMult: 0.96, costMult: 1.00, speedMult: 1.15 },
-  undead: { name: 'Undead', incomeMult: 1.00, attackMult: 0.98, hpMult: 0.97, buildTimeMult: 0.96, costMult: 0.95, speedMult: 1.00 },
+  undead: { name: 'Undead', incomeMult: 1.00, attackMult: 0.98, hpMult: 0.97, buildTimeMult: 0.96, costMult: 0.95, speedMult: 1.00, darkStone: true },
 };
 
 // One active ability per race, on a cooldown of its own. Abilities are not

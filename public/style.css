@@ -1342,6 +1342,1432 @@ input[type="range"]:disabled { cursor: not-allowed; filter: grayscale(1) brightn
 }
 #tip.hidden { display: none; }
 #tip b { color: var(--gold); font-weight: normal; }
+/* The building popup. Anchored in SCREEN space at the building own position,
+   written by renderBuildingPopup on every frame the camera moves — a panel
+   pinned to a thing on the map has to follow it or it is lying about which
+   building it belongs to. */
+#building-popup {
+  position: absolute; z-index: 7;
+  display: flex; flex-direction: column;
+}
+#building-popup.hidden { display: none; }
+
+/* ---- the building popup, second pass ---------------------------------- */
+/* Laid out as a production panel: who this is, how healthy, what it is making
+   and how far along, who is inside, and the ways out. The close button is a row
+   item rather than something floated over the corner — floated, it sat on the
+   subtitle and clipped it. */
+#building-popup {
+  min-width: 232px; max-width: 268px;
+  padding: 0.5rem 0.6rem 0.6rem;
+  gap: 0.5rem;
+}
+#bp-head { display: flex; align-items: flex-start; gap: 0.5rem; }
+#bp-titles { flex: 1 1 auto; min-width: 0; }
+#bp-title {
+  font-size: 0.8rem; color: var(--gold); letter-spacing: 0.04em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#bp-sub { font-size: 0.66rem; color: var(--parchment); opacity: 0.75; }
+#bp-sub[hidden] { display: none; }
+#bp-close { flex: 0 0 auto; padding: 0 0.42rem; min-height: 22px; }
+
+/* Health. Thin, because it is a fact you glance at rather than the subject. */
+.bp-hp {
+  position: relative; height: 12px; border: 1px solid #0006;
+  background: #1b1a17; overflow: hidden;
+}
+.bp-hp > i {
+  display: block; height: 100%; width: 100%;
+  background: linear-gradient(#7fbf62, #4d8038);
+}
+.bp-hp > span {
+  position: absolute; inset: 0; text-align: center;
+  font-size: 0.6rem; line-height: 12px; color: #f2ead6; text-shadow: 0 1px 0 #0009;
+}
+
+/* What it makes: the button, the queue beside it, the bar under both. */
+.bp-make { display: flex; flex-direction: column; gap: 0.3rem; }
+.bp-makerow { display: flex; align-items: stretch; gap: 0.4rem; }
+.bp-makerow .btn { flex: 1 1 auto; min-height: 28px; }
+.bp-queue { display: flex; align-items: center; gap: 3px; flex: 0 0 auto; }
+/* One slot per thing waiting. A shape reads faster than a number, which is why
+   every production building in the genre draws its queue rather than counting
+   it. */
+.bp-slot {
+  width: 7px; height: 18px; border: 1px solid #0007; background: #26241f;
+}
+.bp-slot.on { background: var(--gold); box-shadow: 0 0 4px #ffd76a55; }
+.bp-prog {
+  position: relative; height: 11px; border: 1px solid #0006;
+  background: #1b1a17; overflow: hidden;
+}
+.bp-prog[hidden] { display: none; }
+.bp-prog > i {
+  display: block; height: 100%; width: 0;
+  background: linear-gradient(#e8c469, #b8912f);
+  transition: width 0.18s linear;   /* the server ticks 5x a second; this fills between */
+}
+.bp-prog > span {
+  position: absolute; inset: 0; text-align: center;
+  font-size: 0.6rem; line-height: 11px; color: #f2ead6; text-shadow: 0 1px 0 #0009;
+}
+
+#bp-inside { font-size: 0.7rem; color: var(--parchment); }
+#bp-inside[hidden], #bp-sendrow[hidden], #bp-deployrow[hidden],
+#bp-upgraderow[hidden] { display: none; }
+#bp-sendrow { margin-bottom: 0; gap: 0.4rem; }
+#bp-sendrow label { flex: 0 0 auto; font-size: 0.68rem; }
+#bp-sendrow input[type="range"] { flex: 1 1 auto; width: auto; }
+#bp-sendrow output { flex: 0 0 1.8rem; text-align: right; font-size: 0.7rem; }
+#building-popup .btn-row { display: flex; gap: 0.35rem; }
+#building-popup .btn-row .btn { flex: 1 1 auto; min-height: 26px; }
+/* Pulling a building down is a different kind of act from training out of it. */
+#building-popup .bp-danger { margin-top: 0.1rem; }
+* Chrome for the game. The frames come from the same pixel-art pipeline as the
+   sprites: tools/build-assets.js writes 9-slice PNGs into assets/ui/, and
+   border-image stretches them around whatever they wrap. Every frame keeps its
+   corner slice at 1:1 — the border-width below and the number in the
+   border-image are always the same, so nothing ever resamples.
+
+   They all come off the Dark Ages sheet now. There used to be one size for all
+   of them, 16px, because they all came from one pack cut to one grid; this
+   sheet is drawn pieces rather than a grid, and a corner scroll and a button's
+   rounded edge are not the same size and should not be forced to be. So there
+   is a variable per weight, and build-assets.js prints the numbers it built
+   them at — if these two ever drift apart, npm test says so. */
+
+:root {
+  /* The pack's own palette, from its README: Honey Gold, Tan, Camel, Charcoal
+     Brown, Powder Blue, Dark Blue. The interface used to be lit in colours
+     picked to suit a different set of art, and against charcoal and gold leaf
+     they read as a wash of orange. */
+  --wood-dark: #14171b;   /* the ground everything sits on */
+  --parchment: #f2e6cd;   /* text on the dark frames */
+  --ink: #9f8873;         /* the pack's Tan: muted text on the dark frames */
+  --ink-dark: #4a3722;    /* text on the parchment cards */
+  --ink-dark-dim: #7b6144;
+  --gold: #dcc47c;        /* the pack's Honey Gold */
+  --camel: #c19149;
+  --lapis: #406c91;
+  --navy: #15202f;
+
+  --frame-panel: 28px;    /* charcoal knotwork box */
+  --frame-card: 20px;     /* torn parchment */
+  --frame-plate: 14px;    /* the same box, light, for things on the map */
+  --frame-ornate: 22px;   /* gold and lapis, corner scrolls */
+  --frame-btn: 12px;      /* the button family */
+  --frame-head: 28px;     /* the scroll-capped heading plaque */
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--wood-dark);
+  color: var(--parchment);
+  font-family: 'Courier New', ui-monospace, monospace;
+  overflow: hidden;
+  -webkit-font-smoothing: none;
+}
+
+canvas { image-rendering: pixelated; }
+
+/* ---- 9-slice frames -------------------------------------------------------
+   One rule per frame art. `fill` paints the middle slice too, so these need no
+   background of their own. */
+
+.frame { image-rendering: pixelated; }
+/* Each one reserves its own corner, because each one's corner is its own size.
+   inset shares the panel's box art cut deeper, so it shares its border too. */
+/* .frame-panel went with #panel. The heavier of the two weights of the same
+   box art; .frame-inset still uses its border width, and the map overlays all
+   use .frame-plate, which is the same box at 1:1. */
+.frame-inset  { border: var(--frame-panel) solid transparent;  border-image: url("assets/ui/inset.png")  28 fill repeat; }
+.frame-card   { border: var(--frame-card) solid transparent;   border-image: url("assets/ui/card.png")   20 fill repeat; }
+/* The same box as the panel at half the weight, for everything that floats on
+   the map. A thin border around a big picture is the point of those; the panel
+   can afford to be furniture and they cannot. */
+.frame-plate  { border: var(--frame-plate) solid transparent;  border-image: url("assets/ui/plate.png")  14 fill repeat; }
+/* Reserved for the screens that stop the game — the menu, the lobby, the
+   draft, the two endings. Ornate enough that using it anywhere else would make
+   everything shout at once. */
+.frame-ornate { border: var(--frame-ornate) solid transparent; border-image: url("assets/ui/ornate.png") 22 fill repeat; }
+
+/* ---- Buttons ---- */
+
+/* A button keeps a 12px border so its corner art stays at 1:1 — size is
+   changed with font and padding, never by shrinking the slice, which would
+   resample the pixels. */
+button {
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--parchment);
+  border: var(--frame-btn) solid transparent;
+  border-image: url("assets/ui/button.png") 12 fill repeat;
+  image-rendering: pixelated;
+  font-size: 0.8rem;
+  line-height: 1.1;
+  padding: 0 0.2rem;
+  min-height: 40px;
+  display: inline-flex; align-items: center; justify-content: center;
+  text-align: center;
+  text-shadow: 0 1px 0 #0008;
+}
+button:hover:not(:disabled) { filter: brightness(1.15); }
+button:active:not(:disabled) { border-image: url("assets/ui/buttonPressed.png") 12 fill repeat; filter: none; }
+button:disabled { border-image: url("assets/ui/disabled.png") 12 fill repeat; color: #8b8579; cursor: not-allowed; text-shadow: none; }
+button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+
+.btn-primary { color: #33240a; text-shadow: 0 1px 0 #ffffff44; font-weight: bold; border-image: url("assets/ui/primary.png") 12 fill repeat; }
+.btn-primary:active:not(:disabled) { border-image: url("assets/ui/primaryPressed.png") 12 fill repeat; }
+.btn.active { color: #33240a; text-shadow: none; font-weight: bold; border-image: url("assets/ui/primary.png") 12 fill repeat; }
+.btn-danger { color: #f0d2c6; border-image: url("assets/ui/danger.png") 12 fill repeat; }
+
+.btn-lg { font-size: 1.05rem; letter-spacing: 3px; min-height: 56px; padding: 0 1.6rem; }
+.btn-sm { font-size: 0.7rem; }
+
+.btn-row { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem; }
+.btn-row .btn { flex: 1 1 auto; }
+
+/* ---- Main menu ----------------------------------------------------------
+   The painted background is an illustration, not tile art, so it is left to
+   scale smoothly; a scrim over it keeps the panels readable wherever the
+   viewport crops to. */
+
+#menu {
+  position: fixed; inset: 0;
+  z-index: 10;
+  overflow-y: auto;
+  background: #150f0a url("media/menu-bg.png") center / cover no-repeat;
+  display: flex; align-items: center; justify-content: center;
+}
+#menu.hidden { display: none; }
+
+#menu-scrim {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(12, 8, 16, 0.35) 0%, rgba(10, 6, 12, 0.82) 78%),
+    linear-gradient(180deg, rgba(10, 6, 12, 0.55) 0%, rgba(10, 6, 12, 0.15) 35%, rgba(10, 6, 12, 0.8) 100%);
+  pointer-events: none;
+}
+
+#menu-inner { position: relative; padding: 2rem 1.5rem; width: 100%; max-width: 900px; }
+
+#menu h1 {
+  color: var(--gold);
+  letter-spacing: 12px;
+  font-size: 3rem;
+  text-align: center;
+  margin: 0 0 0.2rem;
+  text-shadow: 0 0 22px #ff9a3c66, 0 4px 0 #000, 0 6px 14px #000;
+}
+#menu .tagline {
+  color: #e7d5b4; text-align: center; margin: 0 0 1.6rem;
+  letter-spacing: 1px; text-shadow: 0 2px 6px #000;
+}
+
+.menu-cols { display: flex; gap: 1rem; align-items: flex-start; }
+.menu-box { flex: 1 1 0; min-width: 0; }
+.menu-box h2 {
+  color: var(--gold); font-size: 0.78rem; letter-spacing: 2px;
+  text-transform: uppercase; margin: 0.9rem 0 0.4rem; text-shadow: 0 1px 0 #0009;
+}
+.menu-box h2:first-child { margin-top: 0; }
+.menu-box > .btn { width: 100%; }
+
+/* Text fields read as inked parchment, matching the cards. */
+#menu input[type="text"] {
+  width: 100%;
+  background: #efe2c6;
+  border: 2px solid #a48b62;
+  color: var(--ink-dark);
+  font-family: inherit; font-size: 0.95rem;
+  padding: 0.5rem 0.55rem;
+}
+#menu input[type="text"]::placeholder { color: #a3906f; }
+#code-input {
+  text-align: center; letter-spacing: 8px; font-size: 1.3rem;
+  font-weight: bold; text-transform: uppercase;
+}
+
+.join-row { display: flex; gap: 0.4rem; align-items: stretch; }
+.join-row input { flex: 1 1 auto; }
+.join-row .btn { flex: none; padding: 0 1.1rem; }
+
+#server-row { margin-top: 0.5rem; }
+#server-row label { display: block; margin-bottom: 0.25rem; }
+#server-row input { font-size: 0.8rem; }
+
+#room-list { max-height: 132px; overflow-y: auto; }
+.room-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.2rem 0; color: var(--parchment);
+}
+.room-row + .room-row { border-top: 1px solid #ffffff14; }
+.room-code { color: var(--gold); font-weight: bold; letter-spacing: 2px; }
+.room-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.78rem; }
+.room-row .btn { min-height: 28px; padding: 0 0.6rem; font-size: 0.68rem; }
+
+#menu-error { color: #7d2b1d; border-image: url("assets/ui/card.png") 20 fill repeat; margin-top: 0.6rem; }
+#menu-error.hidden { display: none; }
+
+#sound-btn { position: absolute; top: 14px; right: 16px; z-index: 2; min-height: 32px; padding: 0 0.7rem; }
+
+/* The match had its own MUSIC toggle in the corner beside Exit. Both are gone:
+   the corner is one gear now, and what the toggle did is the Master slider
+   inside it. This one, on the main menu, stays — the menu has no gear. */
+
+.race-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+
+.race-card {
+  border: var(--frame-btn) solid transparent;
+  border-image: url("assets/ui/button.png") 12 fill repeat;
+  image-rendering: pixelated;
+  cursor: pointer;
+  text-align: center;
+  color: var(--parchment);
+  transition: transform .08s;
+}
+.race-card:hover { transform: translateY(-2px); }
+.race-card.selected { border-image: url("assets/ui/primary.png") 12 fill repeat; }
+.race-card.selected h3, .race-card.selected small { color: #33240a; }
+.race-card .race-preview {
+  display: block;
+  margin: 0 auto 0.2rem;
+  /* The sprite's own shadow does the grounding; this is just a plinth for it. */
+  background: radial-gradient(ellipse at 50% 84%, #ffffff26 0%, transparent 62%);
+}
+.race-card h3 { margin: 0 0 0.2rem; font-size: 0.95rem; letter-spacing: 1px; }
+.race-card small { color: #c9b697; display: block; line-height: 1.35; font-size: 0.66rem; }
+
+@media (max-width: 900px) {
+  #draft-cards { flex-wrap: wrap; }
+  .draft-card { flex: 0 0 150px; }
+}
+
+@media (max-width: 760px) {
+  .menu-cols { flex-direction: column; }
+  #menu h1 { font-size: 2.1rem; letter-spacing: 7px; }
+}
+
+/* ---- Main game layout ---- */
+
+/* The map is the interface. There is no second column any more: everything
+   that used to live in a 336px bar down the right now sits on the map's own
+   edges, where it is either something you act on (the bottom stack) or a
+   figure you glance at (the top row). */
+#game-ui { display: flex; height: 100vh; }
+#game-ui.hidden { display: none; }
+#map-wrap { flex: 1; overflow: hidden; background: #0e0b08; position: relative; }
+#map { cursor: crosshair; display: block; }
+
+/* Every figure worth glancing at, in one row along the top. Gold, income and
+   troops were always here; works and border came off the Town Center card when
+   the panel went. */
+.hud-dim { color: var(--ink); }
+/* Scoped .hidden, like everything else in this sheet. */
+#ore-income.hidden { display: none; }
+/* The right half of the top row: what your empire can hold, as against what
+   it has. Sits left of the gear, mirroring the treasury on the far side. */
+#hud-right {
+  /* Clear of the gear: it is 56 wide at right:12, so it finishes 68 from the
+     edge and this starts a gap after that. Measured, not guessed — at 60 the
+     two overlapped by eight pixels. */
+  position: absolute; top: 10px; right: 80px;
+  display: flex; gap: 1.1rem;
+  font-size: 0.85rem;
+  padding: 0;
+  z-index: 6;
+}
+#hud-right.hidden { display: none; }
+#works-stat, #border-stat { cursor: help; pointer-events: auto; }
+
+#hud {
+  position: absolute; top: 10px; left: 10px;
+  display: flex; gap: 1.1rem;
+  font-size: 0.85rem;
+  padding: 0;
+  pointer-events: none;
+}
+.hud-stat { white-space: nowrap; color: var(--parchment); }
+
+/* ---- The town center's health bar -----------------------------------------
+   Drawn from the Dark Ages UI sheet at three times its source size and hung
+   along the top edge of the map. It has been at x3 in the top-left corner, at
+   x5 in the middle, and at x4; what settles it is the alignment, not the size.
+   The corner buttons finish 46px down, and crest plus trough have to fit above
+   that line for the bar's bottom to sit on it — 21 + 24 does, 28 + 32 did not.
+   A health bar wants to be long and thin anyway, and the length is where the
+   legibility went: it is three times the width it was at x3 originally.
+
+   Three pieces, because a bar has to stretch and a crest must not. The trough
+   is a horizontal 9-slice — its rounded ends held, its middle repeated — the
+   fill is another one inside it, and the crest is its own image centred over
+   the join. Every size below is a multiple of 5 for that reason: the art is
+   pixel art at 1:1 inside a x5 box, and a fractional height would resample it.
+
+   The variable --keep-cap is the width of the trough's rounded end in the
+   source art (6px) times that scale. It is a variable because the border-width
+   and the slice have to agree, and them disagreeing is the one way to get this
+   wrong — see the check in tools/tests/client.test.js that reads both. */
+/* ---- Your empire has fallen ------------------------------------------------
+   Modelled on the game-over banner, because it is the same kind of news and
+   should not look like a different game. The difference is what it offers: the
+   match is still running, so the first button is to stay and watch it. */
+#defeat-screen {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 7, 4, 0.72);
+  z-index: 60;
+}
+#defeat-screen.hidden { display: none; }
+.defeat-box { padding: 26px 34px; text-align: center; max-width: 460px; }
+.defeat-box h1 {
+  margin: 0 0 6px; font-size: 1.35rem; letter-spacing: 0.1em;
+  color: #d9534f; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+}
+.defeat-box .sub { margin: 0 0 16px; }
+
+#spectating-chip {
+  position: absolute; top: 10px; left: 50%;
+  transform: translateX(-50%);
+  display: flex; gap: 0.6rem; align-items: baseline;
+  padding: 4px 12px;
+  background: rgba(10, 7, 4, 0.72);
+  border: 1px solid #6b5334;
+  font-size: 0.72rem; letter-spacing: 0.14em;
+  color: #d9534f;
+  pointer-events: none;
+  z-index: 30;
+}
+#spectating-chip.hidden { display: none; }
+#spectating-note { color: var(--ink); letter-spacing: 0.04em; }
+
+#keep-bar {
+  --keep-cap: 18px;
+  --keep-fill-cap: 9px;
+  /* How far the trough's dark channel sits inside the edge of its own art: the
+     gold rim is two source pixels thick, so six at x3. Measured off
+     keepbar.png. See #keep-track, which is the only thing that needs it and the
+     one place it was silently wrong. */
+  --keep-lip: 6px;
+  /* Centred on the map rather than on the window: this is positioned inside
+     #map-wrap, which is the viewport minus the side panel, and the map is what
+     the bar belongs to.
+
+     top:22 is where the BOTTOM of the trough lands on 46, which is where the
+     Music and Exit buttons in the far corner finish. That shared line is the
+     whole reason for the number: the three things along the top of the map read
+     as one row rather than as three things at three heights. It leaves the
+     crest, which hangs above the trough, spanning 1..22 — one pixel clear of
+     the top edge, which is all the room there is and exactly enough.
+
+     The width is the interesting number. It no longer dodges the stat row by
+     sitting BELOW it, which is what kept the bar pinned unhappily far down the
+     screen; it dodges it sideways instead.
+
+     The gutters were re-measured when the side panel went. 100% used to be the
+     window minus a 336px panel; it is now the whole window, so the old figure
+     silently handed the bar an extra 336 and it grew from 228 to 564 and put
+     itself under the stat row. What it has to clear today is the treasury on
+     the left, which finishes at 325, and the works/border pair on the right,
+     which starts at about 1025 of 1264. The left figure moved again when the
+     Mining stat joined the money on that side: the treasury row now finishes
+     at 366, so 380 either side of centre and 760 is the pair of them
+     . Up to 760, which is where it stops growing on a wide
+     screen. On a narrow one it gives up length rather than moving down, which
+     is the trade that keeps it at the top where it belongs. */
+  position: absolute; top: 22px; left: 50%;
+  transform: translateX(-50%);
+  width: min(760px, calc(100% - 760px));
+  z-index: 4;             /* under #conn-notice, which owns the top edge */
+  pointer-events: none;
+}
+/* Against its own id, for the reason written over #attack-alert.hidden. This
+   one does not set `display`, so the class would in fact have won — but a rule
+   that works by accident is one that breaks the day somebody adds a display. */
+#keep-bar.hidden { display: none; }
+/* The caption sits on the map itself, not on a panel, and the map underneath
+   it is whatever terrain the keep happens to stand on — at the top middle that
+   is usually open grass, which is bright. A drop shadow was not enough: tan
+   text on lit grass simply vanished. This is a hard one-pixel outline on all
+   four sides plus a soft pool behind it, which holds over grass, stone and
+   water alike. */
+/* The caption sits UNDER the middle of the bar, not pushed out to its two ends.
+   Spread apart with space-between, the name and the number ended up four
+   hundred pixels from each other with nothing in between, so the eye read them
+   as two separate labels that happened to share a row and the whole assembly
+   looked uncentred — the crest was over the middle and the writing was not. */
+#keep-cap {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 0.9rem; align-items: baseline;
+  font-size: 0.78rem; letter-spacing: 0.06em;
+  padding: 5px 0 0;
+  text-shadow:
+    1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000,
+    0 0 7px #000d;
+}
+#keep-name { color: #d8c8ac; }
+/* Under the caption, not in it. #keep-cap is a centred flex row, so a button
+   inside it widens the whole bar — which is how the keep bar grew from 228
+   to 564 wide and collided with the stat row. */
+/* Centred under the bar and sized to its own label. It was a flex item in
+   #keep-cap, where `flex: 0 0 100%` did exactly what it says and stretched a
+   26px button across the full 584px of the keep bar. */
+#upgrade-btn {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  top: 100%; margin-top: 4px;
+  min-height: 26px; padding: 0 0.7rem; font-size: 0.66rem;
+  white-space: nowrap;
+  /* #keep-bar takes no pointer events so it never eats a click meant for the
+     map underneath it. This is the one thing on it you click. */
+  pointer-events: auto;
+}
+#upgrade-btn.hidden { display: none; }
+#keep-hp { color: var(--gold); font-weight: bold; }
+
+#keep-trough {
+  height: 24px;                         /* the art is 8px tall at x3 */
+  border: 0 solid transparent;
+  border-left-width: var(--keep-cap);
+  border-right-width: var(--keep-cap);
+  border-image: url("assets/ui/keepbar.png") 0 18 fill stretch;
+  image-rendering: pixelated;
+  position: relative;
+}
+/* The interior the fill runs along: the trough's dark channel, exactly.
+   An absolutely positioned child is placed against its parent's PADDING box,
+   which here is inset by the full 18px border — but the channel it has to fill
+   starts only 6px in, because the gold rim is thinner than the slice reserved
+   for the corners. At left/right 0 the track was 252px inside a 276px channel,
+   so a keep at full health showed twelve pixels of empty trough at each end and
+   never looked full. Pulling the track back out by the difference lines it up
+   with the art it is running along.
+
+   The vertical needs no such correction: the channel is 12px tall in a 24px
+   art, and a 12px track centred in a 24px element already lands on it. */
+#keep-track {
+  position: absolute;
+  left: calc(var(--keep-lip) - var(--keep-cap));
+  right: calc(var(--keep-lip) - var(--keep-cap));
+  top: 50%;
+  transform: translateY(-50%);
+  height: 12px;                          /* the fill art is 4px tall at x3 */
+}
+#keep-fill {
+  height: 100%;
+  width: 0;
+  border: 0 solid transparent;
+  border-left-width: var(--keep-fill-cap);
+  border-right-width: var(--keep-fill-cap);
+  image-rendering: pixelated;
+  /* Health drops in one direction, so the bar only ever needs to catch up
+     downwards. Quick enough not to lie about the current number. */
+  transition: width 140ms linear;
+}
+#keep-fill.hp-green { border-image: url("assets/ui/keepbar-fill-green.png") 0 9 fill stretch; }
+#keep-fill.hp-amber { border-image: url("assets/ui/keepbar-fill-amber.png") 0 9 fill stretch; }
+#keep-fill.hp-red   { border-image: url("assets/ui/keepbar-fill-red.png")   0 9 fill stretch; }
+/* Below the width of its own two end caps the fill has nothing left to draw
+   but squashed caps, which reads as a bar that never quite empties. */
+#keep-fill.empty { display: none; }
+
+/* The crest sits ON the trough's top lip, which is where it sits in the source
+   art: rows 0-6 of the original are the crest and row 7 is the top of the bar.
+   Anchored to the trough rather than to the bar so it cannot drift if the
+   caption's font ever changes. */
+#keep-crest {
+  position: absolute;
+  left: 50%; bottom: 100%;
+  transform: translateX(-50%);
+  margin-bottom: 0;                      /* base on the lip, as in the art */
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+/* The keep is in trouble: the whole bar takes the same slow pulse the alert
+   banner uses, so the two read as one piece of news. */
+#keep-bar.critical #keep-trough { animation: keep-throb 900ms ease-in-out infinite; }
+@keyframes keep-throb {
+  0%, 100% { filter: none; }
+  50%      { filter: brightness(1.5) drop-shadow(0 0 6px rgba(217, 83, 79, 0.9)); }
+}
+
+/* ---- "You are under attack" -----------------------------------------------
+   The ribbon is from the flat UI pack, sliced 13 either side because that is
+   where its folded tabs end and its flat body begins. It is loud and it leaves
+   on its own: worth interrupting you for, not worth a click to dismiss. */
+#attack-alert {
+  position: absolute;
+  /* Clear of the health bar. The bar runs to about y=125 with its caption, and
+     the banner is centred on the map — which, with the side panel taking its
+     width off, puts its left edge right on top of the bar. Found by rendering
+     it: the banner was covering the second half of "900 / 900". */
+  top: 150px; left: 50%;
+  transform: translateX(-50%);
+  min-width: 330px;
+  /* The plaque is framed on all four sides, so unlike the health bar it is
+     sliced on all four: 15px of gold at the top and bottom, 30px at the sides
+     where the corner swirls are. Both numbers are the source art (5 and 10) at
+     the same x3 everything else here uses. */
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 6px 12px 8px;
+  border: 0 solid transparent;
+  border-width: 15px 30px;
+  /* round across, stretch down. The two axes want opposite things here and
+     saying so is the whole trick: the top and bottom rails carry a repeating
+     gold ornament, and stretching a 44px run of it to 370 smears it into
+     blurred blocks — visible the moment the page was rendered. The sides are
+     plain gold, where stretching is exact and tiling would show a seam.
+     "round" rather than "repeat" so a whole number of ornaments fits and the
+     run never ends mid-pattern. */
+  border-image: url("assets/ui/banner.png") 15 30 fill round stretch;
+  image-rendering: pixelated;
+  text-align: center;
+  pointer-events: none;
+  z-index: 40;
+  animation: alert-in 260ms cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+/* Every other overlay in this file spells the hidden case out against its own
+   id, and this is why: `.hidden` is one class and `#attack-alert` is an id, so
+   a bare `display: none` on the class loses to the `display: flex` above it and
+   the banner is on screen for the whole game — including over the lobby, which
+   is where this was noticed. */
+#attack-alert.hidden { display: none; }
+#attack-alert-crest {
+  position: absolute;
+  left: 50%; bottom: 100%;
+  transform: translateX(-50%);
+  margin-bottom: -2px;                   /* the frame's own top edge overlaps */
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+#attack-alert-line1 {
+  font-size: 1rem; font-weight: bold; letter-spacing: 0.18em;
+  color: #ffd76a; line-height: 1.15;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
+}
+#attack-alert-line2 {
+  font-size: 0.8rem; margin-top: 3px; color: #f2d7bc; line-height: 1.15;
+  white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+}
+#attack-alert.leaving { animation: alert-out 320ms ease-in forwards; }
+@keyframes alert-in {
+  from { transform: translateX(-50%) translateY(-18px) scale(0.94); opacity: 0; }
+  to   { transform: translateX(-50%) translateY(0) scale(1); opacity: 1; }
+}
+@keyframes alert-out {
+  from { opacity: 1; }
+  to   { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+}
+.hud-label { color: var(--ink); margin-right: 0.35rem; }
+.gold { color: var(--gold); font-weight: bold; }
+
+/* #panel is gone. It was 336px of screen holding four sections: two of them
+   were figures that are now in the HUD, one was the build palette which is now
+   a bar under the troop roster, and one was a list of your buildings which is
+   now the count on each palette icon. Nothing moved into a submenu. */
+/* The sheet has a scroll-capped plaque and this is what it is for. A heading
+   used to be gold text floating on the panel, which read as a label for the
+   card under it rather than as a division of the panel; on a plaque it reads as
+   a division. The caps are 28px of art either side, so short words need the
+   min-height to keep the plaque from collapsing around them. */
+
+/* ---- Cards: tan parchment notes pinned to the wood ---- */
+
+.card {
+  border: var(--frame-card) solid transparent;
+  border-image: url("assets/ui/card.png") 20 fill repeat;
+  image-rendering: pixelated;
+  color: var(--ink-dark);
+  margin-bottom: 0.4rem;
+  min-height: 34px;
+}
+.card .row { display: flex; justify-content: space-between; align-items: center; gap: 0.3rem; }
+.card .label { color: #2f2110; font-weight: bold; }
+.card .sub { color: var(--ink-dark-dim); }
+.card .btn { color: var(--parchment); }
+.sub { font-size: 0.74rem; line-height: 1.45; color: var(--ink); }
+
+.stat-row { display: flex; justify-content: space-between; margin: 0.18rem 0; }
+
+/* ---- Troop bar --------------------------------------------------------
+   Sits over the map, centred at the bottom: the roster is what you read while
+   deciding where to click, so it lives where your eyes already are. */
+
+/* Sits directly above the troop bar and is centred on the same line, so the
+   two read as one stack rather than two floating boxes. Only up while a group
+   is selected, which is the only time it means anything. */
+/* The bottom stack, read upward: what you build, what you train, what you have
+   selected. Each bar is centred on the same line so they read as one column of
+   controls rather than three floating boxes, and each one is only up when it
+   has something to say. */
+/* What you build sits on the left of the bottom edge and what you train on
+   the right, rather than both stacked down the middle. Each is clear of the
+   corner beside it: the log takes the first 310px on the left, the minimap
+   and the ability take about 290 on the right. */
+#build-bar {
+  position: absolute; left: 320px; bottom: 12px; transform: none;
+  z-index: 6;
+  display: flex;
+  max-width: calc(100% - 24px);
+}
+#build-bar.hidden { display: none; }
+/* Inside the bar, the way #deploy-hint lives inside the troop bar. It was a
+   floating line positioned above the bar, which is a line that lands on the
+   bar the moment the bar is a pixel taller than the guess. */
+#build-bar { flex-direction: column; align-items: stretch; gap: 0.35rem; }
+.build-row { display: flex; align-items: flex-end; gap: 0.7rem; }
+#build-hint {
+  text-align: center; font-size: 0.68rem; color: var(--ink);
+  max-width: 620px; min-height: 1em;
+}
+#build-hint .sub { display: block; color: var(--gold); }
+#build-hint .hidden { display: none; }
+.bar-sep { width: 1px; align-self: stretch; background: #ffffff18; margin: 2px 0; }
+.build-tools { display: flex; flex-direction: column; gap: 4px; }
+.build-tools .btn { min-height: 28px; padding: 0 0.6rem; }
+
+#group-bar {
+  position: absolute; left: 50%; bottom: 236px; transform: translateX(-50%);
+  z-index: 6;
+  display: flex; align-items: center; gap: 0.9rem;
+  max-width: calc(100% - 24px);
+}
+#group-bar.hidden { display: none; }
+#group-summary { font-size: 0.72rem; color: var(--parchment); white-space: nowrap; }
+/* Not shrinkable. The row's children are all fixed widths, so letting the row
+   itself be squeezed does not make anything narrower — it just pushes the
+   readout past the row's right edge and underneath the Split button, where it
+   was invisible and looked for all the world like it was never rendered. */
+#group-bar .slider-row { margin-bottom: 0; flex: 0 0 auto; }
+#group-bar .slider-row label { flex: 0 0 auto; }
+#group-bar input[type="range"] { width: 150px; flex: 0 0 150px; }
+#group-bar output { flex: 0 0 2.2rem; text-align: right; }
+#split-close { padding: 0 0.5rem; min-height: 28px; }
+
+@media (max-width: 1180px) {
+  #build-bar { left: 50%; transform: translateX(-50%); }
+  #troop-bar { right: auto; left: 50%; bottom: 124px; transform: translateX(-50%); }
+}
+
+@media (max-height: 780px) {
+  #group-bar { bottom: 214px; }
+  #build-hint { bottom: 96px; }
+}
+
+/* Not up until the empire has something that trains — same scoped-.hidden
+   rule every other element here needs. */
+#troop-bar.hidden { display: none; }
+#troop-bar {
+  position: absolute; right: 300px; left: auto; bottom: 12px; transform: none;
+  z-index: 6;
+  display: flex; align-items: center; gap: 0.9rem;
+  max-width: calc(100% - 24px);
+}
+
+#unit-inputs { display: flex; gap: 0.5rem; }
+
+.troop-slot {
+  position: relative;
+  width: 52px;
+  padding: 0.1rem 0;
+  text-align: center;
+  cursor: pointer;
+  border: 2px solid transparent;
+  border-radius: 2px;
+  transition: background .1s, border-color .1s;
+}
+.troop-slot:hover { background: #ffffff14; border-color: #ffffff2e; }
+.troop-slot.empty { opacity: 0.42; }
+.troop-slot.empty:hover { background: none; border-color: transparent; cursor: default; }
+
+.troop-icon {
+  display: block; margin: 0 auto;
+  image-rendering: pixelated;
+  /* A plinth, so a sprite with no ground under it still reads as standing. */
+  background: radial-gradient(ellipse at 50% 88%, #ffffff1f 0%, transparent 62%);
+}
+
+/* How many you have, over the portrait's shoulder. */
+.troop-have {
+  position: absolute; top: 2px; right: 4px;
+  font-size: 0.78rem; font-weight: bold;
+  color: var(--parchment);
+  text-shadow: 0 0 3px #000, 0 1px 0 #000;
+  pointer-events: none;
+}
+
+/* How many you are about to send. */
+.troop-slot input {
+  width: 46px;
+  background: #efe2c6;
+  border: 2px solid #a48b62;
+  color: var(--ink-dark);
+  font-family: inherit; font-size: 0.78rem;
+  padding: 0.1rem 0.2rem; text-align: center;
+}
+
+.troop-actions { display: flex; flex-direction: column; gap: 0.35rem; min-width: 190px; }
+.troop-actions .btn-row { margin-top: 0; }
+.troop-actions .btn { flex: 1 1 auto; }
+
+#deploy-hint {
+  font-size: 0.72rem; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#deploy-btn.armed { background: #ffd76a2e; border-color: var(--gold); }
+
+@media (max-height: 620px) {
+  #troop-bar { bottom: 6px; }
+  .troop-slot { width: 46px; }
+}
+
+/* Bottom-left corner of the map, opposite the HUD and clear of the troop bar
+   in the middle. Sized so it never grows into the play area — old lines
+   scroll away rather than pushing the box taller. */
+#log {
+  position: absolute; left: 10px; bottom: 12px; z-index: 6;
+  width: 300px; height: 118px; overflow-y: auto;
+  font-size: 0.7rem; color: var(--ink);
+  opacity: 0.86; transition: opacity 120ms;
+}
+#log:hover { opacity: 1; }
+#log div { margin-bottom: 0.15rem; }
+
+/* ---- Game over ---- */
+
+#game-over-banner {
+  position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+  background: rgba(10, 8, 5, 0.88); z-index: 20;
+}
+.game-over-box { text-align: center; padding: 0 2rem; }
+#game-over-banner h1 {
+  color: var(--gold); font-size: 2.6rem; letter-spacing: 8px; margin: 0.4rem 0 1.2rem;
+  text-shadow: 0 4px 0 #000;
+}
+#game-over-banner.show { display: flex; }
+
+/* ---- Scrollbars ---- */
+
+#log { scrollbar-width: thin; scrollbar-color: #6b563a #1a140e; }
+#log::-webkit-scrollbar { width: 10px; }
+#log::-webkit-scrollbar-track { background: #1a140e; }
+#log::-webkit-scrollbar-thumb { background: #6b563a; border: 2px solid #1a140e; }
+
+.btn-note { color: var(--ink); font-size: 0.7rem; margin-left: 0.5rem; }
+
+/* ---- Opening draft ------------------------------------------------------
+   The cards roll in from off-screen, staggered, so the hand deals itself
+   rather than appearing. --i is the card's index, set inline. */
+
+#draft {
+  position: fixed; inset: 0; z-index: 15;
+  display: flex; align-items: center; justify-content: center;
+  overflow-y: auto;
+  background: radial-gradient(ellipse at 50% 45%, rgba(20, 12, 6, 0.82) 0%, rgba(8, 5, 3, 0.94) 75%);
+  overflow: hidden;
+}
+#draft.hidden { display: none; }
+#draft-inner { text-align: center; max-width: 1240px; padding: 1rem; }
+#draft h1 {
+  color: var(--gold); letter-spacing: 10px; font-size: 2rem; margin: 0 0 0.3rem;
+  text-shadow: 0 0 20px #ff9a3c55, 0 3px 0 #000;
+}
+.draft-sub { color: var(--ink); margin: 0 0 1.4rem; letter-spacing: 1px; }
+#draft-timer { color: var(--gold); font-weight: bold; }
+#draft-timer.urgent { color: #ff8a6a; }
+
+/* One row of six. They shrink before they wrap — a hand that reflows onto a
+   second line stops reading as a hand. */
+#draft-cards { display: flex; gap: 0.7rem; justify-content: center; align-items: stretch; }
+
+.draft-card {
+  /* Fixed, not flexible: the face has to stay at exactly the size the art was
+     magnified to, or the browser resamples pixel art it has no business
+     touching. 153 = the 51px tarot at x3, plus the 12px frame either side. */
+  width: 177px; flex: none;
+  display: flex; flex-direction: column;
+  border: var(--frame-btn) solid transparent;
+  border-image: url("assets/ui/button.png") 12 fill repeat;
+  image-rendering: pixelated;
+  cursor: pointer;
+  color: var(--parchment);
+  text-align: center;
+  animation: card-roll-in 620ms cubic-bezier(.16, .84, .32, 1.06) backwards;
+  animation-delay: calc(var(--i) * 95ms);
+  transition: transform .1s, filter .1s;
+}
+.draft-card:hover { transform: translateY(-8px); filter: brightness(1.18); }
+.draft-card.taken {
+  border-image: url("assets/ui/primary.png") 12 fill repeat;
+  color: #33240a;
+  cursor: default;
+}
+.draft-card.taken .card-desc { color: #6b4c14; }
+.draft-card.taken:hover { transform: none; filter: none; }
+.draft-card.spent { opacity: 0.4; cursor: not-allowed; }
+.draft-card.spent:hover { transform: none; filter: none; }
+
+@keyframes card-roll-in {
+  from { transform: translate(120vw, -12vh) rotate(680deg) scale(0.45); opacity: 0; }
+  60%  { opacity: 1; }
+  to   { transform: translate(0, 0) rotate(0) scale(1); opacity: 1; }
+}
+
+/* The face: a sigil by default, covered by real art the moment there is any.
+   Sized to a tarot card at x3 (51x79 -> 153x237). */
+.card-face {
+  position: relative;
+  width: 153px; height: 237px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #2b1f14, #17110b);
+  border: 2px solid #00000055;
+  overflow: hidden;
+}
+/* `none`, not `contain`: the art is already at its display size, so any
+   fitting the browser does is a resample. A tarot card fills the box exactly;
+   a tome is smaller and sits centred in it, which is the right way round —
+   a card is a card and a book is an object lying on one. */
+.card-face img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: none;
+  image-rendering: pixelated;
+}
+.card-sigil { font-size: 3.2rem; line-height: 1; }
+.card-boon .card-sigil { color: #ffd76a; text-shadow: 0 0 18px #e3b23c88; }
+.card-spell .card-sigil { color: #8fd0ff; text-shadow: 0 0 18px #4aa8ff88; }
+
+.card-kind { font-size: 0.6rem; letter-spacing: 3px; text-transform: uppercase; margin-top: 0.4rem; }
+.card-boon .card-kind { color: #e0b24a; }
+.card-spell .card-kind { color: #7fb6e6; }
+.draft-card.taken .card-kind { color: #6b4c14; }
+.card-title { font-size: 0.9rem; margin: 0.1rem 0 0.3rem; font-weight: bold; }
+.card-desc { font-size: 0.66rem; line-height: 1.4; color: var(--ink); flex: 1 1 auto; }
+/* The generated spec line under a spell's prose — see spellFacts. Quieter than
+   the description above it, because it is looked up rather than read. */
+.card-facts {
+  margin-top: 0.3rem; padding-top: 0.3rem;
+  border-top: 1px solid #ffffff1a;
+  font-size: 0.6rem; line-height: 1.35;
+  color: var(--ink-dark-dim);
+  flex: 0 0 auto;
+}
+.card-boon .card-facts, .draft-card.taken .card-facts { color: #6b4c14; }
+
+/* ---- Cards in the side panel ---- */
+
+/* The hand, in the side panel: a row of faces at the raw size the pipeline
+   writes them (51x79). Fixed, never scaled — see .card-face. Names and rules
+   live in the tooltip; spelling them out here cost more panel height than the
+   rest of the section put together. */
+/* A draft keeps three, so the hand never grows and needs no room to. It sits
+   under the ability because both are things you spend. */
+#card-list {
+  /* 212 of ability plus the 98 it stands, plus a gap. Measured in the page,
+     not guessed: at 306 the two boxes overlapped by four pixels. */
+  position: absolute; right: 12px; bottom: 322px; z-index: 6;
+  opacity: 0.92; transition: opacity 120ms;
+}
+#card-list:hover { opacity: 1; }
+/* Same stack at every width; the wide-screen variant is gone. */
+.card-hand { display: flex; gap: 5px; }
+/* Two thirds of what it was. On a panel a card could afford to be a card; on
+   the map it is a button with a picture on it, and the picture only has to be
+   recognisable. */
+.owned-card {
+  position: relative; flex: none;
+  width: 38px; height: 59px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #2b1f14, #17110b);
+  border: 1px solid #00000066;
+  overflow: hidden;
+}
+.owned-card img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: none;
+  image-rendering: pixelated;
+}
+.owned-card.card-spell { background: radial-gradient(ellipse at 50% 45%, #2a3550 0%, #10131f 70%); }
+.owned-card .card-sigil { font-size: 1.1rem; }
+/* Only a spell is clickable, so only a spell reacts to the pointer. */
+.owned-card[data-spell] { cursor: pointer; }
+.owned-card[data-spell]:hover, .owned-card[data-spell]:focus-visible {
+  outline: 2px solid var(--gold); outline-offset: -2px;
+}
+.owned-card.spell-armed { outline: 2px solid var(--gold); outline-offset: -2px; }
+.owned-card.spell-spent { filter: grayscale(1) brightness(0.55); }
+.charge-badge {
+  position: absolute; right: 0; bottom: 0; z-index: 2;
+  padding: 0 3px;
+  background: #000000bb; color: var(--gold);
+  font-size: 0.6rem; line-height: 1.4;
+}
+.aiming {
+  position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
+  z-index: 2; text-align: center;
+  padding: 2px 0; background: #000000cc; color: var(--gold);
+  font-size: 0.55rem; letter-spacing: 0.5px;
+}
+.hand-hint { margin-top: 0.35rem; font-size: 0.66rem; }
+
+/* A connection that has dropped is the one thing worth interrupting the map
+   for, so it sits across the top rather than in the log. */
+#conn-notice {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 5;
+  padding: 0.45rem 1rem; text-align: center;
+  background: rgba(120, 40, 20, 0.92);
+  color: #ffe0c8; font-size: 0.8rem; letter-spacing: 1px;
+  border-bottom: 2px solid #00000055;
+}
+#conn-notice.hidden { display: none; }
+
+/* ---- Exit ---- */
+
+#exit-wrap { position: absolute; top: 10px; right: 12px; z-index: 6; text-align: right; }
+/* Music and Exit, side by side. The confirm box below is measured against the
+   row, so the row is an element rather than the two buttons floating. */
+#exit-row { display: flex; gap: 0.4rem; justify-content: flex-end; }
+
+/* Square, and sized to the art rather than to a label: the gear is 32px and
+   the frame is 12 either side of it, so the button is exactly as big as what
+   it holds. Padding here would push the frame off the icon. */
+#menu-btn { padding: 0; line-height: 0; }
+#menu-btn img { display: block; width: 32px; height: 32px; image-rendering: pixelated; }
+#menu-btn.active { filter: brightness(1.2); }
+
+/* Wide enough that a controls line does not wrap, which is what decides this
+   number — the longest of them is the right-click line. */
+#game-menu { width: 360px; margin-top: 0.4rem; text-align: left; }
+#game-menu.hidden { display: none; }
+#game-menu .btn-row { margin-top: 0.7rem; }
+#game-menu .btn-row .btn { flex: 1 1 0; }
+
+.menu-head {
+  color: var(--gold); font-size: 0.72rem; letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0.1rem 0 0.45rem;
+}
+.menu-head + .menu-head, .slider-row + .menu-head { margin-top: 0.9rem; }
+
+/* label / track / readout. The readout is a fixed width so the track does not
+   jump about as the number goes from 8% to 100%. */
+.slider-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; }
+.slider-row label { flex: 0 0 4.4rem; font-size: 0.72rem; color: var(--ink); }
+.slider-row output { flex: 0 0 2.6rem; text-align: right; font-size: 0.72rem; color: var(--parchment); }
+.slider-row input[type="range"] { flex: 1 1 auto; min-width: 0; }
+
+/* The pack has no slider art, so this is built out of its palette rather than
+   pulled from somewhere else: a sunk charcoal track with a gold fill behind the
+   thumb, and the thumb itself the pack's own diamond turned 45 degrees. Squared
+   corners throughout, because everything else in this interface has them. */
+input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  height: 14px; background: transparent; cursor: pointer;
+}
+/* Chrome paints no filled portion of a range track — Firefox does, through
+   ::-moz-range-progress, and there is no WebKit equivalent. So the fill is a
+   gradient with a hard stop at --fill, which the client sets as a percentage
+   whenever a slider moves. Custom properties reach into the pseudo-element,
+   which is the only reason this works at all. Without it the two engines
+   disagree about whether a slider shows its own value. */
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  background: linear-gradient(to right,
+    var(--camel) 0 var(--fill, 0%), var(--navy) var(--fill, 0%) 100%);
+  border: 1px solid #000; box-shadow: inset 0 1px 0 #0008;
+}
+input[type="range"]::-moz-range-track {
+  height: 6px; background: var(--navy);
+  border: 1px solid #000; box-shadow: inset 0 1px 0 #0008;
+}
+input[type="range"]::-moz-range-progress { height: 6px; background: var(--camel); }
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 12px; height: 12px; margin-top: -4px;
+  background: var(--gold); border: 1px solid #2a2116;
+  transform: rotate(45deg);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 0;
+  background: var(--gold); border: 1px solid #2a2116;
+  transform: rotate(45deg);
+}
+input[type="range"]:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+input[type="range"]:disabled { cursor: not-allowed; filter: grayscale(1) brightness(0.7); }
+
+/* The controls list. A definition list because that is what it is, laid out in
+   two columns so the keys line up and can be scanned down. */
+#controls-list { display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.6rem; margin: 0; }
+#controls-list dt {
+  color: var(--gold); font-size: 0.68rem; white-space: nowrap;
+  text-align: right;
+}
+#controls-list dd { margin: 0; color: var(--ink); font-size: 0.68rem; }
+
+/* It lives inside #game-menu now. While it is up the rest of the panel is
+   hidden, so the box stays the size of the question rather than adding
+   itself to the bottom of a panel that already fills the corner. */
+#exit-confirm { margin-top: 0.6rem; text-align: left; }
+#game-menu.confirming .menu-head,
+#game-menu.confirming .slider-row,
+#game-menu.confirming #controls-list,
+#game-menu.confirming > .btn-row { display: none; }
+#exit-confirm.hidden { display: none; }
+#exit-confirm .btn-row { margin-top: 0.5rem; }
+#exit-confirm .btn { flex: 1 1 0; }
+#exit-yes { color: #ffd2c4; }
+
+/* ---- Build palette ----------------------------------------------------
+   Buildings are picked up here and dropped on the map, so the icons are the
+   real sprites rather than labels: what you drag is what you get. */
+
+/* A row, not a wrapping grid: it is a bar along the bottom of the map now, and
+   six things fit on one line at any width worth playing at. */
+#build-palette { display: flex; gap: 5px; align-items: flex-end; }
+.build-item {
+  width: 52px;
+  text-align: center;
+  cursor: grab;
+  touch-action: none;
+}
+/* The icon sits in a sunk well so a row of them reads as a row of slots rather
+   than as pictures floating on the map. The well is a fixed square whatever the
+   icon inside it started as — see ICON_PX in tools/build-assets.js. */
+.build-well {
+  position: relative;
+  width: 48px; height: 48px; margin: 0 auto;
+  display: grid; place-items: center;
+  background: #131a26;
+  border: 1px solid #000;
+  box-shadow: inset 0 0 0 1px #ffffff10;
+  transition: background .1s, box-shadow .1s;
+}
+.build-item:hover .build-well { background: #1b2534; box-shadow: inset 0 0 0 1px #ffffff2e; }
+.build-item.armed .build-well { background: #3a2f14; box-shadow: inset 0 0 0 1px var(--gold); cursor: grabbing; }
+.build-item.unaffordable { opacity: 0.42; }
+/* No room left under the town center's building limit. Same dimming as being
+   unable to afford it — it is the same answer: not this one, not yet. */
+.build-item.at-limit { opacity: 0.42; cursor: not-allowed; }
+
+/* How many of this kind you run. This is the whole of what the old Buildings
+   section did, and it does it on the thing you already look at to build one. */
+.build-item .count {
+  position: absolute; right: -4px; top: -4px;
+  min-width: 16px; height: 16px; padding: 0 3px;
+  font-size: 0.6rem; line-height: 16px;
+  color: #33240a; background: var(--gold);
+  border: 1px solid #2a2116;
+}
+/* Anything mid-build or hurt, which a plain total would hide. */
+.build-item .note {
+  position: absolute; left: -4px; top: -4px;
+  min-width: 16px; height: 16px; padding: 0 3px;
+  font-size: 0.6rem; line-height: 16px;
+  color: var(--parchment); background: #2f4a6b;
+  border: 1px solid #101a26;
+}
+.build-item .note.hurt { background: #6b2f2f; border-color: #260f0f; }
+/* .hidden in this sheet is scoped per element, so these need their own rule
+   — without it every icon carried a 0 for a building nobody had built. */
+.build-item .count.hidden, .build-item .note.hidden { display: none; }
+.build-item:hover { background: #ffffff14; border-color: #ffffff2e; }
+.build-item.armed { background: #ffd76a2e; border-color: var(--gold); cursor: grabbing; }
+.build-item.unaffordable { opacity: 0.42; }
+/* No room left under the town center's building limit. Same dimming as being
+   unable to afford it — it is the same answer: not this one, not yet. */
+.build-item.at-limit { opacity: 0.42; cursor: not-allowed; }
+.build-icon { display: block; width: 40px; height: 40px; image-rendering: pixelated; }
+.build-name {
+  display: block; font-size: 0.58rem; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.build-cost { display: block; font-size: 0.62rem; color: var(--gold); }
+.build-item.unaffordable .build-cost { color: #c58e6a; }
+
+/* ---- Training on the roster ---- */
+
+.troop-portrait { position: relative; width: 100%; }
+/* Grey covers what has not been trained yet and recedes as it is — a queue you
+   read at a glance rather than a number you have to find. */
+.troop-progress {
+  position: absolute; left: 0; right: 0; top: 0;
+  background: rgba(210, 215, 225, 0.42);
+  pointer-events: none;
+  transition: height .12s linear;
+}
+.troop-queue {
+  position: absolute; bottom: 0; left: 3px;
+  font-size: 0.62rem; font-weight: bold; color: var(--gold);
+  text-shadow: 0 0 3px #000, 0 1px 0 #000;
+  pointer-events: none;
+}
+.troop-slot.untrainable { cursor: default; }
+.troop-slot.untrainable .troop-portrait { filter: grayscale(1); opacity: 0.5; }
+.troop-slot.unaffordable .troop-portrait { opacity: 0.62; }
+
+/* Spell faces are objects rather than cards, so the panel behind them does the
+   framing. */
+.card-spell .card-face {
+  background: radial-gradient(ellipse at 50% 45%, #2a3550 0%, #10131f 70%);
+}
+
+/* Taller than it was: the list is one row per kind of building now rather than
+   one per building, so the whole of an empire's works fits without scrolling
+   where it used to run off the bottom after four banks. */
+/* The buildings list is the build bar now — see .build-item .count. */
+
+/* ---- The race ability ----------------------------------------------------
+   Deliberately not styled as a card. A card is something you drew and might
+   not have; this is the one power every empire is guaranteed, and it reads
+   better as a labelled button than as a face in a hand.
+
+   Where it sits, and everything about its colour, is under #ability-dock —
+   this is only what is true of it wherever it is drawn. */
+.ability-sigil { line-height: 1; text-shadow: 0 0 12px #e3b23c66; }
+/* Empty and invisible while the ability is idle, so the dock does not jump by
+   a line every time one runs out. */
+.ability-timer { min-height: 1.1em; font-weight: bold; opacity: 0; }
+.ability-timer.on { opacity: 1; }
+#ability-btn.armed { filter: brightness(1.35); }
+/* Which power a race brings, on the menu card, under the stat line. */
+.race-ability { display: block; margin-top: 0.3rem; color: var(--gold); font-size: 0.62rem; }
+
+/* ---- The lobby -----------------------------------------------------------
+   Same full-bleed overlay as the draft, because it is the same kind of moment:
+   the map is already behind it and the match is simply held. */
+/* flex-start plus auto margins, not align-items:center. Centring a child that
+   is taller than the scroll container puts its top edge above the scroll
+   origin, and the browser will not scroll up to reach it — so once the map
+   preview and the sides box made this screen tall enough to overflow, the room
+   code went off the top and could not be scrolled back to. Auto margins centre
+   it when it fits and let it scroll properly when it does not. */
+#lobby {
+  position: fixed; inset: 0; z-index: 16;
+  display: flex; align-items: flex-start; justify-content: center;
+  background: radial-gradient(ellipse at 50% 45%, rgba(20, 12, 6, 0.86) 0%, rgba(8, 5, 3, 0.96) 75%);
+  overflow-y: auto;
+}
+#lobby.hidden { display: none; }
+#lobby-inner { text-align: center; width: 440px; max-width: 94vw; padding: 1rem; margin: auto; }
+#lobby h1 {
+  color: var(--gold); letter-spacing: 10px; font-size: 1.8rem; margin: 0 0 0.3rem;
+  text-shadow: 0 0 20px #ff9a3c55, 0 3px 0 #000;
+}
+.lobby-sub { color: var(--ink); margin: 0 0 0.6rem; letter-spacing: 1px; font-size: 0.8rem; }
+/* The code is the whole reason this screen exists — somebody is reading it out
+   loud to somebody else, so it is the biggest thing on it. */
+/* Stuck to the top of the lobby, because the code is the one thing on this
+   screen somebody is reading out loud to a friend, and it is the thing the
+   panels below push out of view. */
+#lobby-code-bar {
+  position: sticky; top: 0; z-index: 3;
+  padding: 0.4rem 0 0.7rem;
+  background: linear-gradient(to bottom,
+    rgba(9, 6, 3, 0.97) 0%, rgba(9, 6, 3, 0.97) 72%, rgba(9, 6, 3, 0) 100%);
+}
+#lobby-code {
+  display: block; width: 100%;
+  background: none; border: 0; font-family: inherit; cursor: pointer;
+  color: var(--gold); font-size: 3rem; letter-spacing: 14px; font-weight: bold;
+  margin: 0; padding: 0; text-indent: 14px;   /* re-centre against the trailing space */
+  text-shadow: 0 0 26px #ff9a3c66, 0 3px 0 #000;
+  transition: color 120ms;
+}
+#lobby-code:hover { color: #fff3c4; }
+#lobby-code.copied { color: #9ce07a; }
+.lobby-box { text-align: left; margin-bottom: 0.8rem; }
+/* The same heading as the menu''s boxes. These were a bare h2 — browser default,
+   big and white — which was survivable on plain brown and is not inside a gold
+   and lapis frame, where the one loud thing in the box should be the frame. */
+.lobby-box h2 {
+  margin: 0 0 0.4rem;
+  color: var(--gold); font-size: 0.78rem; letter-spacing: 2px;
+  text-transform: uppercase; text-shadow: 0 1px 0 #0009;
+}
+#lobby-players { display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow-y: auto; }
+.lobby-player {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 5px 7px;
+  background: #ffffff10; border: 1px solid #ffffff1a;
+}
+.lobby-player .lobby-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The race colours are tuned for the menu's lit cards; on this near-black
+   overlay the darker ones (orc red especially) sink into it. */
+.lobby-player .lobby-race { font-size: 0.68rem; letter-spacing: 1px; text-transform: uppercase; filter: brightness(1.45); }
+/* The chair, and the seat being held for someone whose connection dropped. */
+.lobby-player .lobby-host { color: var(--gold); font-size: 0.62rem; letter-spacing: 1px; }
+.lobby-player.is-away { opacity: 0.5; }
+.lobby-player .lobby-away { color: #e08a6a; font-size: 0.62rem; letter-spacing: 1px; }
+#lobby-hint { min-height: 1.2em; margin-bottom: 0.7rem; font-size: 0.72rem; }
+.lobby-actions { justify-content: center; }
+/* Only the host has a Start button; everyone else just gets Leave. Every
+   .hidden in this sheet is scoped to its own element, so this one is too. */
+#lobby-start.hidden { display: none; }
+.lobby-actions .btn { flex: 1 1 0; padding: 0 0.8rem; }
+/* Whether a listed game can still be joined at the start line. */
+.room-row .room-live { color: #e08a6a; font-size: 0.62rem; letter-spacing: 1px; }
+.room-row .room-open { color: #7fd07f; font-size: 0.62rem; letter-spacing: 1px; }
+
+/* Seconds until a spent spell charge comes back. Sits opposite the charge
+   count so a card can show "none left" and "back shortly" at once. */
+.recharge-badge {
+  position: absolute; left: 0; bottom: 0; z-index: 2;
+  padding: 0 3px;
+  background: #000000bb; color: #8fd0ff;
+  font-size: 0.55rem; line-height: 1.5;
+}
+
+/* Why the palette prices are not the numbers in the rules: the empire's own
+   cost multiplier, from its race and whatever it drafted. */
+#cost-note { margin: 0.25rem 0 0.1rem; font-size: 0.66rem; color: var(--gold); }
+#cost-note.hidden { display: none; }
+
+
+/* ---- Map picker in the lobby ---- */
+#lobby-map-name { color: var(--gold); letter-spacing: 1px; }
+#lobby-map-blurb { font-size: 0.68rem; line-height: 1.4; margin-bottom: 0.5rem; min-height: 2.4em; }
+#lobby-maps { display: flex; flex-wrap: wrap; gap: 4px; }
+/* Thumbnails, and the caveat that goes with them: the maps are procedural, so
+   what is drawn is a map this generator made rather than the one about to be
+   played. Both are built from the real generator on a fixed seed, so they
+   cannot drift from the maps they describe. The gold rings are the starting
+   positions, which is the half of a map that is chosen rather than rolled. */
+#lobby-map-preview {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+  border: 2px solid var(--ink-dark);
+  margin-bottom: 0.4rem;
+}
+.map-sample-note { font-size: 0.6rem; opacity: 0.72; margin-bottom: 0.5rem; }
+.map-choice {
+  flex: 1 1 30%;
+  font-size: 0.6rem;
+  padding: 3px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  line-height: 1.2;
+}
+.map-thumb {
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+  display: block;
+}
+.map-choice-name { display: block; }
+.room-row .room-map { color: var(--ink); font-size: 0.62rem; }
+
+/* ---- Minimap ---- */
+/* Opposite corner from the log, which owns the bottom left. Sized at 1:1
+   with its own canvas — one pixel a tile — so the pixels stay square and
+   the whole 240x160 world is legible without any scaling at all. */
+/* ---- The race ability, docked on the map ----------------------------------
+   It used to be the fourth heading down a scrolling side panel, which is a bad
+   place for the one button in the game you press because of something that is
+   happening right now: by the time you had scrolled to it the moment had gone.
+   Down here it is in the corner your eye is already in when you are reading a
+   fight, next to the minimap.
+
+   Beside the minimap while there is room beside the minimap. The troop roster
+   is centred along the same edge and grows with the number of unit types, so on
+   a narrow window the two would meet; below about 1440 the dock goes above the
+   minimap instead, which is always free. */
+/* The right edge, read upward: minimap, then the ability, then the hand.
+   These used to sit beside the minimap on a wide window, which is where the
+   troop roster goes now — the ability dock spent a while underneath it,
+   drawn and invisible. One arrangement at every width. */
+#ability-dock {
+  position: absolute; right: 12px; bottom: 212px; z-index: 6;
+  width: 240px;
+  opacity: 0.9; transition: opacity 120ms;
+}
+#ability-dock:hover { opacity: 1; }
+/* The width-dependent variant is gone — see the block above. */
+.ability-head { display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.25rem; cursor: help; }
+#ability-dock .ability-sigil { font-size: 1.1rem; color: var(--gold); }
+#ability-dock .ability-name { font-weight: bold; font-size: 0.74rem; letter-spacing: 1px; color: var(--gold); }
+#ability-dock .btn { width: 100%; min-height: 34px; }
+#ability-dock .ability-timer { font-size: 0.66rem; color: #8fd08f; }
+
+/* ---- The garrison, inside the Town Center card ---------------------------- */
+/* The garrison had a fold-out inside the Town Center card, with a clickable
+   head and a row per kind. There is no card to fold out of; clicking your own
+   keep says it in the log instead — see logGarrison. */
+
+#minimap-wrap {
+  position: absolute; right: 12px; bottom: 12px; z-index: 6;
+  line-height: 0;
+  opacity: 0.88; transition: opacity 120ms;
+}
+#minimap-wrap:hover { opacity: 1; }
+#minimap {
+  display: block; width: 240px; height: 160px;
+  image-rendering: pixelated; cursor: pointer;
+  touch-action: none;          /* a drag steers the camera, not the page */
+}
+/* The troop bar is centred over the map and the minimap is not, so on a
+   narrow window they meet. The minimap is the one that gets out of the way. */
+@media (max-width: 1100px) {
+  #minimap { width: 168px; height: 112px; }
+}
+
+/* ---- Teams ---- */
+#lobby-teams { display: flex; flex-wrap: wrap; gap: 4px; }
+#lobby-team-mine { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 0.45rem; }
+#lobby-team-mine .sub { flex: 1 1 100%; margin-bottom: 0.15rem; }
+.team-choice { flex: 1 1 44%; font-size: 0.62rem; min-height: 26px; padding: 0 0.3rem; }
+/* The side you are on is bordered in its own colour, so the roster above
+   and the button below are obviously the same thing. */
+.team-pick { flex: 1 1 44%; font-size: 0.62rem; min-height: 26px; padding: 0 0.3rem; border-style: solid; border-width: 2px; }
+.team-pick[disabled] { opacity: 0.45; }
+.lobby-team { font-size: 0.62rem; letter-spacing: 1px; margin-right: 0.4rem; }
+
+/* ---- No text selection over the map ---- */
+/* Dragging across the map to pick troops used to sweep up whatever text it
+   passed over — the counts on the troop bar, lines in the log — and once a
+   number is highlighted, right-clicking it opens the browser menu for the
+   selection instead of issuing an order. None of this text is meant to be
+   copied; the room code on the menu screen is, and is left alone. */
+#game-ui, #map-wrap, #hud, #hud-right, #log, #troop-bar, #build-bar, #minimap-wrap, #exit-wrap {
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* ...except the boxes you type numbers into, where selecting the value to
+   overwrite it is the whole interaction. Right-clicking one still stages all
+   of that unit rather than offering paste; that is deliberate. */
+#game-ui input, #game-ui textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* ---- Golem slot ---- */
+/* A unit nobody trains: the slot exists so a golem that marched home can be
+   sent out again, but it stays out of the row until you actually have one. */
+.troop-slot.special.hidden { display: none; }
+.troop-slot.special .build-cost, .troop-slot.special .troop-queue { display: none; }
+
+/* ---- Tooltips -------------------------------------------------------
+   The interface ran on title attributes, which is the browser's tooltip: it
+   waits a second, it renders in the OS style, and on a dark pixel-art game
+   it looks like a stray dialog from another program. One element, moved to
+   the cursor, styled like everything else here. */
+#tip {
+  position: fixed; z-index: 40; pointer-events: none;
+  max-width: 280px; padding: 0.4rem 0.55rem;
+  font-size: 0.7rem; line-height: 1.35; color: var(--parchment);
+  background: #10141c; border: 1px solid #000;
+  box-shadow: inset 0 0 0 1px #ffffff14, 0 3px 10px #0009;
+  white-space: pre-line;
+}
+#tip.hidden { display: none; }
+#tip b { color: var(--gold); font-weight: normal; }
 /* The building popup. Anchored in SCREEN space at the building's own position,
    written by renderBuildingPopup on every frame the camera moves — a panel
    pinned to a thing on the map has to follow it or it is lying about which

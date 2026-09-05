@@ -3,12 +3,14 @@
  "terrain": {
   "grass": "terrain/grass.png",
   "cobble": "terrain/cobble.png",
+  "cobbleDark": "terrain/cobble-dark.png",
   "cliffKit": "terrain/cliffkit.png",
   "cliffKitCols": 4,
   "dirt": "terrain/dirt.png",
   "brush": "terrain/brush.png",
   "bloom": "terrain/bloom.png",
   "pave": "terrain/pave.png",
+  "paveDark": "terrain/pave-dark.png",
   "water": "terrain/water.png",
   "sheetCols": 8,
   "blobLookup": [

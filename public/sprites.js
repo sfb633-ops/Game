@@ -66,7 +66,7 @@ const Sprites = (function () {
   // Paint the whole static map into an offscreen canvas: grass, then earth
   // patches and rock blended over it by autotile, then scenery. Redrawn only
   // when the map itself changes, and blitted with a camera offset each frame.
-  function buildTerrainCanvas(width, height, isMountain, isWater, isCobble, isOccupied, isApron) {
+  function buildTerrainCanvas(width, height, isMountain, isWater, isCobble, isOccupied, isApron, isDarkCobble) {
     const t = TILE();
     const canvas = document.createElement('canvas');
     canvas.width = (width + TERRAIN_PAD * 2) * t;
@@ -133,7 +133,10 @@ const Sprites = (function () {
 
     for (const [sheet, same] of [
       [manifest.terrain.dirt, isEarth],
-      [manifest.terrain.pave, apron],
+      // Two aprons, split by whose ground it is. A compound is all one owner,
+      // so the two never meet and neither has to edge against the other.
+      [manifest.terrain.pave, (x, y) => apron(x, y) && !(isDarkCobble && isDarkCobble(x, y))],
+      [manifest.terrain.paveDark, (x, y) => apron(x, y) && !!(isDarkCobble && isDarkCobble(x, y))],
       [manifest.terrain.brush, isBrush],
       [manifest.terrain.bloom, isBloom],
       [manifest.terrain.water, isLake],
@@ -302,11 +305,18 @@ const Sprites = (function () {
     // Courtyard floors: a plain cobble fill, no blending — the walls round it
     // are what draw its edge. Painted after the blobs so an earth patch that
     // happened to fall inside a compound is covered rather than showing through.
+    // Two pavings: the pale laid stone, and the dark slate the black keeps
+    // stand on. An empire that builds in black stone was flooring its compound
+    // in light grey cobbles, which is the one place on the map where its own
+    // castle and its own ground disagreed about what it is made of.
     const cobble = manifest.terrain.cobble && get(manifest.terrain.cobble);
+    const cobbleDark = manifest.terrain.cobbleDark && get(manifest.terrain.cobbleDark);
     if (cobble) {
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
-          if (paved(x, y)) ctx.drawImage(cobble, (x + P) * t, (y + P) * t);
+          if (!paved(x, y)) continue;
+          const slab = (cobbleDark && isDarkCobble && isDarkCobble(x, y)) ? cobbleDark : cobble;
+          ctx.drawImage(slab, (x + P) * t, (y + P) * t);
         }
       }
     }

@@ -310,16 +310,41 @@ function buildTerrain() {
     // did when the three were recolours of a single hand-classified tileset.
     lookup = built.lookup;
     files[name] = write(built.sheet, 'terrain', name + '.png');
+    // The apron a building stands on, again in the black stone the dark keeps
+    // are built from.
+    //
+    // Darkened rather than cut from another block, and that is not laziness.
+    // The apron is A2 kind 18 — cobble drawn INTO grass, so its edge quadrants
+    // carry grass and a patch of it feathers away instead of ending on a
+    // rectangle. Every dark paving in A2 is solid to the edge: laid as an apron
+    // one would put a hard-edged slab on the lawn, which is the exact thing the
+    // apron exists to avoid. So it is the same stone in less light, by the same
+    // numbers the dark castle's gate is taken down by, which is what makes the
+    // floor and the keep standing on it agree.
+    if (name === 'pave') {
+      files.paveDark = write(
+        ops.mapPixels(built.sheet, (r, g, b, a) => [
+          Math.round(r * 0.5), Math.round(g * 0.52), Math.round(b * 0.56), a]),
+        'terrain', 'pave-dark.png');
+    }
   }
 
   // The courtyard floor: one plain cobble tile, no blending, since a courtyard
   // is always walled and the walls draw its edge.
   const cobbleBlock = rm.blockAt(a2, TILE, 0, 2);
   const cobble = ops.crop(cobbleBlock, TILE / 2, TILE * 1.5, TILE, TILE);
+  // ...and the dark slate the black keeps stand on. A2 block (1,3): the same
+  // kind of laid stone as the pale one and the same size of block, measured at
+  // 80 average brightness against the pale cobble's 117, which is the gap
+  // between the two castles. Picked by rendering all thirty-two of A2's blocks
+  // and looking, not by taking the darkest number — the darkest are fences.
+  const darkBlock = rm.blockAt(a2, TILE, 1, 3);
+  const cobbleDark = ops.crop(darkBlock, TILE / 2, TILE * 1.5, TILE, TILE);
 
   manifest.terrain = {
     grass: write(grass, 'terrain', 'grass.png'),
     cobble: write(cobble, 'terrain', 'cobble.png'),
+    cobbleDark: write(cobbleDark, 'terrain', 'cobble-dark.png'),
     // The pack's own cliff kit, lifted whole: A5 columns 0-3, rows 11-15, as a
     // 4x5 sheet indexed by [col, row - 11].
     //
@@ -341,6 +366,7 @@ function buildTerrain() {
     brush: files.brush,
     bloom: files.bloom,
     pave: files.pave,
+    paveDark: files.paveDark,
     water: files.water,
     sheetCols: cols,
     blobLookup: lookup,
@@ -583,7 +609,15 @@ const COMPOUND_PART = {
 
 // Which sets are the black castle. Their curtain is the pack's dark stone and
 // every pale piece is taken down to match it before the empire's cast goes on.
-const DARK_SETS = new Set(['red', 'purple']);
+//
+// Derived from the races rather than listed again: RACES[x].darkStone is the
+// one place that decides, and the client reads the same flag to floor those
+// empires' courtyards in the matching dark paving. Two lists would have drifted
+// the first time a race changed colour.
+const GAME_CONFIG = require('../config');
+const DARK_SETS = new Set(Object.entries(RACE_BUILDING_SET)
+  .filter(([race]) => (GAME_CONFIG.RACES[race] || {}).darkStone)
+  .map(([, set]) => set));
 
 // The cast is hue and saturation only — lightness is left alone, because
 // lightness is what says "stone" or "iron" and the dark sets have already had

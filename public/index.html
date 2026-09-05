@@ -225,9 +225,16 @@
          it down. The keep's upgrade is in here too, because the keep is a
          building that trains and this is where a building's business is now. -->
     <div id="building-popup" class="frame frame-plate hidden">
-      <div id="bp-title"></div>
+      <!-- The close button is a row item, not an overlay. Floated over the
+           corner it sat on top of the subtitle and clipped it. -->
+      <div id="bp-head">
+        <div id="bp-titles">
+          <div id="bp-title"></div>
+          <div id="bp-sub"></div>
+        </div>
+        <button id="bp-close" class="btn btn-sm" title="Close (Esc)" aria-label="Close">✕</button>
+      </div>
       <div id="bp-body"></div>
-      <button id="bp-close" class="btn btn-sm" title="Close (Esc)" aria-label="Close">✕</button>
     </div>
 
       </div>

@@ -46,7 +46,7 @@ let mapCfg = null, terrain = null, buildCfg = null;
 // real tile size is not known yet. It has to track MAP.tileSize in config.js:
 // guessing low here draws one frame of a world at the wrong scale.
 const MAP_TILE_FALLBACK = 48;
-let buildingTypes = null, unitTypes = null, castleCfg = null;
+let buildingTypes = null, unitTypes = null, castleCfg = null, raceDefs = null;
 let terrainClearCost = 0;  // gold per tile of rock or water bought back
 let latestState = null;
 let armedClear = false;    // buying a tile of rock or water back as open ground
@@ -852,6 +852,9 @@ function onInit(msg) {
   terrain = msg.terrain;
   buildCfg = msg.build;
   buildingTypes = msg.buildingTypes;
+  // Kept because the courtyard needs it: RACES[x].darkStone says which empires
+  // build in black stone, and their compound floor follows their keep.
+  raceDefs = msg.races;
   unitTypes = msg.unitTypes;
   castleCfg = msg.castle;
   cardDefs = msg.cards;
@@ -1618,6 +1621,23 @@ function frame(ts) {
 // no acceleration to lose and no document to make elements with.
 const TERRAIN_CHUNK = 2048;
 
+// Whose courtyard is this, and do they build in black stone?
+//
+// A compound's floor is terrain — one value for every empire — so the tile
+// itself cannot say. The keep standing in it can: courtyards only ever appear
+// around a seat, so the nearest base within the compound's own reach owns the
+// ground, and the race flag says what it is paved with.
+const COURTYARD_REACH = 9;
+function isDarkCourtyard(x, y) {
+  if (!latestState || !latestState.players) return false;
+  let best = null, bestD = COURTYARD_REACH;
+  for (const p of latestState.players) {
+    const d = Math.hypot(p.baseX - x, p.baseY - y);
+    if (d <= bestD) { bestD = d; best = p; }
+  }
+  return !!(best && raceDefs && raceDefs[best.race] && raceDefs[best.race].darkStone);
+}
+
 function buildTerrainLayer() {
   const whole = Sprites.buildTerrainCanvas(
     mapCfg.width, mapCfg.height,
@@ -1625,7 +1645,8 @@ function buildTerrainLayer() {
     (x, y) => terrain[y][x] === 2,        // water
     (x, y) => terrain[y][x] === 3,        // cobbles: a compound's courtyard
     (x, y) => sceneryBlock.has(x + ',' + y),
-    (x, y) => apronSet.has(x + ',' + y));
+    (x, y) => apronSet.has(x + ',' + y),
+    isDarkCourtyard);
 
   terrainChunks = [];
   for (let y = 0; y < whole.height; y += TERRAIN_CHUNK) {
@@ -2946,28 +2967,108 @@ function onCanvasClick(e) {
 
 // ---------- The building popup ----------
 //
-// Everything you can do with a building, at the building. It replaced two
-// things: the cross-and-refund badge that was the only way to pull one down,
-// and the troop row along the bottom that deployed out of an empire-wide pool
-// that no longer exists. Soldiers wait in the building that trained them, so
-// the place to send them out from is the building.
+// Everything you can do with a building, at the building: what it makes, how
+// far along it is, who is waiting inside, how many to send out, and the way to
+// pull it down.
 //
-// Rebuilt from scratch on every state message, which is 5Hz — cheap for a
-// dozen nodes, and it means nothing here can hold a stale count. The one thing
-// that must NOT be rebuilt is the slider's value while a thumb is on it, so it
-// is remembered against the building it belongs to and reset when the selection
-// moves, exactly as the split slider does.
-let bpCount = 1;
-let bpCountFor = null;
+// **Built once, then updated.** The first version rebuilt its innerHTML on
+// every state message, which is five times a second, and that breaks the two
+// things a panel like this is mostly made of. A range input being dragged was
+// destroyed and recreated under the thumb, so it snapped back; a button could
+// be replaced between the press and the release, so the click never landed.
+// Neither reads as "the panel is being rebuilt" — they read as the controls
+// being broken, which is what they were.
+//
+// So the skeleton is made once per selected building, and every frame after
+// that writes only text, widths and disabled flags. Nothing that can be under a
+// finger is ever replaced.
+//
+// The shape follows what a production building shows in an RTS: what it makes
+// and what that costs, a bar and a countdown for the one in progress, the rest
+// of the queue as slots, what is standing inside, and the way out. The
+// countdown especially — a build with no timer is a build you sit and stare at.
+let bpKey = null;        // which building the skeleton was built for
+let bpCount = 1;         // the Send slider's value, remembered across frames
+let bpDragging = false;  // ...and held still while a thumb is on it
+
+const BP_QUEUE_SLOTS = 5;
 
 function bpUnitName(type) {
   return (unitTypes && unitTypes[type] && unitTypes[type].name) || type;
 }
 
-// Screen position of a building, in the same transform render() draws with.
+// What a FINISHED building of this type turns out. The keep is not in
+// buildingTypes — it is the thing you start with — so it is named separately.
+function trainsWhat(type) {
+  if (type === 'castle') return castleCfg && castleCfg.trains;
+  return ((buildingTypes && buildingTypes[type]) || {}).trains;
+}
+
 function buildingScreenPos(b) {
   const ts = mapCfg.tileSize;
   return { x: (b.x * ts - camera.x) * zoom, y: (b.y * ts - camera.y) * zoom };
+}
+
+function buildPopupSkeleton(b) {
+  const body = document.getElementById('bp-body');
+  const trains = trainsWhat(b.type);
+  const isKeep = b.type === 'castle';
+  let slots = '';
+  for (let i = 0; i < BP_QUEUE_SLOTS; i++) slots += '<i class="bp-slot"></i>';
+  const make = trains
+    ? '<div class="bp-make">' +
+        '<div class="bp-makerow">' +
+          '<button class="btn btn-sm" id="bp-train"><span id="bp-trainname"></span>' +
+            '<span class="btn-note" id="bp-cost"></span></button>' +
+          '<div class="bp-queue" id="bp-queue">' + slots + '</div>' +
+        '</div>' +
+        '<div class="bp-prog" id="bp-prog"><i id="bp-progfill"></i>' +
+          '<span id="bp-eta"></span></div>' +
+      '</div>'
+    : '';
+  const upgrade = isKeep
+    ? '<div class="btn-row" id="bp-upgraderow"><button class="btn btn-sm" id="bp-upgrade">' +
+      '<span id="bp-uplabel">Upgrade</span><span class="btn-note" id="bp-upcost"></span></button></div>'
+    : '';
+  const demolish = (!isKeep && !b.builtin)
+    ? '<div class="btn-row bp-danger"><button class="btn btn-danger btn-sm" id="bp-demolish">' +
+      'Pull down<span class="btn-note" id="bp-refund"></span></button></div>'
+    : '';
+  body.innerHTML =
+    '<div class="bp-hp"><i id="bp-hpfill"></i><span id="bp-hptext"></span></div>' +
+    make +
+    '<div class="bp-line" id="bp-inside"></div>' +
+    '<div class="slider-row" id="bp-sendrow">' +
+      '<label for="bp-count">Send</label>' +
+      '<input type="range" id="bp-count" min="1" max="1" step="1" value="1">' +
+      '<output id="bp-count-out">1</output>' +
+    '</div>' +
+    '<div class="btn-row" id="bp-deployrow">' +
+      '<button class="btn btn-primary btn-sm" id="bp-deploy">Deploy</button></div>' +
+    upgrade + demolish;
+
+  // Handlers go on once, with the building's own tile captured. The skeleton is
+  // rebuilt when the SELECTION changes, so these can never point at the wrong
+  // building.
+  const at = { x: b.x, y: b.y, type: b.type };
+  const train = document.getElementById('bp-train');
+  if (train) train.onclick = () => send({ type: 'train', x: at.x, y: at.y, unitType: trains });
+  const up = document.getElementById('bp-upgrade');
+  if (up) up.onclick = () => send({ type: 'upgradeCastle' });
+  const dem = document.getElementById('bp-demolish');
+  if (dem) dem.onclick = () => { send({ type: 'demolish', x: at.x, y: at.y }); closeBuildingPopup(); };
+  const slider = document.getElementById('bp-count');
+  slider.addEventListener('pointerdown', () => { bpDragging = true; });
+  window.addEventListener('pointerup', () => { bpDragging = false; });
+  slider.addEventListener('input', () => {
+    bpCount = Number(slider.value) || 1;
+    document.getElementById('bp-count-out').textContent = bpCount;
+    paintRange(slider);
+  });
+  document.getElementById('bp-deploy').onclick = () => {
+    if (at.type === 'bank') send({ type: 'releaseFromBank', x: at.x, y: at.y, count: bpCount });
+    else send({ type: 'deployFrom', bx: at.x, by: at.y, count: bpCount });
+  };
 }
 
 function renderBuildingPopup() {
@@ -2975,113 +3076,111 @@ function renderBuildingPopup() {
   if (!el) return;
   const b = selectedBuildingLive();
   const me = myPlayer();
-  if (!b || !me || !mapCfg) { el.classList.add('hidden'); bpCountFor = null; return; }
+  if (!b || !me || !mapCfg) { el.classList.add('hidden'); bpKey = null; return; }
 
-  const key = b.x + ',' + b.y;
-  if (bpCountFor !== key) { bpCountFor = key; bpCount = 1; }
+  const key = b.x + ',' + b.y + ':' + b.type;
+  if (bpKey !== key) { bpKey = key; bpCount = 1; buildPopupSkeleton(b); }
 
   const def = buildingTypes[b.type];
   const isKeep = b.type === 'castle';
-  const trains = isKeep ? (castleCfg && castleCfg.trains) : (def && def.trains);
-  const ready = b.ready || 0;
-  const name = isKeep ? 'Town Center' : (def ? def.name : b.type);
+  const isBank = b.type === 'bank';
+  const trains = trainsWhat(b.type);
 
-  const title = document.getElementById('bp-title');
-  title.innerHTML = name +
-    (isKeep ? '<span class="bp-sub">Level ' + (b.level || 1) + '</span>' : '');
+  document.getElementById('bp-title').textContent =
+    isKeep ? 'Town Center' : (def ? def.name : b.type);
+  const sub = isKeep ? 'Level ' + (b.level || 1)
+    : b.underConstruction ? 'Going up — ' + Math.ceil(b.remainingSec || 0) + 's of work left'
+    : '';
+  const subEl = document.getElementById('bp-sub');
+  subEl.textContent = sub;
+  subEl.hidden = !sub;
 
-  const rows = [];
-  if (b.underConstruction) {
-    rows.push('<div class="bp-line">Still going up — ' + Math.ceil(b.remainingSec || 0) + 's left.</div>');
-  } else {
-    if (trains) {
-      const st = (me.training && me.training[trains]) || {};
-      const cost = unitTypes[trains] ? priceFor(unitTypes[trains].cost) : 0;
-      rows.push('<div class="bp-line">Trains <b>' + bpUnitName(trains) + '</b>' +
-        (st.capacity ? ' — queue ' + (st.queued || 0) + '/' + st.capacity : '') + '</div>');
-      rows.push('<div class="btn-row"><button class="btn btn-sm" id="bp-train"' +
-        (me.gold < cost || st.full ? ' disabled' : '') + '>Train<span class="btn-note">' +
-        cost + 'g</span></button></div>');
-      rows.push('<div class="bp-line"><b>' + ready + '</b> waiting inside</div>');
-    }
-    if (b.type === 'bank') {
-      const holds = def && def.holds;
-      rows.push('<div class="bp-line"><b>' + (b.stored || 0) + '</b> of ' + holds +
-        ' villagers inside, earning <b>' +
-        ((b.stored || 0) * (def.incomePerWorker || 0)) + '/s</b></div>');
-      if (!b.stored) {
-        rows.push('<div class="bp-line">Right-click it with villagers to put them to work.</div>');
-      }
-    }
-    const out = b.type === 'bank' ? (b.stored || 0) : ready;
-    if (out > 0) {
-      if (bpCount > out) bpCount = out;
-      rows.push('<div class="slider-row"><label for="bp-count">Send</label>' +
-        '<input type="range" id="bp-count" min="1" max="' + out + '" step="1" value="' + bpCount + '">' +
-        '<output id="bp-count-out">' + bpCount + '</output></div>');
-      rows.push('<div class="btn-row"><button class="btn btn-primary btn-sm" id="bp-deploy">' +
-        (b.type === 'bank' ? 'Send out' : 'Deploy') + '</button></div>');
-    }
-    if (isKeep && castleCfg && (b.level || 1) < castleCfg.maxLevel) {
-      const up = priceFor(castleCfg.upgradeCost[b.level || 1]);
-      rows.push('<div class="btn-row"><button class="btn btn-sm" id="bp-upgrade"' +
-        (me.gold < up ? ' disabled' : '') + '>Upgrade<span class="btn-note">' + up + 'g</span></button></div>');
+  // Health, because a panel that never mentions it is one you have to close to
+  // find out whether the thing is still standing.
+  const hpPct = b.maxHp ? Math.max(0, Math.min(1, b.hp / b.maxHp)) : 1;
+  document.getElementById('bp-hpfill').style.width = (hpPct * 100).toFixed(1) + '%';
+  document.getElementById('bp-hptext').textContent = b.hp + ' / ' + b.maxHp;
+
+  if (trains) {
+    const cost = unitTypes[trains] ? priceFor(unitTypes[trains].cost) : 0;
+    const st = (me.training && me.training[trains]) || {};
+    document.getElementById('bp-trainname').textContent = bpUnitName(trains);
+    document.getElementById('bp-cost').textContent = cost + 'g';
+    const t = document.getElementById('bp-train');
+    t.disabled = !!b.underConstruction || me.gold < cost || !!st.full;
+
+    // The queue as slots, the way a production building shows it: one lit per
+    // thing waiting, so its depth is a shape rather than a number to read.
+    const queued = b.trainQueueLen || 0;
+    const slots = document.getElementById('bp-queue').children;
+    for (let i = 0; i < slots.length; i++) slots[i].classList.toggle('on', i < queued);
+
+    const prog = document.getElementById('bp-prog');
+    if (queued > 0 && b.trainTotal > 0) {
+      const left = Math.max(0, b.trainRemaining || 0);
+      const pct = Math.max(0, Math.min(1, 1 - left / b.trainTotal));
+      prog.hidden = false;
+      document.getElementById('bp-progfill').style.width = (pct * 100).toFixed(1) + '%';
+      document.getElementById('bp-eta').textContent = Math.ceil(left) + 's';
+    } else {
+      prog.hidden = true;
     }
   }
-  if (!isKeep && !b.builtin) {
-    const refund = def ? Math.floor(priceFor(def.cost) / 3) : 0;
-    rows.push('<div class="btn-row bp-danger"><button class="btn btn-danger btn-sm" id="bp-demolish">' +
-      'Pull down<span class="btn-note">+' + refund + 'g</span></button></div>');
-  }
-  document.getElementById('bp-body').innerHTML = rows.join('');
 
-  // Wiring. Fresh nodes every render, so the handlers go on fresh too.
-  const train = document.getElementById('bp-train');
-  if (train) train.onclick = () => send({ type: 'train', x: b.x, y: b.y, unitType: trains });
-  const up = document.getElementById('bp-upgrade');
-  if (up) up.onclick = () => send({ type: 'upgradeCastle' });
-  const dem = document.getElementById('bp-demolish');
-  if (dem) dem.onclick = () => { send({ type: 'demolish', x: b.x, y: b.y }); closeBuildingPopup(); };
-  const slider = document.getElementById('bp-count');
-  if (slider) {
+  // Who is inside, and the way out.
+  const inside = isBank ? (b.stored || 0) : (b.ready || 0);
+  const insideEl = document.getElementById('bp-inside');
+  insideEl.innerHTML = isBank
+    ? '<b>' + inside + '</b> of ' + ((def && def.holds) || 0) + ' villagers inside, earning <b>' +
+      (inside * ((def && def.incomePerWorker) || 0)) + '/s</b>'
+    : '<b>' + inside + '</b> waiting inside';
+  insideEl.hidden = !trains && !isBank;
+
+  const sendRow = document.getElementById('bp-sendrow');
+  const deployRow = document.getElementById('bp-deployrow');
+  sendRow.hidden = deployRow.hidden = inside <= 0;
+  if (inside > 0 && !bpDragging) {
+    // Never moved while a thumb is on it: a max that changes under a drag is
+    // how a slider ends up fighting the hand holding it.
+    const slider = document.getElementById('bp-count');
+    if (bpCount > inside) bpCount = inside;
+    if (slider.max !== String(inside)) slider.max = String(inside);
+    if (slider.value !== String(bpCount)) slider.value = String(bpCount);
+    document.getElementById('bp-count-out').textContent = bpCount;
     paintRange(slider);
-    slider.oninput = () => {
-      bpCount = Number(slider.value) || 1;
-      document.getElementById('bp-count-out').textContent = bpCount;
-      paintRange(slider);
-    };
+    document.getElementById('bp-deploy').textContent = isBank ? 'Send out' : 'Deploy';
   }
-  const go = document.getElementById('bp-deploy');
-  if (go) go.onclick = () => {
-    if (b.type === 'bank') send({ type: 'releaseFromBank', x: b.x, y: b.y, count: bpCount });
-    else send({ type: 'deployFrom', bx: b.x, by: b.y, count: bpCount });
-  };
 
-  // Anchored to the building, then kept on screen. A panel pinned to something
-  // on the map has to follow it, or it is lying about which building it is for.
-  //
-  // It sits BESIDE and ABOVE the base line, never below it. Troops come out of
-  // the door and stand two tiles south, which is precisely the ground a panel
-  // centred on the building covers — so the first thing you did after training
-  // a worker was hide him behind the window you trained him in, and the only
-  // evidence anything had happened was the gold going down.
+  if (isKeep) {
+    const row = document.getElementById('bp-upgraderow');
+    const maxed = !castleCfg || (b.level || 1) >= castleCfg.maxLevel;
+    row.hidden = maxed;
+    if (!maxed) {
+      const upCost = priceFor(castleCfg.upgradeCost[b.level || 1]);
+      document.getElementById('bp-upcost').textContent = upCost + 'g';
+      document.getElementById('bp-uplabel').textContent =
+        b.upgrading ? 'Upgrading… ' + Math.ceil(b.remainingSec || 0) + 's' : 'Upgrade';
+      document.getElementById('bp-upgrade').disabled = me.gold < upCost || !!b.upgrading;
+    }
+  }
+  const refund = document.getElementById('bp-refund');
+  if (refund && def) refund.textContent = '+' + Math.floor(priceFor(def.cost) / 3) + 'g';
+
+  // Beside the building and ABOVE its base line, never below it: troops come
+  // out of the door and stand two tiles south, and a panel centred on the
+  // building covers exactly that ground.
   el.classList.remove('hidden');
   const pos = buildingScreenPos(b);
-  const w = el.offsetWidth || 220, h = el.offsetHeight || 160;
+  const w = el.offsetWidth || 236, h = el.offsetHeight || 200;
   const ts = mapCfg.tileSize * zoom;
   const pad = 8;
   let left = pos.x + ts * 0.8;
   if (left + w + pad > canvas.width) left = pos.x - w - ts * 0.8;
-  // Bottom edge a little above the doorstep.
   let top = pos.y - h - ts * 0.35;
-  // If that puts it off the top — a building near the top of the view — drop it
-  // below the exit instead of over it.
   if (top < pad) top = pos.y + ts * 2.6;
   el.style.left = Math.max(pad, Math.min(canvas.width - w - pad, left)) + 'px';
   el.style.top = Math.max(pad, Math.min(canvas.height - h - pad, top)) + 'px';
 }
-
-document.getElementById('bp-close').addEventListener('click', () => closeBuildingPopup());
 
 function closeBuildingPopup() {
   selectedBuilding = null;
