@@ -1759,6 +1759,89 @@ function addSceneryFootprint(b, race) {
     for (let tx = tx0; tx <= tx1; tx++) sceneryBlock.add(tx + ',' + ty);
 }
 
+// ---------- Tracks between buildings ----------
+//
+// A compound with nothing joining its buildings is a set of objects standing on
+// a surface. What makes the artist's own towns read as PLACES is that everything
+// is connected: dirt tracks and stone walks run door to door and out through the
+// gate. A path is also honest about the simulation — troops walk out of doors
+// and workers cross to the seams, so a worn line along those routes is
+// describing something that actually happens.
+//
+// **A camp can never grow a road home, structurally.** Taking one sets
+// `capturedBy` and leaves it in `aiCamps`; it is never moved into
+// `player.buildings`, and `player.buildings` is the only thing walked here. So
+// the case is excluded by the shape of the data rather than by a distance test
+// that could be got wrong.
+//
+// The build radius is a second guard, for the player's OWN buildings: a track
+// grows only to one standing on the keep's ground. Placement already confines
+// them to territory, so it should never fire — but a compound is a thing with an
+// edge, and saying so costs one line.
+//
+// **And a track is only laid where there is no paving.** A dirt path across a
+// stone courtyard is not a path, it is a stain. Inside a compound the aprons
+// have already joined up and the ground is continuous; the track appears where
+// that runs out.
+let pathTiles = new Map();       // 'x,y' -> the clock time this tile appears
+const PATH_LAY_STEP = 0.045;     // seconds between one tile going down and the next
+
+// A staircase from one tile to another, stepping along whichever axis has
+// further to go. It reads as a diagonal worn across open ground rather than as
+// two sides of a rectangle, which is what an L-shaped route would give.
+function trackBetween(from, to) {
+  const out = [];
+  let x = from.x, y = from.y, guard = 0;
+  while ((x !== to.x || y !== to.y) && guard++ < 80) {
+    out.push({ x, y });
+    if (Math.abs(to.x - x) > Math.abs(to.y - y)) x += Math.sign(to.x - x);
+    else y += Math.sign(to.y - y);
+  }
+  out.push({ x: to.x, y: to.y });
+  return out;
+}
+
+// Rebuild the network, keeping the times already assigned so an existing track
+// does not re-lay itself every time a state message arrives. Only genuinely new
+// tiles get a time, and they get it in ORDER along their run — which is what
+// makes a road appear to be laid rather than to switch on.
+function rebuildPaths(msg) {
+  const next = new Map();
+  for (const p of msg.players) {
+    if (p.id !== myId || !p.buildings) continue;
+    const keep = p.buildings.find(b => b.type === 'castle');
+    if (!keep || !castleCfg) continue;
+    const radius = castleCfg.buildRadius[(keep.level || 1) - 1] || castleCfg.buildRadius[0];
+    const gate = { x: keep.x, y: keep.y + 2 };
+    for (const b of p.buildings) {
+      if (!b.type || b.type === 'castle' || b.type === 'wall' || b.builtin) continue;
+      if (Math.hypot(b.x - keep.x, b.y - keep.y) > radius) continue;
+      const run = trackBetween({ x: b.x, y: b.y + 1 }, gate);
+      run.forEach((t, i) => {
+        const key = t.x + ',' + t.y;
+        if (next.has(key)) return;
+        // Paving already joins these two; a track would be laid over stone.
+        if (apronSet.has(key) || occupiedSet.has(key)) return;
+        if (!isMarchable(t.x, t.y)) return;          // never over water or rock
+        next.set(key, pathTiles.has(key) ? pathTiles.get(key) : clock + i * PATH_LAY_STEP);
+      });
+    }
+  }
+  pathTiles = next;
+}
+
+// The tiles that have been laid so far. Autotiled against the WHOLE network, so
+// a run does not re-edge itself as it grows.
+function drawPaths() {
+  if (!pathTiles.size || !mapCfg) return;
+  const inNetwork = (x, y) => pathTiles.has(x + ',' + y);
+  for (const [key, at] of pathTiles) {
+    if (clock < at) continue;
+    const c = key.indexOf(',');
+    Sprites.drawPathTile(ctx, +key.slice(0, c), +key.slice(c + 1), inNetwork);
+  }
+}
+
 function rebuildTileSets(msg) {
   wallSet = new Set(); occupiedSet = new Set(); rubbleSet = new Set();
   sceneryBlock = new Set(); apronSet = new Set(); campYardSet = new Set();
@@ -2076,6 +2159,11 @@ function render() {
     if (k.x > vx1 || k.y > vy1 || k.x + k.w < vx0 || k.y + k.h < vy0) continue;
     ctx.drawImage(k.cv, t0 + k.x, t0 + k.y);
   }
+
+  // The tracks, over the baked ground and under everything that stands on it.
+  // Not baked with the rest because they are LAID — a tile at a time as a
+  // building goes up — and a baked layer can only switch on.
+  drawPaths();
 
   // ---- My territory ----
   // Just the boundary, not a wash over every buildable tile: the terrain art is
@@ -4665,6 +4753,7 @@ function onState(msg) {
   }
   latestState = msg;
   rebuildTileSets(msg);
+  rebuildPaths(msg);        // after the tile sets: it reads the aprons
   // Scenery is cleared from under whatever gets built, so a new wall or a
   // razed one means the ground layer is out of date.
   if (assetsReady && occupancyChanged()) buildTerrainLayer();

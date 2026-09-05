@@ -63,6 +63,33 @@ const Sprites = (function () {
       (tx + TERRAIN_PAD) * t, (ty + TERRAIN_PAD) * t, t, t);
   }
 
+  // One tile of trodden path, drawn in WORLD space rather than into the terrain
+  // canvas.
+  //
+  // Paths are the one piece of ground that is not baked with the rest. They are
+  // laid a tile at a time when a building goes up, so they have to be drawn per
+  // frame while that is happening — and there are only ever a few dozen of them,
+  // which is nothing beside what the renderer already does each frame.
+  //
+  // `isPath` is the whole network, not just what is visible yet: a tile has to
+  // autotile against its finished neighbours or the run would re-edge itself as
+  // it grew, and each new tile would visibly change the one behind it.
+  //
+  // Terrain tiles are centred on their coordinate — the canvas is blitted at
+  // terrainOrigin(), which is half a tile up and left — so a tile at (tx, ty)
+  // covers world pixels from (tx - 0.5) to (tx + 0.5).
+  function drawPathTile(ctx, tx, ty, isPath) {
+    const sheet = manifest.terrain.dirt;
+    if (!sheet || !ready(sheet)) return false;
+    const t = TILE();
+    const mask = ArtDefs.blobMask(isPath, tx, ty);
+    const cell = ArtDefs.pickBlobCell(manifest.terrain.blobLookup, mask, ArtDefs.tileHash(tx, ty, 11));
+    const cols = manifest.terrain.sheetCols;
+    ctx.drawImage(get(sheet), (cell % cols) * t, Math.floor(cell / cols) * t, t, t,
+      Math.round((tx - 0.5) * t), Math.round((ty - 0.5) * t), t, t);
+    return true;
+  }
+
   // Paint the whole static map into an offscreen canvas: grass, then earth
   // patches and rock blended over it by autotile, then scenery. Redrawn only
   // when the map itself changes, and blitted with a camera offset each frame.
@@ -954,7 +981,7 @@ const Sprites = (function () {
     get manifest() { return manifest; },
     image: get,
     isReady: ready,
-    buildTerrainCanvas, terrainOrigin,
+    buildTerrainCanvas, terrainOrigin, drawPathTile,
     drawBuilding, drawBuildingDoor, drawBuildingFire, drawBanner, buildingDef, drawWall, groundShadow,
     drawUnit, drawArmy,
     drawSmoke,
