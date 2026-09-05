@@ -66,6 +66,59 @@ for (const [fn, where, source] of [
   check(`${where} calls ${fn}`, source.includes(`${fn}(`));
 }
 
+// The stylesheet does not contain a copy of itself.
+//
+// A bad write doubled style.css — the whole file again, minus its first two
+// characters, so the second copy opened with a comment body and no /*. CSS does
+// not fail loudly: the parser threw away what it could not read, recovered
+// somewhere in the middle, and applied a stale second copy of every rule on top
+// of the new ones. Every specificity tie then went to the OLDER rule, because it
+// was now written later — which is a debugging session that begins by doubting
+// the rule you just wrote. Balanced comment markers alone would not catch it.
+{
+  const css = fs.readFileSync(path.join(SRC, 'style.css'), 'utf8');
+  const opens = (css.match(/\/\*/g) || []).length, closes = (css.match(/\*\//g) || []).length;
+  check('style.css comments are balanced', opens === closes, `${opens} open, ${closes} close`);
+
+  const lines = css.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 12);
+  const RUN = 20;                    // long enough that no two blocks share it honestly
+  const seen = new Map();
+  let echo = null;
+  for (let i = 0; i + RUN <= lines.length && !echo; i++) {
+    const run = lines.slice(i, i + RUN).join('\n');
+    if (seen.has(run)) echo = { first: seen.get(run), again: i };
+    else seen.set(run, i);
+  }
+  check('  and no block of it is written twice', !echo,
+    echo ? `${RUN} lines repeat (near "${lines[echo.again].slice(0, 46)}")`
+         : `${lines.length} rules, no run of ${RUN} repeats`);
+}
+
+// Every order the server takes in a match has something in the client that
+// sends it.
+//
+// This is the shape of a bug that hides completely. cmdStoreInBank was written,
+// dispatched in server.js, given an arrival branch in the tick and a message of
+// its own — and nothing in the browser ever sent it, so putting villagers in a
+// bank was simply not a thing you could do. Every piece looked right on its own
+// and the feature did not exist. A command with no caller is a feature with no
+// way in.
+//
+// Whitelisted: 'trainUnit' picks the building for you, which is what a headless
+// caller needs and the opposite of what the UI does — you click the barracks
+// you meant.
+const HEADLESS_ONLY = new Set(['trainUnit']);
+{
+  const server = fs.readFileSync(path.join(SRC, '..', 'server.js'), 'utf8');
+  const inMatch = server.slice(server.indexOf("case 'build':"));
+  const accepts = [...inMatch.matchAll(/case '([a-zA-Z]+)':/g)].map(m => m[1]);
+  const sends = new Set([...client.matchAll(/type:\s*'([a-zA-Z]+)'/g)].map(m => m[1]));
+  const orphans = accepts.filter(c => !HEADLESS_ONLY.has(c) && !sends.has(c));
+  check('every in-match order the server takes is one the client can send',
+    orphans.length === 0,
+    orphans.length ? `no caller: ${orphans.join(', ')}` : `${accepts.length} orders`);
+}
+
 // The server thinks five times a second; the canvas draws sixty. Two calls hold
 // the interpolation that bridges the gap, and the order of them is the whole
 // trick: trackSmoothing has to read the positions the server reported, and

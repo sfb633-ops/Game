@@ -3130,9 +3130,14 @@ function renderBuildingPopup() {
   // Who is inside, and the way out.
   const inside = isBank ? (b.stored || 0) : (b.ready || 0);
   const insideEl = document.getElementById('bp-inside');
+  // A bank with room in it says how to fill it. Storing is a right-click order
+  // on the building, and nothing on screen would otherwise suggest it exists —
+  // the feature is invisible until somebody happens to try the one gesture.
+  const room = isBank ? ((def && def.holds) || 0) - inside : 0;
   insideEl.innerHTML = isBank
     ? '<b>' + inside + '</b> of ' + ((def && def.holds) || 0) + ' villagers inside, earning <b>' +
-      (inside * ((def && def.incomePerWorker) || 0)) + '/s</b>'
+      (inside * ((def && def.incomePerWorker) || 0)) + '/s</b>' +
+      (room > 0 ? '<span class="bp-hint">Right-click the bank with villagers selected to send them in.</span>' : '')
     : '<b>' + inside + '</b> waiting inside';
   insideEl.hidden = !trains && !isBank;
 
@@ -3214,6 +3219,21 @@ function hitsBuilding(b, x, y) {
     return dx >= -f.left && dx <= f.right && dy >= -f.up && dy <= f.down;
   }
   return withinBuilding(b, x, y);
+}
+
+// One of my buildings standing under this tile, optionally of a given type.
+// Right-click needs this for the same reason left-click does: a building
+// answers across the whole of its artwork, not just its anchor tile.
+function myBuildingAt(x, y, type) {
+  const me = myPlayer();
+  if (!me || !me.buildings) return null;
+  return me.buildings.find(b => b.type && (!type || b.type === type) && hitsBuilding(b, x, y)) || null;
+}
+
+// Room left in a bank, by the same arithmetic the server uses.
+function bankRoom(b) {
+  const def = buildingTypes && buildingTypes.bank;
+  return Math.max(0, ((def && def.holds) || 0) - (b.stored || 0));
 }
 
 // The building you have selected, as a live state object — or null if it has
@@ -3359,6 +3379,33 @@ function onCanvasRightClick(e) {
     // Right-clicking a group you have selected now means what it means
     // everywhere else: go there. Merging is right-clicking a group you have
     // NOT selected, which is a thing you have to mean.
+    // A bank of mine under the cursor with villagers in hand: they walk over
+    // and go inside. Storing has to be an order you GIVE — the server will not
+    // take a crew that merely walked past a bank, because workers cross their
+    // own ground constantly and a route home that clipped the corner of a
+    // treasury would swallow them silently.
+    //
+    // Checked before the merge below: a group standing on the bank makes a
+    // right-click on it ambiguous, and "put my miners in" is the reading you
+    // meant, every time, on a building whose whole purpose is holding them.
+    const bank = myBuildingAt(fx, fy, 'bank');
+    const diggers = bank ? commanding.filter(a => unitTypes[a.type] && unitTypes[a.type].worker) : [];
+    // An unfinished bank is a building site, and a right-click with workers on
+    // a building site means go and raise it. Storing waits until it stands.
+    if (bank && !bank.underConstruction && diggers.length) {
+      if (bankRoom(bank) > 0) {
+        for (const a of diggers) send({ type: 'storeInBank', armyId: a.id, x: bank.x, y: bank.y });
+        // Anybody else in the selection was not invited. They march to the bank
+        // and wait outside, rather than being told off once per group.
+        const stored = new Set(diggers.map(a => a.id));
+        for (const a of commanding) if (!stored.has(a.id)) send({ type: 'moveArmy', armyId: a.id, x: bank.x, y: bank.y });
+        return;
+      }
+      // Full. Say so and let the march below carry them there anyway: a click
+      // that produces nothing at all reads as a click that did not land.
+      log(`That bank is full — it holds ${bankRoom(bank) + (bank.stored || 0)}.`);
+    }
+
     const friend = nearestMyArmy(fx, fy, 0.9);
     if (friend && !ids.includes(friend)) {
       for (const id of ids) if (id !== friend) send({ type: 'mergeArmy', armyId: id, targetId: friend });
