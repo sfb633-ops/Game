@@ -19,13 +19,24 @@
 // fidelity — and becomes regenerable and versioned like every other building
 // instead of being a screenshot nobody can reproduce.
 //
-// THE FORMAT
+// THE FORMAT, both of them
 //
-// Godot 4 stores a TileMapLayer's cells as a flat PackedInt32Array of triples:
+// The old TileMap node keeps a flat PackedInt32Array of triples:
 //
 //   [0]  the coordinate:  (y << 16) | x, each a signed 16-bit
 //   [1]  the atlas cell:  (atlas_y << 16) | atlas_x
 //   [2]  the source:      (alternative << 16) | source_id
+//
+// A modern TileMapLayer keeps a base64 PackedByteArray instead: a two-byte
+// header, then twelve bytes a cell, little-endian —
+//
+//   int16 x, int16 y, uint16 source_id, uint16 atlas_x, uint16 atlas_y,
+//   uint16 alternative
+//
+// Reading only the first is how this tool concluded that two saved castles were
+// empty and told Seth to save files he had already saved. The scenes carry both
+// kinds: one legacy TileMap node with stale contents, and four TileMapLayers
+// with the actual castle in them.
 //
 // source_id indexes the layer's TileSet `sources/N`, which names a
 // TileSetAtlasSource, which names an ExtResource, which is the PNG.
@@ -64,23 +75,52 @@ function parseScene(file) {
     if (m) {
       const srcs = {};
       for (const s of b.matchAll(/sources\/(\d+) = SubResource\("([^"]+)"\)/g)) srcs[+s[1]] = s[2];
-      sets[m[1]] = srcs;
+      // How far apart the cells are placed, which is NOT the size of the art in
+      // them. Godot omits tile_size when it is the default, and the default is
+      // 16 — so evilcastle, which has no tile_size line at all, lays 48px tiles
+      // on a 16px grid. Stepping by the art size instead scattered the whole
+      // castle into a grid of disconnected tiles with gaps between them.
+      const ts = b.match(/tile_size = Vector2i\((\d+), (\d+)\)/);
+      sets[m[1]] = { srcs, step: ts ? +ts[1] : 16 };
       continue;
     }
     m = b.match(/^\[node name="([^"]+)" type="(TileMapLayer|TileMap)"/);
     if (m) {
       const setId = b.match(/tile_set = SubResource\("([^"]+)"\)/);
-      // A TileMapLayer keeps one array; the older TileMap node keeps one per
-      // layer_N. Both appear in these scenes.
-      const datas = [...b.matchAll(/(?:layer_\d+\/)?tile_data = PackedInt32Array\(([^)]*)\)/g)]
-        .map(d => d[1].split(',').map(v => parseInt(v.trim(), 10)).filter(v => !isNaN(v)));
       const pos = b.match(/position = Vector2\(([-\d.]+), ([-\d.]+)\)/);
-      for (const data of datas) {
-        if (data.length) layers.push({
-          name: m[1], set: setId && setId[1], data,
-          ox: pos ? Math.round(+pos[1]) : 0, oy: pos ? Math.round(+pos[2]) : 0,
-        });
+      const at = {
+        set: setId && setId[1],
+        ox: pos ? Math.round(+pos[1]) : 0,
+        oy: pos ? Math.round(+pos[2]) : 0,
+      };
+      const cells = [];
+
+      // The modern form: base64, twelve bytes a cell after a two-byte header.
+      const packed = b.match(/tile_map_data = PackedByteArray\("([^"]*)"\)/);
+      if (packed && packed[1]) {
+        const buf = Buffer.from(packed[1], 'base64');
+        for (let o = 2; o + 12 <= buf.length; o += 12) {
+          cells.push({
+            x: buf.readInt16LE(o), y: buf.readInt16LE(o + 2),
+            source: buf.readUInt16LE(o + 4),
+            ax: buf.readUInt16LE(o + 6), ay: buf.readUInt16LE(o + 8),
+          });
+        }
       }
+
+      // The legacy form, one array per layer_N on an old TileMap node.
+      for (const d of b.matchAll(/(?:layer_\d+\/)?tile_data = PackedInt32Array\(([^)]*)\)/g)) {
+        const a = d[1].split(',').map(v => parseInt(v.trim(), 10)).filter(v => !isNaN(v));
+        for (let i = 0; i + 2 < a.length; i += 3) {
+          cells.push({
+            x: int16(a[i] & 0xFFFF), y: int16((a[i] >> 16) & 0xFFFF),
+            source: a[i + 2] & 0xFFFF,
+            ax: a[i + 1] & 0xFFFF, ay: (a[i + 1] >> 16) & 0xFFFF,
+          });
+        }
+      }
+
+      if (cells.length) layers.push({ name: m[1], ...at, cells });
       continue;
     }
   }
@@ -114,20 +154,44 @@ function run(sceneName, outRel) {
   const cells = [];
   const missing = new Set();
   const skipped = new Set();
-  let cellsSeen = 0;
+  let cellsSeen = 0, ground = 0;
+  // The scene has ground under the castle — the author needed something to see
+  // it against — and a building sprite must not carry its own lawn with it. A1
+  // and A2 are RPG Maker's ground sheets: animated water and floors. Nothing a
+  // keep is built from comes off either. `--ground` keeps them, for looking at
+  // the scene as the author sees it.
+  const keepGround = process.argv.includes('--ground');
+  const isGroundSheet = (rel) => /Fantasy_Outside_A[12](_|\.)/.test(rel);
+
   for (const layer of scene.layers) {
-    const srcs = scene.sets[layer.set] || {};
-    for (let i = 0; i + 2 < layer.data.length; i += 3) {
-      const c = layer.data[i], a = layer.data[i + 1], s = layer.data[i + 2];
-      const x = int16(c & 0xFFFF), y = int16((c >> 16) & 0xFFFF);
-      const ax = a & 0xFFFF, ay = (a >> 16) & 0xFFFF;
-      const sourceId = s & 0xFFFF;
+    const set = scene.sets[layer.set] || { srcs: {}, step: 48 };
+    const srcs = set.srcs;
+    const step = set.step;
+    for (const c of layer.cells) {
       cellsSeen++;
-      const at = scene.atlas[srcs[sourceId]];
-      if (!at) { skipped.add(`${layer.name}: source ${sourceId}`); continue; }
+      // A legacy TileMap node keeps its old layer_0 data but, once Godot has
+      // migrated it into child TileMapLayers, is left holding a cut-down TileSet
+      // that no longer has the source ids that data refers to. The cells are
+      // still real — the good keep's entire curtain wall is twenty of them,
+      // asking for a source 8 that its tileset no longer contains.
+      //
+      // When the set is down to a SINGLE source there is only one thing those
+      // cells can mean, so it is used. That resolves the wall to A5's pale
+      // ashlar, which is what it is. Searching the scene's other tilesets for a
+      // matching id was tried first and is wrong: it found a source 8 belonging
+      // to a different set and drew ivy across the gatehouse.
+      let atlasId = srcs[c.source];
+      if (!atlasId) {
+        const only = Object.values(srcs);
+        if (only.length === 1) atlasId = only[0];
+      }
+      const at = scene.atlas[atlasId];
+      if (!at) { skipped.add(`${layer.name}: source ${c.source}`); continue; }
       const rel = scene.ext[at.ext];
       if (!rel) { missing.add(`${layer.name}: ext ${at.ext}`); continue; }
-      cells.push({ x, y, ax, ay, rel, w: at.w, h: at.h, ox: layer.ox, oy: layer.oy });
+      if (!keepGround && isGroundSheet(rel)) { ground++; continue; }
+      cells.push({ x: c.x, y: c.y, step, ax: c.ax, ay: c.ay, rel, w: at.w, h: at.h,
+        ox: layer.ox, oy: layer.oy });
     }
   }
   if (!cells.length) {
@@ -145,11 +209,10 @@ function run(sceneName, outRel) {
     return;
   }
 
-  const T = 48;
-  const x0 = Math.min(...cells.map(c => c.x * T + c.ox));
-  const y0 = Math.min(...cells.map(c => c.y * T + c.oy));
-  const x1 = Math.max(...cells.map(c => c.x * T + c.ox + c.w));
-  const y1 = Math.max(...cells.map(c => c.y * T + c.oy + c.h));
+  const x0 = Math.min(...cells.map(c => c.x * c.step + c.ox));
+  const y0 = Math.min(...cells.map(c => c.y * c.step + c.oy));
+  const x1 = Math.max(...cells.map(c => c.x * c.step + c.ox + c.w));
+  const y1 = Math.max(...cells.map(c => c.y * c.step + c.oy + c.h));
   const out = ops.blank(x1 - x0, y1 - y0);
 
   let drawn = 0;
@@ -157,7 +220,7 @@ function run(sceneName, outRel) {
     const img = load(c.rel);
     if (!img) { missing.add(c.rel); continue; }
     ops.drawOver(out, ops.crop(img, c.ax * c.w, c.ay * c.h, c.w, c.h),
-      c.x * T + c.ox - x0, c.y * T + c.oy - y0);
+      c.x * c.step + c.ox - x0, c.y * c.step + c.oy - y0);
     drawn++;
   }
 
@@ -173,6 +236,7 @@ function run(sceneName, outRel) {
   }
   console.log(`${sceneName}: ${scene.layers.length} layers, ${drawn} of ${cells.length} cells drawn`);
   console.log(`  -> ${dest}  ${img.width}x${img.height}`);
+  if (ground) console.log(`  ${ground} ground cells left out (--ground keeps them)`);
   console.log(`  ${solid} solid, ${soft} soft-edged pixels` +
     (soft ? '' : '  <-- no anti-aliasing: something is wrong'));
   if (missing.size) console.log('  missing: ' + [...missing].slice(0, 6).join(', '));
