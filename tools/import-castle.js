@@ -67,8 +67,15 @@ function parseScene(file) {
     let m = b.match(/^\[sub_resource type="TileSetAtlasSource" id="([^"]+)"\]/);
     if (m) {
       const tex = b.match(/texture = ExtResource\("([^"]+)"\)/);
+      // Godot omits texture_region_size when it is the default, and the default
+      // is 16 — the same trap as tile_size below, and this one was got wrong.
+      // Defaulting to 48 sent evilcastle's twenty-four gatehouse-base cells to
+      // atlas (18,28) at 48px on a 768x720 sheet that only has 16x15 cells of
+      // that size. They cropped clean off the edge, drew nothing, and were
+      // counted as drawn — which is why the dark keep had a hole under its gate
+      // and the import cheerfully reported 232 of 232.
       const size = b.match(/texture_region_size = Vector2i\((\d+), (\d+)\)/);
-      atlas[m[1]] = { ext: tex && tex[1], w: size ? +size[1] : 48, h: size ? +size[2] : 48 };
+      atlas[m[1]] = { ext: tex && tex[1], w: size ? +size[1] : 16, h: size ? +size[2] : 16 };
       continue;
     }
     m = b.match(/^\[sub_resource type="TileSet" id="([^"]+)"\]/);
@@ -215,12 +222,24 @@ function run(sceneName, outRel) {
   const y1 = Math.max(...cells.map(c => c.y * c.step + c.oy + c.h));
   const out = ops.blank(x1 - x0, y1 - y0);
 
-  let drawn = 0;
+  let drawn = 0, srcSoft = 0;
+  const offSheet = new Set();
   for (const c of cells) {
     const img = load(c.rel);
     if (!img) { missing.add(c.rel); continue; }
-    ops.drawOver(out, ops.crop(img, c.ax * c.w, c.ay * c.h, c.w, c.h),
-      c.x * c.step + c.ox - x0, c.y * c.step + c.oy - y0);
+    // A crop that runs off the texture comes back transparent rather than
+    // failing, so a cell pointing at a tile that is not there draws nothing and
+    // looks exactly like a cell that drew air. That is how a hole opened in the
+    // dark keep's foot while the run reported every cell drawn.
+    if (c.ax * c.w + c.w > img.width || c.ay * c.h + c.h > img.height) {
+      offSheet.add(`${c.rel.replace(/.*\//, '')} has no cell ${c.ax},${c.ay} at ${c.w}px`);
+      continue;
+    }
+    const cell = ops.crop(img, c.ax * c.w, c.ay * c.h, c.w, c.h);
+    for (let p = 3; p < cell.data.length; p += 4) {
+      if (cell.data[p] > 8 && cell.data[p] <= 250) srcSoft++;
+    }
+    ops.drawOver(out, cell, c.x * c.step + c.ox - x0, c.y * c.step + c.oy - y0);
     drawn++;
   }
 
@@ -237,14 +256,36 @@ function run(sceneName, outRel) {
   console.log(`${sceneName}: ${scene.layers.length} layers, ${drawn} of ${cells.length} cells drawn`);
   console.log(`  -> ${dest}  ${img.width}x${img.height}`);
   if (ground) console.log(`  ${ground} ground cells left out (--ground keeps them)`);
-  console.log(`  ${solid} solid, ${soft} soft-edged pixels` +
-    (soft ? '' : '  <-- no anti-aliasing: something is wrong'));
+  // Zero soft-edged pixels is exactly what a keyed-out screenshot looks like,
+  // and replacing those is why this tool exists — but it is ALSO what a
+  // composite of hard-alpha pixel art legitimately looks like. evilcastle is 55
+  // distinct cells of A3, A4, Big_Decoration and door1 that between them hold
+  // not one partly-transparent pixel, and the flat warning called that broken.
+  // Compare against the source instead: anti-aliasing the cells HAD and the
+  // composite lost is a compositing bug; never having had any is just the art.
+  console.log(`  ${solid} solid, ${soft} soft-edged pixels (source cells had ${srcSoft})` +
+    (srcSoft && !soft ? '  <-- the source was anti-aliased and the composite lost it' : ''));
   if (missing.size) console.log('  missing: ' + [...missing].slice(0, 6).join(', '));
+  if (offSheet.size) {
+    console.log(`  ${cells.length - drawn} cells point off their sheet and drew nothing:`);
+    for (const o of [...offSheet].slice(0, 6)) console.log('    ' + o);
+  }
 }
 
+// Where each scene lands by default, which is where build-assets.js looks for
+// that faction's keep. Two folders rather than one, because the build picks a
+// keep by taking the first PNG in a directory: a flat folder holding both would
+// hand the same castle to everybody.
+const DEFAULT_OUT = {
+  Goodcastle: 'CastleImport/pale/keep.png',   // human and elf
+  evilcastle: 'CastleImport/dark/keep.png',   // orc and undead
+};
+
 if (require.main === module) {
-  const [scene, out] = process.argv.slice(2);
+  // Flags are filtered out so `import-castle.js Goodcastle --ground` does not
+  // take "--ground" as the output path and write a file by that name.
+  const [scene, out] = process.argv.slice(2).filter(a => !a.startsWith('--'));
   if (!scene) { console.log('usage: node tools/import-castle.js <SceneName> [out.png]'); process.exit(1); }
-  run(scene, out || `CastleImport/${scene}.png`);
+  run(scene, out || DEFAULT_OUT[scene] || `CastleImport/${scene}.png`);
 }
 module.exports = { run, parseScene };
