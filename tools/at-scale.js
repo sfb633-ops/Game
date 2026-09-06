@@ -169,6 +169,12 @@ function committedAssets() {
 function run(argv) {
   const wantBefore = argv.includes('--before');
   const all = argv.includes('--all');
+  // Human was hardcoded, which meant half the buildings in the game could not
+  // be looked at with this tool at all: orc and undead take the dark stone and
+  // a different keep entirely, so "I checked it at 1:1" was only ever true of
+  // the pale set. `--race=orc` picks the other one.
+  const raceArg = argv.find(a => a.startsWith('--race='));
+  const race = raceArg ? raceArg.slice(7) : 'human';
   const types = argv.filter(a => !a.startsWith('--'));
   const subjects = all ? ['barracks', 'bank', 'stable', 'siege', 'camp'] : (types.length ? types : ['camp']);
   if (!fs.existsSync(OUT)) fs.mkdirSync(OUT, { recursive: true });
@@ -189,10 +195,10 @@ function run(argv) {
     // The subject, then the things it is judged against. The keep first,
     // because that is the yardstick.
     const row = [
-      { kind: 'building', type: 'castle', opts: { race: 'human', level: 1 }, label: 'keep' },
-      { kind: 'building', type, opts: { race: 'human' }, fire: type === 'camp', label: type },
-      { kind: 'building', type: type === 'barracks' ? 'bank' : 'barracks', opts: { race: 'human' }, label: 'neighbour' },
-      { kind: 'unit', race: 'human', unit: 'swordsman', label: 'soldier' },
+      { kind: 'building', type: 'castle', opts: { race, level: 1 }, label: 'keep' },
+      { kind: 'building', type, opts: { race }, fire: type === 'camp', label: type },
+      { kind: 'building', type: type === 'barracks' ? 'bank' : 'barracks', opts: { race }, label: 'neighbour' },
+      { kind: 'unit', race, unit: 'swordsman', label: 'soldier' },
     ];
     const probe = strip(Sprites, row, 40, 10);
     const wTiles = probe.usedW + 1, hTiles = 10;

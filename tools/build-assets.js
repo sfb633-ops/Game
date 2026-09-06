@@ -432,42 +432,89 @@ function buildShadow(img, ...outParts) {
   const H = box.y1 + 1;                      // the sprite stands on its bbox foot
   const shH = Math.max(4, Math.round(H * SHADOW_SQUASH));
   const lean = Math.round(H * SHADOW_SHEAR);
-  const w = img.width + lean, h = shH;
+  // Where each COLUMN of the sprite meets the ground.
+  //
+  // One flat base line across the whole sprite is what made buildings float.
+  // Most of these do not have a flat foot: the stable's body stands 20px above
+  // its feed barrel, the camp's hut 37-48px above the props scattered in front
+  // of it, the dark keep's walls above the steps at its gate. Anchoring every
+  // column to the sprite's LOWEST pixel started the shadow that far below where
+  // most of the building actually stands, and the band of lit ground left
+  // between a wall and its own shadow is exactly what reads as levitation.
+  //
+  // A column whose lowest pixel is far above the base is not standing on the
+  // ground — it is a roof eave, or the spike of a tower over the notch between
+  // two of them, and its shadow belongs on the ground beneath it rather than
+  // hanging in the air at its own height. The evil keep has columns 250px up.
+  // One TILE is the cut: this game's ground is a 48px grid, and more than a
+  // tile above the base is a storey up, not a foot. Those columns fall back to
+  // the base line and behave exactly as they always did.
+  const foot = new Int32Array(img.width).fill(-1);
+  for (let x = 0; x < img.width; x++) {
+    for (let y = H - 1; y >= 0; y--) {
+      if (img.data[(y * img.width + x) * 4 + 3] > 40) { foot[x] = y; break; }
+    }
+  }
+  let topRow = H - 1;
+  for (let x = 0; x < img.width; x++) {
+    if (foot[x] < 0) continue;
+    if (foot[x] < H - 1 - TILE) foot[x] = H - 1;
+    if (foot[x] < topRow) topRow = foot[x];
+  }
+
+  const w = img.width + lean, h = shH + (H - 1 - topRow);
   const mask = new Float32Array(w * h);
-  // Row 0 of the shadow IS the building's foot, and rows below it are further
-  // out along the ground. Light comes from the upper left on every sheet in
-  // this pack, so the shadow falls down and to the right — which means it lies
-  // BELOW the base line on screen, not above it.
-  for (let sy = 0; sy < h; sy++) {
+  // How far each shadow pixel is from the foot that cast it. Once feet are at
+  // different heights that is no longer the same thing as its row, and the
+  // falloff has to be measured from the foot or a low prop's shadow washes out
+  // for being further down the image rather than further along the ground.
+  const span = new Float32Array(w * h);
+  // Row 0 of a column's shadow IS that column's foot, and rows below it are
+  // further out along the ground. Light comes from the upper left on every
+  // sheet in this pack, so the shadow falls down and to the right — which means
+  // it lies BELOW the base line on screen, not above it.
+  //
+  // This used to sample H - 1 - height. H is one past the sprite's last opaque
+  // row, so row 0 sampled a row BELOW the building and found nothing — the
+  // shadow was missing exactly where it matters, at the foot. foot[] holds the
+  // contact row itself, so it needs no correction and cannot drift out from
+  // under the building again.
+  for (let sy = 0; sy < shH; sy++) {
     const height = sy / SHADOW_SQUASH;       // how high up the sprite this came from
-    // H is one past the sprite's last opaque row, so row 0 of the shadow was
-    // sampling a row BELOW the building and finding nothing. The shadow was
-    // missing exactly where it matters — at the foot, where the thing touches
-    // the ground — which is most of why buildings read as floating on the
-    // cobble rather than standing on it.
-    const srcY = Math.round(H - 1 - height);
-    if (srcY < 0 || srcY >= img.height) continue;
     const shift = Math.round(height * SHADOW_SHEAR);
     for (let sx = 0; sx < w; sx++) {
       const srcX = sx - shift;
-      if (srcX < 0 || srcX >= img.width) continue;
-      if (img.data[(srcY * img.width + srcX) * 4 + 3] > 40) mask[sy * w + sx] = 1;
+      if (srcX < 0 || srcX >= img.width || foot[srcX] < 0) continue;
+      const srcY = Math.round(foot[srcX] - height);
+      if (srcY < 0 || srcY >= img.height) continue;
+      const row = foot[srcX] - topRow + sy;
+      if (row >= h) continue;
+      if (img.data[(srcY * img.width + srcX) * 4 + 3] > 40) {
+        const i = row * w + sx;
+        mask[i] = 1;
+        span[i] = sy;
+      }
     }
   }
-  // Soften. Two cheap box passes read better than one wide one.
-  let cur = mask;
+  // Soften. Two cheap box passes read better than one wide one. The distance
+  // field rides through the same blur, weighted by the mask, so an empty
+  // neighbour cannot drag a pixel's distance towards zero and darken the edge.
+  let cur = mask, curSpan = span;
   for (let pass = 0; pass < 2; pass++) {
     const next = new Float32Array(w * h);
+    const nextSpan = new Float32Array(w * h);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      let sum = 0, n = 0;
+      let sum = 0, n = 0, wsum = 0;
       for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
         const nx = x + dx, ny = y + dy;
         if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-        sum += cur[ny * w + nx]; n++;
+        const k = ny * w + nx;
+        sum += cur[k]; n++; wsum += cur[k] * curSpan[k];
       }
       next[y * w + x] = sum / n;
+      nextSpan[y * w + x] = sum > 0 ? wsum / sum : curSpan[y * w + x];
     }
-    cur = next;
+    cur = next; curSpan = nextSpan;
   }
   const out = ops.blank(w, h);
   // Fade with distance from the foot. A shadow is darkest and sharpest where the
@@ -475,11 +522,15 @@ function buildShadow(img, ...outParts) {
   // one flat opacity it comes out as a grey slab with a straight edge, which is
   // what a flat roofline projects to and what it looked like on the map. The
   // falloff costs nothing and is the difference between a shadow and a shape.
+  // Measured from the foot that cast each pixel, not from the top of the image.
+  // With feet at different heights those differ, and fading by row would wash
+  // out a low prop's shadow for sitting further down the image rather than for
+  // running further out along the ground.
   for (let sy = 0; sy < h; sy++) {
-    const far = sy / Math.max(1, h - 1);
-    const fade = 1 - far * far * 0.55;
     for (let sx = 0; sx < w; sx++) {
       const i = sy * w + sx;
+      const far = Math.min(1, curSpan[i] / Math.max(1, shH - 1));
+      const fade = 1 - far * far * 0.55;
       out.data[i * 4 + 3] = Math.round(Math.min(1, cur[i]) * 255 * SHADOW_ALPHA * fade);
     }
   }
@@ -488,8 +539,11 @@ function buildShadow(img, ...outParts) {
     w, h,
     // Where the sprite's own foot sits inside this image, so the caller can line
     // the two up without knowing how the projection was done. The foot is the
-    // TOP edge here, since the shadow runs away from the building.
-    anchorX: Math.round(img.width / 2), anchorY: 0,
+    // TOP edge here, since the shadow runs away from the building — but where a
+    // building stands at more than one height the image starts at the HIGHEST
+    // foot, which is above the sprite's lowest pixel, and the client lifts it by
+    // that much. Zero for anything whose lowest pixel really is its contact.
+    anchorX: Math.round(img.width / 2), anchorY: H - 1 - topRow,
   };
 }
 
@@ -802,10 +856,21 @@ function buildFromSource(type, setName) {
 // in; CASTLE.footprint in config.js reserves the ground under it and has to be
 // re-measured if KEEP_TILES_WIDE moves.
 const KEEP_TILES_WIDE = 6;
-// Drop a PNG in any of these and it becomes that faction's keep. Several names
-// for the pale one because the folder is made by hand and the name it happens
-// to be made under is not worth being strict about.
-const KEEP_DIRS = { dark: ['CastleEvil'], pale: ['goodcastle', 'CastleStone', 'CastleGood'] };
+// Drop a PNG in any of these and it becomes that faction's keep, first match
+// wins. Several names for the pale one because the folder is made by hand and
+// the name it happens to be made under is not worth being strict about.
+//
+// CastleImport/ is written by tools/import-castle.js, which rebuilds each keep
+// out of the pack's own tiles by reading the Godot scene it was assembled in.
+// It comes first because the folders under it are the same castles without the
+// screenshot: the old exports were keyed out of an editor capture and had
+// 344,530 fully opaque pixels and not one partly transparent one, so every edge
+// was a hard alpha cut. The screenshots stay behind them as a fallback — empty
+// CastleImport/ and the previous keeps come straight back.
+const KEEP_DIRS = {
+  dark: ['CastleImport/dark', 'CastleEvil'],
+  pale: ['CastleImport/pale', 'goodcastle', 'CastleStone', 'CastleGood'],
+};
 
 function firstPng(dirs) {
   for (const dir of [].concat(dirs)) {
@@ -914,9 +979,16 @@ function buildKeep(setName) {
   }
   const box = ops.bbox(img);
   if (box) img = ops.crop(img, box.x0, box.y0, box.w, box.h);
+  // How far the keep art is about to shrink. The gate is drawn to the same
+  // scale as the keep — both are the pack's 48px tiles — so it has to shrink by
+  // the same factor or it arrives half again too big. That is exactly what was
+  // happening: a 432px keep came down to 288 and the 144x192 gate went on at
+  // full size, which is half the width of the whole castle and 14px taller than
+  // it, so the portcullis swallowed the gatehouse and buried the front steps.
+  const keepScale = (KEEP_TILES_WIDE * TILE) / img.width;
   img = fitW(img, KEEP_TILES_WIDE * TILE);
   const def = describeBuilding(img, 'buildings', setName, 'castle.png');
-  const gate = buildKeepGate(img, setName);
+  const gate = buildKeepGate(img, setName, keepScale);
   if (gate) def.gate = gate;
   return def;
 }
@@ -941,38 +1013,78 @@ const GATE_FW = 144, GATE_FH = 192, GATE_COLS = 3, GATE_ROWS = 4;
 
 // The bounding box of everything darker than `max` — an arch opening in both
 // the gate frame and the keep.
-function darkBox(img, max, x0, y0, x1, y1) {
+// `rowOk`, when given, drops whole rows before any pixel in them is counted —
+// used to keep a keep's front steps out of its doorway measurement.
+function darkBox(img, max, x0, y0, x1, y1, rowOk) {
   let ax = 1e9, ay = 1e9, bx = -1, by = -1;
-  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+  for (let y = y0; y < y1; y++) { if (rowOk && !rowOk(y)) continue; for (let x = x0; x < x1; x++) {
     const i = (y * img.width + x) * 4;
     if (img.data[i + 3] < 128) continue;
     const l = 0.299 * img.data[i] + 0.587 * img.data[i + 1] + 0.114 * img.data[i + 2];
     if (l > max) continue;
     if (x < ax) ax = x; if (x > bx) bx = x;
     if (y < ay) ay = y; if (y > by) by = y;
-  }
+  } }
   return bx < 0 ? null : { x: ax, y: ay, w: bx - ax + 1, h: by - ay + 1 };
 }
 
-function buildKeepGate(img, setName) {
+function buildKeepGate(img, setName, keepScale = 1) {
   const src = decodePNG(need(path.join(WINLU, 'characters', GATE_SHEET)));
-  const inner = darkBox(src, 95, 0, 0, GATE_FW, GATE_FH);
-  // The keep's own opening: dark, low down, and near the middle.
-  // Tight to the lower middle. Opened wider than this it catches the shadow
-  // under the statues and the dark inside the tower tops, and the gate lands
-  // forty pixels high.
-  const arch = darkBox(img, 70, Math.round(img.width * 0.30), Math.round(img.height * 0.55),
-    Math.round(img.width * 0.70), img.height);
-  if (!inner || !arch) return null;
-  // A keep with no archway of about the right size has no gate to raise.
-  if (Math.abs(arch.h - inner.h) > inner.h * 0.35) return null;
+  const fw = Math.max(1, Math.round(GATE_FW * keepScale));
+  const fh = Math.max(1, Math.round(GATE_FH * keepScale));
+
+  // The keep's own doorway. Threshold 32, not 70: on the pale keep 70 also
+  // takes the shading under the statues, and on the dark keep the WALLS sit at
+  // 48-63, so 70 swallowed the entire castle and the box that came out was just
+  // the search window — 116 wide in a window 116 wide, bottom clipped to the
+  // image edge. Both keeps put their gateway alone below 32.
+  //
+  // Only the centre and the bottom of this box are used. The dark keep's box
+  // still picks up the near-black roof block above its gate, which makes the
+  // width and height meaningless — but the castle is symmetric, so the centre
+  // is right anyway, and the lowest dark pixel is the foot of the doorway.
+  // Size no longer comes from here at all; it comes from keepScale.
+  //
+  // And it must be ENCLOSED. A gateway is a hole in a wall, so there is
+  // building to the left and right of it; a flight of steps in front of the
+  // gate is not, and the dark keep's steps are near-black stone that this
+  // threshold reads as more doorway. They dragged the measured bottom down to
+  // the foot of the sprite and stood the whole stone arch on the grass with the
+  // steps hidden behind it. So a row only counts when there are opaque pixels
+  // OUTSIDE the search band on both sides — true of every row the gateway
+  // passes through, false of the steps, which are narrower than the band.
+  const bandL = Math.round(img.width * 0.30), bandR = Math.round(img.width * 0.70);
+  const arch = darkBox(img, 32, bandL, Math.round(img.height * 0.50), bandR, img.height,
+    (y) => {
+      let l = false, r = false;
+      for (let x = 0; x < bandL; x++) if (img.data[(y * img.width + x) * 4 + 3] > 128) { l = true; break; }
+      for (let x = bandR; x < img.width; x++) if (img.data[(y * img.width + x) * 4 + 3] > 128) { r = true; break; }
+      return l && r;
+    });
+  if (!arch) return null;
 
   const frames = GATE_COLS * GATE_ROWS;
-  const strip = ops.blank(frames * GATE_FW, GATE_FH);
+  let strip = ops.blank(frames * GATE_FW, GATE_FH);
   for (let f = 0; f < frames; f++) {
     const c = f % GATE_COLS, r = Math.floor(f / GATE_COLS);
     ops.blit(strip, ops.crop(src, c * GATE_FW, r * GATE_FH, GATE_FW, GATE_FH), f * GATE_FW, 0);
   }
+  // Frame by frame, so a resize cannot smear one frame's edge into the next.
+  if (fw !== GATE_FW || fh !== GATE_FH) {
+    const scaled = ops.blank(frames * fw, fh);
+    for (let f = 0; f < frames; f++) {
+      ops.blit(scaled, ops.resize(ops.crop(strip, f * GATE_FW, 0, GATE_FW, GATE_FH), fw, fh), f * fw, 0);
+    }
+    strip = scaled;
+  }
+
+  // Where the opening sits inside a frame, measured on the LAST frame — the
+  // fully raised gate, whose hole has no bars across it. Frame 0 is the shut
+  // one and its lit bars break the opening into pieces.
+  const open = darkBox(ops.crop(strip, (frames - 1) * fw, 0, fw, fh), 40, 0, 0, fw, fh);
+  if (!open) return null;
+  // A keep whose doorway is far narrower than the gate has no gateway to fill.
+  if (arch.w < open.w * 0.6) return null;
   // A pale stone arch dropped into the evil castle read as somebody else's
   // gateway bolted on. The dark keeps get the same darkening their walls do;
   // the pale ones are left alone, because their keep is untinted grey and the
@@ -983,10 +1095,15 @@ function buildKeepGate(img, setName) {
   const shaded = DARK_SETS.has(setName)
     ? ops.mapPixels(strip, (r, g, b, a) => [Math.round(r * 0.5), Math.round(g * 0.52), Math.round(b * 0.56), a])
     : strip;
+  // Centred on the doorway and standing on its floor. Aligning the two boxes
+  // corner to corner was what the old code did, and it only worked while the
+  // measured arch happened to be the size of the gate; the gateway is drawn to
+  // reach the bottom of its frame, so the frame's foot is the doorway's foot.
   return {
     file: write(shaded, 'buildings', setName, 'castle_gate.png'),
-    frames, w: GATE_FW, h: GATE_FH,
-    x: arch.x - inner.x, y: arch.y - inner.y,
+    frames, w: fw, h: fh,
+    x: Math.round(arch.x + arch.w / 2 - (open.x + open.w / 2)),
+    y: arch.y + arch.h - fh,
   };
 }
 

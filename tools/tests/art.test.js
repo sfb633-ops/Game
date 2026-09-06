@@ -183,6 +183,62 @@ const COMPOSED = new Set(['barracks', 'bank', 'stable', 'siege', 'camp']);
     bad.length === 0, bad.slice(0, 4).join('; ') || 'all attached, none starting empty');
 }
 
+// ---- 4b. no lit ground between a building and its own shadow ---------------
+//
+// The check above asks whether the shadow starts at the sprite's foot. This one
+// asks whether it starts at the foot of each COLUMN, which is a different
+// question and the one that had gone wrong.
+//
+// Most of these buildings do not have a flat bottom. The stable's body stands
+// 20px above its feed barrel, the camp's hut 37-48px above the props in front
+// of it, the dark keep's walls above the steps at its gate. A shadow projected
+// from one flat base line begins that far below where most of the building
+// actually stands, and the strip of lit ground left between a wall and its own
+// shadow is exactly what "it looks like it is floating" means. It was on every
+// one of them and nothing was looking for it.
+//
+// Columns more than a tile above the sprite's lowest pixel are skipped: those
+// are eaves and tower spikes, they do not touch the ground, and the generator
+// deliberately falls them back to the base line.
+{
+  const bad = [];
+  for (const { setName, type, def } of everyBuilding()) {
+    if (!def.shadow) continue;
+    const img = load(def.file);
+    const sh = load(def.shadow.file);
+    const fw = def.frames ? def.w : img.width;   // the first frame is enough
+    let tested = 0, missed = 0;
+    for (let x = 0; x < fw; x++) {
+      let foot = -1;
+      for (let y = img.height - 1; y >= 0; y--) if (alphaAt(img, x, y) > 40) { foot = y; break; }
+      if (foot < 0) continue;
+      const drop = def.anchorY - 1 - foot;       // how far this column sits above the bbox foot
+      if (drop <= 0 || drop > 48) continue;
+      tested++;
+      // Where that column's foot lands inside the shadow image once the client
+      // has lifted it by shadow.anchorY.
+      const row = def.shadow.anchorY - drop;
+      let hit = false;
+      for (let dy = 0; dy <= 2 && !hit; dy++) {
+        const r = row + dy;
+        if (r < 0 || r >= sh.height) continue;
+        for (let dx = -2; dx <= 2; dx++) {
+          const sx = x + dx;
+          if (sx >= 0 && sx < sh.width && alphaAt(sh, sx, r) > 0) { hit = true; break; }
+        }
+      }
+      if (!hit) missed++;
+    }
+    // A handful of edge columns fading out under the blur is fine; a base line
+    // in the wrong place misses nearly all of them.
+    if (tested >= 20 && missed / tested > 0.15)
+      bad.push(`${setName}/${type}: ${Math.round(missed / tested * 100)}% of its raised columns `
+        + `(${missed}/${tested}) have no shadow at their own foot`);
+  }
+  check('  and no building has lit ground between it and its shadow', bad.length === 0,
+    bad.slice(0, 4).join('; ') || 'every raised column sits on its shadow');
+}
+
 // ---- 5. the proportions are the artist's -----------------------------------
 //
 // Measured over eighteen buildings in the pack's own sample maps: mean five and
@@ -209,7 +265,7 @@ const COMPOSED = new Set(['barracks', 'bank', 'stable', 'siege', 'camp']);
 {
   const bad = [];
   for (const { setName, type, def } of everyBuilding()) {
-    for (const [what, spec] of [['door', def.door], ['fire', def.fire]]) {
+    for (const [what, spec] of [['door', def.door], ['fire', def.fire], ['gate', def.gate]]) {
       if (!spec || spec.frames < 2) continue;
       const strip = load(spec.file);
       const fw = Math.round(strip.width / spec.frames);
@@ -219,7 +275,19 @@ const COMPOSED = new Set(['barracks', 'bank', 'stable', 'siege', 'camp']);
         for (let y = 0; y < strip.height; y++) for (let x = 0; x < fw; x++) {
           const a = (y * strip.width + x) * 4, b = (y * strip.width + x + f * fw) * 4;
           n++;
-          if (Math.abs(strip.data[a] - strip.data[b]) + Math.abs(strip.data[a + 3] - strip.data[b + 3]) > 40) differ++;
+          // All four channels. It used to be red and alpha only, which failed
+          // the dark keeps' gate the moment this check started covering it:
+          // that strip is darkened to about half before it is written, so a
+          // difference of 60 in the red channel arrives as 30 and fell under
+          // the bar. The portcullis was moving perfectly well. Summed across
+          // RGBA every real strip here differs in 10-43% of its pixels against
+          // a 0.5% threshold, and a strip of identical frames still differs in
+          // none of them, so the margin is wide in both directions.
+          const d = Math.abs(strip.data[a] - strip.data[b])
+                  + Math.abs(strip.data[a + 1] - strip.data[b + 1])
+                  + Math.abs(strip.data[a + 2] - strip.data[b + 2])
+                  + Math.abs(strip.data[a + 3] - strip.data[b + 3]);
+          if (d > 40) differ++;
         }
         if (n && differ / n > 0.005) moved++;
       }
@@ -227,24 +295,31 @@ const COMPOSED = new Set(['barracks', 'bank', 'stable', 'siege', 'camp']);
     }
   }
   check('  and every animated strip has frames that differ', bad.length === 0,
-    bad.slice(0, 4).join('; ') || 'doors and fires all move');
+    bad.slice(0, 4).join('; ') || 'doors, fires and gates all move');
 }
 
 // ---- 7. the overlay lands on the sprite ------------------------------------
 //
 // A door or a fire recorded at an offset outside the building it belongs to
 // draws into empty air, and the sprite underneath looks untouched.
+//
+// The keep's gate is the same kind of overlay and was missing from this list,
+// so nothing objected when the portcullis went on at full size over a keep that
+// had been scaled down: a 144x192 gate at y=159 on a 337px castle, half the
+// width of the whole building and hanging fourteen pixels below its own front
+// steps. Seth found it in a screenshot, which is the job this check exists to
+// do. Both this and the frames-differ check above now cover it.
 {
   const bad = [];
   for (const { setName, type, def } of everyBuilding()) {
-    for (const [what, spec] of [['door', def.door], ['fire', def.fire]]) {
+    for (const [what, spec] of [['door', def.door], ['fire', def.fire], ['gate', def.gate]]) {
       if (!spec) continue;
       if (spec.x < 0 || spec.y < 0 || spec.x + spec.w > def.w + 2 || spec.y + spec.h > def.h + 2)
         bad.push(`${setName}/${type} ${what} at ${spec.x},${spec.y} ${spec.w}x${spec.h} falls outside ${def.w}x${def.h}`);
     }
   }
   check('  and every overlay sits inside the sprite it belongs to', bad.length === 0,
-    bad.slice(0, 4).join('; ') || 'doors and fires all on their buildings');
+    bad.slice(0, 4).join('; ') || 'doors, fires and gates all on their buildings');
 }
 
 console.log(failures ? `\n${failures} FAILURES` : '\nall art checks pass');
