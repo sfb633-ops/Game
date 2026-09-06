@@ -578,4 +578,280 @@ function series({ n, map, A, B, minutes }) {
   return tally;
 }
 
-module.exports = { playMatch, series, POLICIES, Bot, withSeed, decide, runEconomy };
+module.exports = { playMatch, series, POLICIES, Bot, withSeed, decide, runEconomy, fight, unitDuel };
+
+// ---------------------------------------------------------------------------
+// A fight in a field
+// ---------------------------------------------------------------------------
+//
+// For the unit and race questions a whole match is the wrong instrument: it
+// answers "which bot played better" with a lot of noise on top. This puts two
+// forces on open ground facing each other and lets them settle it, which is the
+// same shape as the mirrored cases in invariants.test.js and comparable across
+// runs because nothing else is happening.
+//
+// Both sides are given the order to attack, so neither is credited with the
+// first swing. `openfield` because it is the one map with no mountains by
+// construction — the invariants file relies on that too, and unmirrored rock
+// between two armies would decide fights on its own.
+function fight({ seed = 99, aRace = 'human', bRace = 'human', aUnits, bUnits,
+                 aCards = [], bCards = [], seconds = 240 }) {
+  return withSeed(seed, () => {
+    const m = new Match({ started: false, map: 'openfield', seed });
+    const pa = m.addPlayer('a', aRace, 'A'), pb = m.addPlayer('b', bRace, 'B');
+    m.start();
+    pa.draft = null; pb.draft = null;
+    for (const id of aCards) m.takeCard(pa, id);
+    for (const id of bCards) m.takeCard(pb, id);
+
+    // Midway between the two keeps, a few tiles apart, so nobody is fighting
+    // over their own doorstep and no tower or keep is in range of anything.
+    const cx = Math.round((pa.baseX + pb.baseX) / 2), cy = Math.round((pa.baseY + pb.baseY) / 2);
+    // spawnArmy returns the ID, not the army. Assigning `a.x` to the string it
+    // hands back is silently a no-op in sloppy mode, so the first version of
+    // this put both forces at their keeps, ordered `undefined` to attack, and
+    // reported four untouched minutes as a draw between every pair of units in
+    // the game. Look the group up.
+    const mk = (p, units, x) => {
+      const out = [];
+      for (const [type, n] of Object.entries(units)) {
+        if (!n) continue;
+        const a = m.armies.get(m.spawnArmy(p, type, n, 'hold', { x, y: cy }));
+        a.x = x; a.y = cy; a.destX = x; a.destY = cy;
+        out.push(a);
+      }
+      return out;
+    };
+    const A = mk(pa, aUnits, cx - 3), B = mk(pb, bUnits, cx + 3);
+    for (const a of A) m.cmdAttackArmy('a', a.id, 'army', B[0].id);
+    for (const b of B) m.cmdAttackArmy('b', b.id, 'army', A[0].id);
+
+    for (let t = 0; t < seconds / TICK; t++) {
+      m.tick(TICK);
+      const alive = new Set([...m.armies.values()].filter(x => armyCount(x) > 0).map(x => x.ownerId));
+      if (alive.size < 2) break;
+    }
+    const left = (id) => {
+      let n = 0, hp = 0;
+      for (const x of m.armies.values()) if (x.ownerId === id) { n += armyCount(x); hp += armyHp(x); }
+      return { n, hp: Math.round(hp) };
+    };
+    return { a: left('a'), b: left('b') };
+  });
+}
+
+// Equal GOLD of one unit against equal gold of another, which is the only
+// comparison that means anything when they cost different amounts. Reported as
+// the fraction of its own force the winner walked off with — 0 is a wipe both
+// ways, 1 would be untouched.
+function unitDuel(x, y, gold = 1000, seed = 99) {
+  const nx = Math.max(1, Math.floor(gold / cfg.UNIT_TYPES[x].cost));
+  const ny = Math.max(1, Math.floor(gold / cfg.UNIT_TYPES[y].cost));
+  const r = fight({ seed, aUnits: { [x]: nx }, bUnits: { [y]: ny } });
+  return { x, y, nx, ny, a: r.a, b: r.b,
+    winner: r.a.n > r.b.n ? x : (r.b.n > r.a.n ? y : null),
+    margin: Math.abs(r.a.n / nx - r.b.n / ny) };
+}
+
+// ---------------------------------------------------------------------------
+// The report
+// ---------------------------------------------------------------------------
+//
+// `wilds`, not `openfield`. Openfield seats two empires at (215,80) and (24,80)
+// on EVERY seed — the layout is fixed and only the ore scatter moves — so ten
+// seeds there are close to one trial run ten times, and two deterministic
+// policies produce the same match each time. It reported 10-0 for whichever
+// empire was created first, which reads as a savage seat advantage and is
+// mostly an artifact of asking the same question ten times. On wilds, where
+// the seats move, the same comparison is 7-3 the other way.
+//
+// Every pairing is played in both seat orders regardless, because a seat effect
+// that survives that is a real one and one that does not would otherwise be
+// reported as a strategy difference.
+const REPORT_MAP = 'wilds';
+const REPORT_MINUTES = 16;
+
+function bar(n, d, width = 20) {
+  const filled = d ? Math.round(n / d * width) : 0;
+  return '#'.repeat(filled) + '.'.repeat(width - filled);
+}
+
+function strategies(n) {
+  console.log('\n== Strategies ==================================================');
+  console.log(`${n * 2} matches a pairing on ${REPORT_MAP}, both seat orders, ${REPORT_MINUTES} minute cap.\n`);
+  const names = Object.keys(POLICIES);
+  const score = Object.fromEntries(names.map(k => [k, { w: 0, l: 0, d: 0 }]));
+  for (let i = 0; i < names.length; i++) {
+    for (let j = i + 1; j < names.length; j++) {
+      const A = { policy: names[i] }, B = { policy: names[j] };
+      const t = series({ n, map: REPORT_MAP, A, B, minutes: REPORT_MINUTES });
+      score[names[i]].w += t.aWins; score[names[i]].l += t.bWins; score[names[i]].d += t.draws;
+      score[names[j]].w += t.bWins; score[names[j]].l += t.aWins; score[names[j]].d += t.draws;
+      console.log(`${names[i].padEnd(7)} vs ${names[j].padEnd(7)}  `
+        + `${String(t.aWins).padStart(2)} - ${String(t.bWins).padEnd(2)}`
+        + `${t.draws ? ` (${t.draws} undecided)` : ''}`
+        + `   median ${t.median}s, ${pct(t.kills, t.games)}% ended in a kill`);
+    }
+  }
+  console.log('');
+  for (const k of names) {
+    const g = score[k].w + score[k].l + score[k].d;
+    console.log(`  ${k.padEnd(7)} ${bar(score[k].w, g)} ${String(pct(score[k].w, g)).padStart(3)}% of ${g}`);
+  }
+}
+
+function races(n, policy = 'boom') {
+  console.log(`\n== Races (both sides playing ${policy}) ========================`);
+  console.log(`${n * 2} matches a pairing, both seat orders.\n`);
+  const names = Object.keys(cfg.RACES);
+  const score = Object.fromEntries(names.map(k => [k, { w: 0, g: 0 }]));
+  for (let i = 0; i < names.length; i++) {
+    for (let j = i + 1; j < names.length; j++) {
+      const A = { policy, race: names[i] }, B = { policy, race: names[j] };
+      const t = series({ n, map: REPORT_MAP, A, B, minutes: REPORT_MINUTES });
+      score[names[i]].w += t.aWins; score[names[i]].g += t.games;
+      score[names[j]].w += t.bWins; score[names[j]].g += t.games;
+      console.log(`${names[i].padEnd(7)} vs ${names[j].padEnd(7)}  `
+        + `${String(t.aWins).padStart(2)} - ${String(t.bWins).padEnd(2)}`
+        + `${t.draws ? ` (${t.draws} undecided)` : ''}   median ${t.median}s`);
+    }
+  }
+  console.log('');
+  for (const k of names) {
+    console.log(`  ${k.padEnd(7)} ${bar(score[k].w, score[k].g)} `
+      + `${String(pct(score[k].w, score[k].g)).padStart(3)}% of ${score[k].g}`);
+  }
+}
+
+// Each boon against an empty hand, everything else held equal. Measured this
+// way rather than boon-against-boon because what a card is WORTH is its edge
+// over not having it — and a round robin of 8 boons is 28 pairings, which at
+// this sample size would say less about more.
+function boons(n, policy = 'boom') {
+  console.log(`\n== Boons (one card against an empty hand, both playing ${policy}) ==`);
+  console.log(`${n * 2} matches a card, both seat orders. 50% means the card did nothing.\n`);
+  const ids = Object.keys(cfg.CARDS).filter(k => cfg.CARDS[k].kind === 'boon');
+  const rows = [];
+  for (const id of ids) {
+    const t = series({
+      n, map: REPORT_MAP, minutes: REPORT_MINUTES,
+      A: { policy, cards: [id] }, B: { policy, cards: [] },
+    });
+    rows.push({ id, w: t.aWins, g: t.games, median: t.median });
+  }
+  rows.sort((a, b) => b.w / b.g - a.w / a.g);
+  for (const r of rows) {
+    console.log(`  ${cfg.CARDS[r.id].name.padEnd(20)} ${bar(r.w, r.g)} `
+      + `${String(pct(r.w, r.g)).padStart(3)}%  (${r.w} of ${r.g})`);
+  }
+}
+
+// Equal gold, on open ground, nothing else on the field.
+function units(gold = 1000) {
+  console.log('\n== Units, at equal gold =======================================');
+  console.log(`${gold} gold of each, on open ground, both ordered to attack.\n`);
+  const names = Object.keys(cfg.UNIT_TYPES).filter(k => !cfg.UNIT_TYPES[k].special && !cfg.UNIT_TYPES[k].worker);
+  for (let i = 0; i < names.length; i++) {
+    for (let j = i + 1; j < names.length; j++) {
+      const d = unitDuel(names[i], names[j], gold);
+      const win = d.winner || 'nobody';
+      console.log(`  ${String(d.nx).padStart(3)} ${names[i].padEnd(10)} vs `
+        + `${String(d.ny).padStart(3)} ${names[j].padEnd(10)} -> ${win.padEnd(10)} `
+        + `survivors ${d.a.n}/${d.nx} and ${d.b.n}/${d.ny}`);
+    }
+  }
+  // What each unit is per gold, which is the arithmetic the fights above are
+  // the consequence of. Both sides deal damage in proportion to how many of
+  // them are standing, so an edge here is squared on its way to a result.
+  console.log('\n  per 100 gold:');
+  for (const k of names) {
+    const u = cfg.UNIT_TYPES[k];
+    console.log(`    ${k.padEnd(10)} ${(u.attack / u.cost * 100).toFixed(1).padStart(5)} attack  `
+      + `${(u.hp / u.cost * 100).toFixed(0).padStart(4)} health  `
+      + `${(u.attack * u.hp / u.cost / u.cost * 10000).toFixed(0).padStart(6)} product  speed ${u.speed}`);
+  }
+}
+
+if (require.main === module) {
+  const args = process.argv.slice(2);
+  const nArg = args.find(a => a.startsWith('--n='));
+  const n = nArg ? +nArg.slice(4) : 10;
+  const want = args.filter(a => !a.startsWith('--'));
+  const all = want.length === 0;
+  const t0 = Date.now();
+  if (all || want.includes('units')) { units(); trainers(); siegeTest(); }
+  if (all || want.includes('strategies')) strategies(n);
+  if (all || want.includes('races')) races(n);
+  if (all || want.includes('boons')) boons(n);
+  console.log(`\n(${Math.round((Date.now() - t0) / 1000)}s)`);
+}
+
+// What a trainer produces, not what a coin buys.
+//
+// This is the comparison the knight was actually tuned against, and the note in
+// config.js says why: the town centre caps how many buildings an empire may
+// run, so the scarce resource is building slots rather than gold, and the unit
+// that wins per slot wins outright. It records that at 8.5s a stable
+// out-produced a barracks on attack AND health, and that 9.4s is where the two
+// "come out level in a straight fight, give or take a couple of bodies, with
+// the knights costing about 9% more gold to get there".
+//
+// So: run each trainer flat out for the same time, then fight the output.
+function trainers(seconds = 180) {
+  console.log(`\n== Trainers, run flat out for ${seconds}s ======================`);
+  console.log('The comparison the knight was tuned against: output per BUILDING,');
+  console.log('because building slots are what the town centre rations.\n');
+  const of = (btype) => {
+    const b = cfg.BUILDING_TYPES[btype];
+    const u = cfg.UNIT_TYPES[b.trains];
+    const n = Math.floor(seconds / u.trainTimeSec);
+    return { btype, unit: b.trains, n, gold: n * u.cost,
+      attack: n * u.attack, hp: n * u.hp };
+  };
+  const rows = ['barracks', 'stable', 'siege'].map(of);
+  for (const r of rows) {
+    console.log(`  ${r.btype.padEnd(9)} ${String(r.n).padStart(3)} ${r.unit.padEnd(10)} `
+      + `for ${String(r.gold).padStart(4)}g   attack ${String(r.attack).padStart(4)}  health ${String(r.hp).padStart(5)}`);
+  }
+  console.log('');
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = i + 1; j < rows.length; j++) {
+      const x = rows[i], y = rows[j];
+      const r = fight({ aUnits: { [x.unit]: x.n }, bUnits: { [y.unit]: y.n } });
+      const win = r.a.n > r.b.n ? x.unit : (r.b.n > r.a.n ? y.unit : 'neither');
+      console.log(`  ${x.btype} v ${y.btype}: ${win} wins, `
+        + `survivors ${r.a.n}/${x.n} and ${r.b.n}/${y.n}`
+        + `   (gold spent ${x.gold} v ${y.gold})`);
+    }
+  }
+}
+module.exports.trainers = trainers;
+
+// The catapult's actual job. It loses badly to anything in the open — that is
+// the trade artillery is supposed to make — so measuring it only in a field
+// says it is weak when what it is for is stonework. Equal gold of each unit,
+// set on an undefended keep, timed.
+function siegeTest(gold = 1000) {
+  console.log(`\n== Against a keep (undefended, level 1) =======================`);
+  console.log(`${gold} gold of each, timed until the keep falls.\n`);
+  for (const type of ['swordsman', 'knight', 'catapult']) {
+    const n = Math.floor(gold / cfg.UNIT_TYPES[type].cost);
+    const secs = withSeed(99, () => {
+      const m = new Match({ started: false, map: 'openfield', seed: 99 });
+      const pa = m.addPlayer('a', 'human', 'A'), pb = m.addPlayer('b', 'human', 'B');
+      m.start(); pa.draft = null; pb.draft = null;
+      const a = m.armies.get(m.spawnArmy(pa, type, n, 'hold', { x: pb.baseX, y: pb.baseY + 3 }));
+      a.x = pb.baseX; a.y = pb.baseY + 3; a.destX = a.x; a.destY = a.y;
+      m.cmdAttackArmy('a', a.id, 'player', 'b');
+      for (let t = 0; t < 600 / TICK; t++) {
+        m.tick(TICK);
+        const keep = m.getCastle(pb);
+        if (!keep || keep.hp <= 0 || !pb.alive) return t * TICK;
+      }
+      return null;
+    });
+    console.log(`  ${String(n).padStart(3)} ${type.padEnd(10)} `
+      + (secs === null ? 'did not take it in 10 minutes' : `took it in ${Math.round(secs)}s`));
+  }
+}
+module.exports.siegeTest = siegeTest;
