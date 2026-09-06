@@ -754,12 +754,13 @@ function stepRoom(room, now, dt) {
     room.match.tick(dt);
     const snapshot = room.match.serialize();
     thinState(room, snapshot);
-    const { events: reports, armies: allArmies, rubble: allRubble, ...common } = snapshot;
+    const { events: reports, armies: allArmies, rubble: allRubble,
+            effects: allEffects, ...common } = snapshot;
     // One view per player. Fog makes this unavoidable — what you are shown
     // depends on what you can see — and it is also where battle reports get
     // filtered down to the player they were addressed to.
     //
-    // But only the four fields below differ between players. The rest — every
+    // But only the five fields below differ between players. The rest — every
     // empire's buildings, the camps, the scores — is the same for everyone, and
     // encoding it once per socket was most of the tick at twelve players. It is
     // encoded once here and the per-player fields are spliced on as text: the
@@ -771,6 +772,13 @@ function stepRoom(room, now, dt) {
         events: reports.filter(e => e.playerId === id),
         armies: room.match.visibleArmiesFor(id, allArmies),
         rubble: room.match.visibleRubbleFor(id, allRubble),
+        // Effects were in the shared half until a playtest heard the
+        // consequence: the client plays a sound for a door, so everyone in the
+        // match could hear every empire deploying troops, anywhere on the map,
+        // through the fog, with no picture to go with it. A noise that tells
+        // you an enemy is moving before anything of yours can see them is an
+        // information leak; it costs a fifth per-player field to close.
+        effects: room.match.visibleEffectsFor(id, allEffects),
         // Tiles this empire has just laid eyes on, and nothing it already knew.
         explored: room.match.drainExplored(id),
       };

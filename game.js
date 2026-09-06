@@ -7,7 +7,7 @@ const {
   BUILDING_TYPES, UNIT_TYPES,
   AI_CAMP, ORE, BUILD_WORK, SHRINE, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
   TERRAIN_CLEAR_COST,
-  TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA,
+  TRAIN_QUEUE_MAX, AUTO_TARGET_RADIUS,
 } = require('./config');
 
 // The longest step the simulation will take in one go. A process that was
@@ -261,6 +261,26 @@ function computeMods(player) {
 // that binds — see SEAT_MARGIN_Y for the other half of that.
 const LAID_OUT_SPACING = CASTLE.buildRadius[1] * 2 + 4;
 
+// What two seats on a laid-out map must actually keep between them, as opposed
+// to what the layout above would LIKE them to have. There are two answers, and
+// which one applies turns on whether the neighbour is an enemy.
+//
+// In a free-for-all everyone around you is an enemy, and two empires sharing
+// ground before either has levelled once is the thing this spacing exists to
+// prevent: SEAT_MIN_SEPARATION is two level-2 borders, so nobody is building
+// inside somebody else's border until both have paid for the upgrade.
+//
+// A team game cannot have that and does not want it. Six seats down one side of
+// The Divide have about 111 tiles of column to share, so demanding two level-2
+// borders' worth between them throws half the side off the map — and what comes
+// back is worse than close neighbours: the cluster comes apart and empires end
+// up nearer an enemy than their own partner, which is the one thing a team
+// layout must never do. So teammates keep two LEVEL-1 borders and a little
+// more, and their level-2 ground is allowed to touch. Sharing a border with
+// somebody you cannot fight is not the problem the number was written for.
+const SEAT_MIN_SEPARATION = CASTLE.buildRadius[1] * 2;
+const SEAT_CLUSTER_SEPARATION = CASTLE.buildRadius[0] * 2 + 4;
+
 // Laid-out seats spread along the short axis, so they get a smaller inset than
 // the map's general spawn margin. At the general 24 a column of six on The
 // Divide has 112 tiles to share and can manage 22 between them; at 12 it has
@@ -338,7 +358,18 @@ function sweepMountainScraps(isRock, clear, width, height, fill) {
   //
   // Removing rock is safe for every caller — it can never put stone anywhere it
   // was not — so the cut half is unconditional and only the fill is gated.
-  for (let pass = 0; pass < 6; pass++) {
+  //
+  // The cap is 24, not 6. Cutting eats a rock ribbon one tile per pass from
+  // each end, so six passes only ever sweep a stub about twelve tiles long, and
+  // a longer one survives with a nub on the end of it. Nothing noticed while
+  // the opening circles were radius 9; widening them to 12 punched bigger holes
+  // in Highlands' 34% rock, left a longer trailing ribbon, and the invariant
+  // failed with exactly one nub. It is still a bound rather than a true fixed
+  // point, because with `fill` on the two rules can trade a tile back and forth
+  // for ever — the loop exits early the moment a pass changes nothing, which is
+  // what every map here actually does. Map generation on Highlands: 63ms.
+
+  for (let pass = 0; pass < 24; pass++) {
     const cut = [], add = [];
     const n4 = (x, y) => (isRock(x - 1, y) ? 1 : 0) + (isRock(x + 1, y) ? 1 : 0) +
                          (isRock(x, y - 1) ? 1 : 0) + (isRock(x, y + 1) ? 1 : 0);
@@ -847,7 +878,21 @@ class Match {
           // partner, which is the one thing this layout exists to prevent. The
           // cluster is only as tall as it has to be to keep their borders
           // apart, centred in the band.
-          const span = Math.min(h - 1 - 2 * SEAT_MARGIN_Y, (per - 1) * LAID_OUT_SPACING);
+          // ...and no taller than the gap to the next side, which is the rule
+          // the paragraph above states and the arithmetic did not enforce.
+          // Three columns sit 95 tiles apart on a 240-wide map; four seats at
+          // the full LAID_OUT_SPACING make a cluster 120 tiles tall, so the top
+          // and bottom of one side were 120 apart while the enemy beside them
+          // was 95 away — every seat in the middle column nearer an enemy than
+          // its own partner. It held only while LAID_OUT_SPACING was small
+          // enough to hide it.
+          //
+          // 0.85 rather than 1.0 so the two are not merely equal: the seats are
+          // then nudged off their targets by the terrain and by each other, and
+          // a cluster exactly as tall as the gap loses the comparison the first
+          // time one of them moves.
+          const gap = teams > 1 ? ((w - 1 - 2 * m) / (teams - 1)) * 0.85 : Infinity;
+          const span = Math.min(h - 1 - 2 * SEAT_MARGIN_Y, (per - 1) * LAID_OUT_SPACING, gap);
           const top = Math.round((h - 1) / 2 - span / 2);
           out.push({
             x: spread(t, teams, m, w - 1 - m),
@@ -917,7 +962,20 @@ class Match {
       // laid-out map the layout decides where empires go, and the only thing
       // separation still has to guarantee is that two level-1 borders do not
       // overlap. Neighbours being close together is the point of those maps.
-      if (wanted) spot = this.nearestOpenSpot(wanted[i], LAID_OUT_SPACING, spawns);
+      // ...and the number that guarantees it is a LEVEL-1 border, which is what
+      // the paragraph above says and what the code did not do: it passed
+      // LAID_OUT_SPACING, which is built from the level-2 radius. The two
+      // disagreed harmlessly while that came to 30, because the targets a
+      // twelve-seat layout produces are about that far apart anyway. Widening
+      // the borders took it to 40, the targets stayed where the column height
+      // allowed — 27 apart down one side of the map — and every seat that could
+      // not find 40 tiles of clearance was pushed somewhere that had it. The
+      // clusters came apart, and empires ended up nearer an enemy than their
+      // own partner, which is the one thing this layout exists to prevent.
+      if (wanted) {
+        spot = this.nearestOpenSpot(wanted[i],
+          this.teamCount ? SEAT_CLUSTER_SEPARATION : SEAT_MIN_SEPARATION, spawns);
+      }
       for (let margin = MAP.spawnMargin; margin >= 3 && !spot; margin -= 4) {
         spot = this.findOpenSpot(MAP.spawnSpacing, margin);
       }
@@ -1385,8 +1443,9 @@ class Match {
     const bases = [...this.players.values()].map(p => ({ x: p.baseX, y: p.baseY }));
     if (bases.length < 2) return;
     const camps = this.aiCamps.filter(c => !c.shrine);
+    const shrines = this.aiCamps.filter(c => c.shrine);
     const placed = [];
-    for (const shrine of this.aiCamps.filter(c => c.shrine)) {
+    for (const shrine of shrines) {
       const spot = this.fairestSpot(bases, camps, placed);
       if (!spot) continue;                   // nowhere better; leave it be
       shrine.x = spot.x; shrine.y = spot.y;
@@ -2143,6 +2202,33 @@ class Match {
     return rubble.filter(r => player.explored[r.y * MAP.width + r.x]);
   }
 
+  // The effects this player may be shown — and, because the client plays a
+  // sound for several of them, may be told about at all.
+  //
+  // These used to ride in the shared half of the broadcast, which meant every
+  // effect in the world was sent to everybody. In a playtest that came out as
+  // a door swinging somewhere in the dark: you could HEAR other empires
+  // deploying troops, anywhere on the map, through the fog, and the noise had
+  // no picture to go with it because the building it came from was not drawn.
+  // That is an information leak as well as a bad noise — the sound told you an
+  // enemy was making a move before anything of yours could see it.
+  //
+  // Live vision, not the explored layer. A remembered tile is ground you walked
+  // past once; something HAPPENING there is only yours to know if you are
+  // watching it now. An ally's ground counts as watched, the same as their
+  // groups do.
+  visibleEffectsFor(playerId, effects) {
+    const player = this.players.get(playerId);
+    if (!player) return effects;
+    if (this.spectatesAll(player)) return effects;
+    return effects.filter(fx => {
+      // A spell the player cast themselves is theirs to see land wherever it
+      // lands — you do not lose sight of your own meteor.
+      if (fx.ownerId && this.allied(playerId, fx.ownerId)) return true;
+      return this.canSee(player, fx.x, fx.y);
+    });
+  }
+
   // The groups this player may be shown: their own always, anyone else's only
   // while something of theirs is watching that ground. Buildings are not
   // filtered — a keep you have walked past stays on your map, which is what the
@@ -2562,16 +2648,20 @@ class Match {
     return out;
   }
 
-  // How deep this empire's queue for one kind of unit runs. The queue belongs
-  // to the empire, not to any one building: the first building that makes the
-  // unit opens it at TRAIN_QUEUE_MAX and every further one widens it by
-  // TRAIN_QUEUE_PER_EXTRA. Diminishing on purpose — with a hard cap on how
-  // many buildings you may run at all, a second barracks should be worth the
-  // slot and a fifth should not.
+  // How deep this empire's queue for one kind of unit runs: every building that
+  // makes it, each holding TRAIN_QUEUE_MAX of its own.
+  //
+  // It used to be one empire-wide ration — TRAIN_QUEUE_MAX for the first
+  // building and TRAIN_QUEUE_PER_EXTRA for each one after it — and a playtest
+  // read that as a bug rather than as a diminishing return. Two barracks, both
+  // standing idle, and the second refuses work because the first is holding the
+  // empire's places. A building you spent a slot on should run its own line.
+  //
+  // The diminishing return has not gone, it has moved somewhere it can be seen:
+  // CASTLE.buildLimit rations buildings, so a fourth barracks costs a slot that
+  // could have been a bank.
   trainCapacity(player, unitType) {
-    const trainers = this.trainersFor(player, unitType).length;
-    if (!trainers) return 0;
-    return TRAIN_QUEUE_MAX + TRAIN_QUEUE_PER_EXTRA * (trainers - 1);
+    return TRAIN_QUEUE_MAX * this.trainersFor(player, unitType).length;
   }
 
   // How much of that is already spoken for, across every building making it.
@@ -2686,7 +2776,14 @@ class Match {
     }
     const cast = this['cast_' + cardId];
     if (typeof cast !== 'function') return;
+    // Whose spell this was, stamped on whatever the cast pushed. Effects are
+    // filtered by vision on the way out (see visibleEffectsFor) and a spell
+    // reaching anywhere on the map usually lands where the caster cannot see —
+    // you do not lose sight of your own meteor. Done here, once, rather than in
+    // each of the seven cast_ functions.
+    const first = this.effects.length;
     if (cast.call(this, player, card.spell, x, y) === false) return;   // spell declined to fire
+    for (let i = first; i < this.effects.length; i++) this.effects[i].ownerId = player.id;
     player.spells[cardId] -= 1;
   }
 
@@ -3515,7 +3612,7 @@ class Match {
         : `Your ${def.name ? def.name.toLowerCase() : 'building'} has been destroyed.`);
       this.emit(army.ownerId, `Destroyed their ${def.name ? def.name.toLowerCase() : 'building'}.`);
       if (army.breach) army.breach = null;
-      if (army.targetType === 'building') this.holdPosition(army);
+      if (army.targetType === 'building') this.standDownOrAdvance(army);
     }
     // A building is not a garrison, but it is not free to stand under either —
     // and a tower is not free at all.
@@ -3696,6 +3793,68 @@ class Match {
     army.destX = army.x; army.destY = army.y;
     army.targetType = null; army.targetId = null;
     army.route = null; army.routeFor = null;
+  }
+
+  // The thing you were fighting is gone. Look for the next one within arm's
+  // reach and take it on; stand down if there is nothing there.
+  //
+  // This exists because of what a real fight looks like: a dozen groups in one
+  // place, and every time one of them finished what it was killing it stopped
+  // dead and waited to be told again. The order given is still the order that
+  // counts — nothing here ever overrides a standing target, it only runs once
+  // that target no longer exists — so a group sent somewhere specific still
+  // goes there, and a group left standing in a battle keeps swinging.
+  //
+  // AUTO_TARGET_RADIUS is deliberately short. It is a group finishing the fight
+  // it is already in, not a group going hunting: at five tiles it picks up what
+  // is beside it and stays where you put it, where a longer leash would walk
+  // your army off across the map one corpse at a time.
+  standDownOrAdvance(army) {
+    const next = this.nearestHostile(army, AUTO_TARGET_RADIUS);
+    if (!next) { this.holdPosition(army); return; }
+    army.order = 'attack';
+    army.breach = null;
+    army.route = null; army.routeFor = null;
+    army.targetType = next.type; army.targetId = next.id;
+    army.destX = next.x; army.destY = next.y;
+  }
+
+  // The closest thing this group is allowed to hit, within `radius`. Groups
+  // first and stonework second at equal distance — something that can hit back
+  // is the more urgent of the two, and a building is not going anywhere.
+  //
+  // Workers are excluded as attackers: a mining crew that started swinging at
+  // whatever wandered past would leave the seam it was put on.
+  nearestHostile(army, radius) {
+    const def = UNIT_TYPES[army.type];
+    if (!def || def.worker) return null;
+    let best = null, bestD = Infinity, bestRank = 9;
+    const offer = (type, id, x, y, rank) => {
+      const d = Math.hypot(x - army.x, y - army.y);
+      if (d > radius) return;
+      if (d > bestD || (d === bestD && rank >= bestRank)) return;
+      best = { type, id, x, y }; bestD = d; bestRank = rank;
+    };
+    for (const other of this.armies.values()) {
+      if (other.id === army.id || armyCount(other) === 0) continue;
+      if (this.allied(army.ownerId, other.ownerId)) continue;
+      offer('army', other.id, other.x, other.y, 0);
+    }
+    for (const player of this.players.values()) {
+      if (!player.alive || this.allied(army.ownerId, player.id)) continue;
+      for (const b of Object.values(player.buildings)) {
+        // The keep is attacked as a player, not as a building — buildingAt
+        // refuses it — so an empire is offered by its town centre's tile and
+        // resolved through the 'player' branch, exactly as a right-click does.
+        if (b.type === 'castle') offer('player', player.id, b.x, b.y, 1);
+        else offer('building', tileKey(b.x, b.y), b.x, b.y, 1);
+      }
+    }
+    for (const camp of this.aiCamps) {
+      if (camp.defeated) continue;
+      offer('camp', camp.id, camp.x, camp.y, 1);
+    }
+    return best;
   }
 
   // ---- Army commands ----
@@ -4226,7 +4385,7 @@ class Match {
       let aim = null;                          // where the target really is
       if (army.order === 'attack' && army.targetType === 'army') {
         const prey = this.armies.get(army.targetId);
-        if (!prey || armyCount(prey) === 0) { this.holdPosition(army); continue; }
+        if (!prey || armyCount(prey) === 0) { this.standDownOrAdvance(army); continue; }
         // The route is planned to a tile, so the destination is rounded — but
         // arriving is measured against where the enemy actually is. Rounding
         // both was worth up to two thirds of a tile, which does not matter to a
@@ -4722,7 +4881,7 @@ class Match {
   // resolve at double speed.
   stepArmyBattle(army, dt) {
     const foe = this.armies.get(army.targetId);
-    if (!foe || armyCount(foe) === 0) { this.holdPosition(army); return; }
+    if (!foe || armyCount(foe) === 0) { this.standDownOrAdvance(army); return; }
 
     // It walked off while we were swinging: take up the chase again rather than
     // fighting something that is no longer there.
@@ -4790,8 +4949,9 @@ class Match {
       this.emit(army.ownerId, `${foeName} wiped out one of your groups.`);
       this.emit(foe.ownerId, `You destroyed one of ${ourName}'s groups.`);
     }
-    // Whoever is left has nothing more to fight here.
-    if (!foeLives && weLive) this.holdPosition(army);
+    // Whoever is left takes on whatever else is within reach, and stands down
+    // only if there is nothing left beside it.
+    if (!foeLives && weLive) this.standDownOrAdvance(army);
     // ...and so has the survivor of a fight it never asked for: a group cut
     // down while on 'hold' was turned to face its attacker by squareUp, and
     // without this it goes on staring at the patch of ground where that
@@ -4799,7 +4959,7 @@ class Match {
     // group that happened to be marching past still has somewhere to be.
     if (!weLive && foeLives &&
         (foe.order === 'hold' || (foe.targetType === 'army' && foe.targetId === army.id))) {
-      this.holdPosition(foe);
+      this.standDownOrAdvance(foe);
     }
   }
 
@@ -4947,7 +5107,7 @@ class Match {
       this.emit(army.ownerId, 'Camp taken — the ruins are yours to build on.');
     }
     army.plunder = 0;
-    this.holdPosition(army);
+    this.standDownOrAdvance(army);
   }
 
   // Knocking down one building, because somebody sent troops to do exactly

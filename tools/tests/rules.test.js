@@ -744,8 +744,15 @@ function openTiles(m, p, want) {
   })());
 }
 
-// The queue belongs to the empire: the first trainer opens it, each further one
-// widens it by a smaller step than the first.
+// The queue belongs to the BUILDING. Each trainer runs its own line of
+// TRAIN_QUEUE_MAX, so an empire's depth is simply the sum of what it built.
+//
+// It used to be one empire-wide ration that widened by a smaller step for each
+// building after the first, and a playtest read that as a bug rather than as a
+// diminishing return: two barracks, both idle, and the second refusing work
+// because the first held the empire's places. The diminishing return still
+// exists, it is just charged somewhere visible — CASTLE.buildLimit rations how
+// many buildings an empire may run at all.
 {
   const m = new Match();
   const p = m.addPlayer('p', 'human', 'P');
@@ -762,8 +769,8 @@ function openTiles(m, p, want) {
     }
     seen.push(m.queuedFor(p, 'swordsman'));
   }
-  const want = [0, 1, 2, 3].map(i => cfg.TRAIN_QUEUE_MAX + cfg.TRAIN_QUEUE_PER_EXTRA * i);
-  check('each extra barracks widens the queue by the smaller step',
+  const want = [1, 2, 3, 4].map(n => cfg.TRAIN_QUEUE_MAX * n);
+  check('each barracks brings a full queue of its own',
     seen.join(',') === want.join(','), `got ${seen.join(',')} want ${want.join(',')}`);
   check('and the queue really is that deep, not merely advertised',
     m.trainCapacity(p, 'swordsman') === seen[3], `${m.trainCapacity(p, 'swordsman')}`);
@@ -794,7 +801,7 @@ function openTiles(m, p, want) {
   buildNow(m, 'p', tiles[2].x, tiles[2].y, 'stable');
   const st = m.trainingStatus(p);
   check('two barracks widen only the swordsman queue',
-    st.swordsman.capacity === cfg.TRAIN_QUEUE_MAX + cfg.TRAIN_QUEUE_PER_EXTRA,
+    st.swordsman.capacity === cfg.TRAIN_QUEUE_MAX * 2,
     `${st.swordsman.capacity}`);
   check('one stable leaves the knight queue at the base',
     st.knight.capacity === cfg.TRAIN_QUEUE_MAX, `${st.knight.capacity}`);
@@ -3156,11 +3163,27 @@ function clearLane(m, x0, x1, y0, y1) {
     }
     return most;
   };
+  // Pinned once PER PRIZE, not once for the pair.
+  //
+  // Pinning the stream at the top and letting both measurements run off it was
+  // not enough, and it hid behind a passing result for as long as neither prize
+  // moved. Every fight builds a real Match and generates a map from that same
+  // stream, so the second prize starts wherever the first one happened to stop
+  // — and how many fights the first one runs is exactly what is being measured.
+  // Change one prize and the OTHER one gets a different set of maps.
+  //
+  // It showed up when the golem's health came down: the colossus then measured
+  // 31 knights and stayed at 31 whether it carried 1100 health or 1350, because
+  // what had actually moved was where its fights started in the stream. Two
+  // separate pins, and each prize is measured against the same maps as the
+  // other, which is what "a property of the two prizes" has to mean.
   const realRandom = Math.random;
-  let seed = 20260830;
-  Math.random = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
-  const worth = cfg.SHRINE.kinds.map(k => ({ id: k.id, knights: beats(k.reward) }));
-  Math.random = realRandom;
+  const pinned = (fn) => {
+    let seed = 20260830;
+    Math.random = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    try { return fn(); } finally { Math.random = realRandom; }
+  };
+  const worth = cfg.SHRINE.kinds.map(k => ({ id: k.id, knights: pinned(() => beats(k.reward)) }));
   const low = Math.min(...worth.map(w => w.knights));
   const high = Math.max(...worth.map(w => w.knights));
   check('every shrine is worth about the same march',
@@ -3562,8 +3585,29 @@ function fightOut(m, ours, theirs) {
   for (; t < 900 && b.buildings[key]; t++) m.tick(0.2);
   check('  and troops sent at it knock it down', !b.buildings[key], `${(t * 0.2).toFixed(0)}s`);
   check('  leaving rubble, the same as a broken wall', m.rubble.has(key));
-  check('  and the raiders stop when it is gone',
-    m.armies.has(raiders.id) && raiders.order === 'hold', raiders.order);
+  // They do NOT stop, and that is the point of them.
+  //
+  // This used to check that a group went to 'hold' the moment its target was
+  // gone. A playtest called that out: in a real fight a dozen groups are on top
+  // of each other, and every one of them stopping dead each time something died
+  // meant re-clicking constantly. A group that has just knocked a building down
+  // is standing in the middle of somebody's compound, so there is always
+  // something else within reach — see AUTO_TARGET_RADIUS.
+  check('  and the raiders take on whatever else is in reach',
+    m.armies.has(raiders.id) && raiders.order === 'attack' && raiders.targetType,
+    `${raiders.order} ${raiders.targetType || '-'}`);
+  // ...and they still stand down when there is genuinely nothing left. Its own
+  // scenario rather than a coda to this one: the raiders above are standing in
+  // the middle of an empire, and there is no corner of it with nothing in reach.
+  {
+    const m2 = twoSides();
+    const far = field(m2, 'a', 'swordsman', 10, 6, 6);
+    const prey = field(m2, 'b', 'swordsman', 1, 7, 6);
+    m2.cmdAttackArmy('a', far.id, 'army', prey.id);
+    for (let i = 0; i < 600 && m2.armies.has(prey.id); i++) m2.tick(0.2);
+    check('  and stand down when there is nothing in reach at all',
+      m2.armies.has(far.id) && far.order === 'hold', far.order);
+  }
 }
 
 // A tower is the one building that costs something to pull down.
@@ -4753,7 +4797,15 @@ function fightOut(m, ours, theirs) {
   m.emit = (id, text) => said.push(text);
   const barracks = trainerOf(m, p, 'swordsman');
   barracks.ready = 5;
-  const far = { x: p.baseX, y: p.baseY + 40 };
+  // Outside the border and ON THE MAP. This was a fixed baseY + 40, which was
+  // outside a radius-9 border and is still outside a radius-12 one — but the
+  // seats moved when the borders widened, and 40 tiles south of this one is off
+  // the bottom of the map. An off-map destination is refused by validMoveTile
+  // before the territory rule is ever reached, so the test passed its subject
+  // by and failed on the silence. Pick a tile that is outside the border and
+  // inside the world, whichever way round that has to be.
+  const reach = Math.round(m.buildRadius(p)) + 8;
+  const far = { x: p.baseX, y: p.baseY + (p.baseY + reach < cfg.MAP.height - 1 ? reach : -reach) };
   const before = m.armies.size;
   m.cmdDeployFrom('p', barracks.x, barracks.y, 1, far.x, far.y);
   check('  and a destination outside the empire is still refused',

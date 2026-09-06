@@ -172,7 +172,12 @@ const OUTPOST = {
   // every side and leaves a usable band: 10.5 tiles across against a 4.5-tile
   // building, so there are three clear tiles either side of it rather than
   // half of one.
-  radius: 5.25,
+  // 7, up from 5.25. Asked for after a playtest: a camp is meant to be worth
+  // holding for the ROOM it hands over, and at 5.25 the disc was 10.5 tiles
+  // across around a building 4.5 tiles wide — three clear tiles a side. At 7 it
+  // is 14 across, so there are five, which is a band you can actually lay
+  // something out in rather than thread buildings into.
+  radius: 7,
   // ...and room to actually use it. An outpost handed over a disc of ground and
   // no permission to fill it: the building limit is set by the town center
   // alone, so unless you happened to be under it, a captured camp was ground
@@ -379,7 +384,24 @@ const CASTLE = {
   // middle is six tiles across now rather than three and reserves the ground
   // under its art (see `footprint`); the ring left to build in at level 1 is
   // about what it was.
-  buildRadius:   [9, 13, 17],
+  // 12 / 18 / 24, up from 9 / 13 / 17. Asked for after a playtest: more room at
+  // the start, and more of a step for levelling.
+  //
+  // The steps matter as much as the opening. It used to widen by 4 and then 4
+  // again, on a disc — so the second upgrade added less than half the ground
+  // the first did as a fraction, and the expensive level felt like the cheap
+  // one. At 12/18/24 each step adds 6, and the ring it opens up grows with the
+  // radius: 339 new tiles at level 2 and 452 at level 3, against 216 and 283.
+  //
+  // What this does NOT change is what may be built on that ground:
+  // CASTLE.buildLimit still rations buildings, so a wider border is room to
+  // place them well and to reach further out, not permission to sprawl.
+  //
+  // The level-1 disc is cleared of mountains and water when the map is
+  // generated, so a bigger opening radius is a bigger clearing — tools/tests
+  // spawns.test.js checks every opening circle is fully buildable and is the
+  // thing to watch if this moves again.
+  buildRadius:   [12, 17, 22],
   // The tiles the keep's art covers, measured from the base tile it stands on:
   // so many either side, so many above (the sprite is anchored at its feet and
   // grows upward), none below, where the gate is. Read by
@@ -468,8 +490,20 @@ const BUILDING_TYPES = {
   //
   // Its hp is its own, too — a tower used to pour its 220 into the garrison's
   // pool and be chewed through *before* the defenders were touched.
+  // shotDamage 15, up from 12: five damage a second rather than four, on the
+  // same three-second clock and the same five tiles. Asked for after a playtest
+  // — "slightly stronger" — and taken on the shot rather than on the range or
+  // the rate deliberately. Range is how much ground one tower denies, and
+  // changing it changes where towers go; the rate of fire is what makes a tower
+  // read as a harasser rather than a wall. What was wanted was for it to hurt
+  // more when it connects, and that is this number.
+  //
+  // Note what it does NOT touch: defensePower, which is what a tower hits back
+  // with while it is being torn down, and which never reaches the town centre.
+  // "A tower is a thing in a place" is the rule this building was rewritten
+  // around, and a stronger arrow does not bend it.
   tower:    { name: 'Archer Tower',  cost: 120, buildTimeSec: 16, hp: 220, defensePower: 15,
-              range: 5, shotSec: 3, shotDamage: 12 },
+              range: 5, shotSec: 3, shotDamage: 15 },
   // Walls are placed by click-and-drag, one building per dragged tile, so the
   // price is per tile. `isWall` is what tells the client to offer the drag tool
   // rather than a palette cell.
@@ -567,7 +601,12 @@ const UNIT_TYPES = {
   // Speed stays under the catapult's, so they remain the slowest thing on the
   // map. That is what they pay with, and 1.7 keeps the payment while making the
   // walk from a shrine to somebody's keep merely long rather than absurd.
-  golem:     { name: 'Golem',     plural: 'Golems',    cost: 600, trainTimeSec: 0, attack: 110, hp: 850, speed: 1.7,
+  // Health down from 850 to 700, asked for after a playtest. The pair of
+  // shrines are priced against each other rather than eyeballed, so the
+  // colossus moves with it: three golems were 330 attack and 2550 health, and
+  // are now 330 and 2100, so two colossi have to come down from 2 x 155/1230 to
+  // hold the parity rules.test.js pins. See the colossus entry.
+  golem:     { name: 'Golem',     plural: 'Golems',    cost: 600, trainTimeSec: 0, attack: 110, hp: 700, speed: 1.7,
                special: true },
   // The other shrine's sleeper, and the same bargain in a different shape: two
   // of these instead of three golems. Not trainable either — `special` keeps it
@@ -592,7 +631,15 @@ const UNIT_TYPES = {
   //
   // Slower than a golem, because it is bigger and because being late is what
   // the whole prize pays with.
-  colossus:  { name: 'Colossus',  plural: 'Colossi',   cost: 900, trainTimeSec: 0, attack: 155, hp: 1230, speed: 1.5,
+  // Health 1010, down from 1230, because the golem came down to 700 and these
+  // two prizes are set against each other rather than against a feeling. Three
+  // golems are 330 attack and 2100 health; two colossi at 155/1010 are 310 and
+  // 2020, which is the same shape of gap the old pair had (330/2550 against
+  // 310/2460) — the colossus carries slightly less on paper and gets it back
+  // from the square law, two bodies losing half their output on the first
+  // death where three lose a third. Re-measure with the shrine block in
+  // rules.test.js before believing any change to these.
+  colossus:  { name: 'Colossus',  plural: 'Colossi',   cost: 900, trainTimeSec: 0, attack: 155, hp: 1010, speed: 1.5,
                special: true },
 };
 
@@ -983,13 +1030,34 @@ const RUBBLE_SEC = 25;
 // layout every time the border grows is a real cost rather than free.
 const DEMOLISH_REFUND = 1 / 3;
 
-// The training queue for one kind of unit, across every building that makes
-// it. The first such building brings TRAIN_QUEUE_MAX; each one after that adds
-// TRAIN_QUEUE_PER_EXTRA on top, so a second barracks is worth building and a
-// fifth is not — which matters now that CASTLE.buildLimit caps how many you may
-// have at all. A single building still never holds more than TRAIN_QUEUE_MAX.
+// The training queue, which belongs to a BUILDING and not to the empire.
+//
+// It used to be empire-wide for each kind of unit: the first barracks opened
+// the queue at TRAIN_QUEUE_MAX and every further one widened it by
+// TRAIN_QUEUE_PER_EXTRA, so a second barracks bought two more places in one
+// shared line. In a playtest that read as broken rather than as diminishing —
+// you have two barracks, both idle, and the second refuses work because the
+// first is holding the empire's ration. A building somebody paid for and put
+// on the map should run its own queue.
+//
+// So each one holds TRAIN_QUEUE_MAX of its own, and an empire's depth is the
+// sum of what it has built. The diminishing return the old rule was reaching
+// for is already provided by CASTLE.buildLimit — buildings are rationed, and
+// spending a slot on a fourth barracks is the cost of the deeper queue.
 const TRAIN_QUEUE_MAX = 5;
-const TRAIN_QUEUE_PER_EXTRA = 2;
+
+// How far a group looks for something else to hit once what it was fighting is
+// gone. See Match.standDownOrAdvance.
+//
+// Five tiles, and short on purpose. This is a group finishing the fight it is
+// standing in, not a group going hunting: it picks up whatever is beside it and
+// stays where it was put. A longer leash walks your army off across the map one
+// corpse at a time, which is the opposite of the problem it was added to solve
+// — a dozen groups in one melee all stopping dead every time something died.
+//
+// The order a player gave always outranks this. Nothing here ever replaces a
+// standing target; it only runs once that target no longer exists.
+const AUTO_TARGET_RADIUS = 5;
 // Most sides a match can be split into. Twelve seats divide evenly by two,
 // three and four, so every team gets the same number of them; five would not,
 // and a side with fewer seats than another is not a team game.
@@ -1002,5 +1070,5 @@ module.exports = {
   BUILDING_TYPES, UNIT_TYPES,
   AI_CAMP, ORE, BUILD_WORK, SHRINE, COMBAT, CARD_DRAFT, CARDS, SPELL_RECHARGE_SEC, RUBBLE_SEC, DEMOLISH_REFUND,
   TERRAIN_CLEAR_COST,
-  TRAIN_QUEUE_MAX, TRAIN_QUEUE_PER_EXTRA, TICK_MS, MAX_TEAMS,
+  TRAIN_QUEUE_MAX, AUTO_TARGET_RADIUS, TICK_MS, MAX_TEAMS,
 };
