@@ -140,6 +140,81 @@ From the woodsman's cabin in Map012, which is the clearest example in the pack:
 - **Repeats are broken up.** Scatter, recolour, or overlap anything that would
   otherwise tile visibly.
 
+
+## The contact line, which is where "floating" comes from
+
+Every time a building in this game has read as floating, the fault has been
+arithmetic at the point where it meets the ground — never the shading, never the
+colour, never the shadow being too faint.
+
+`buildShadow` used to project the whole sprite from **one base line**, the bottom
+of its bounding box. A pixel `hgt` above that line throws its shadow
+`hgt * SQUASH` out along the ground, which is correct only when the bounding
+box's foot *is* where the building stands.
+
+Almost none of these buildings has a flat bottom, so almost none of them was
+standing where its shadow said. The shadow began below the walls, and a band of
+lit ground sat between the wall and its own shadow — which is precisely what the
+eye reads as levitation. Measured overhang below the contact line, in built
+pixels:
+
+| building | overhang |
+|---|---|
+| stable | 20 (the feed barrel) |
+| camp | 48 (scattered props) |
+| siege | 9 |
+| tower | 4 |
+| dark keep, with its steps at the wrong row | 27 |
+
+**The diagnosis is a column count, not a look.** Opaque pixels per row down the
+last fifty rows separates a taper from a cliff in one line. The pale keep runs
+288 down to 136 smoothly, because its towers reach as deep as its steps; the
+dark keep held 262 for 34 rows and then dropped to 81 for 27. That second shape
+is a tab hanging in the air, and no amount of looking at renders had found it.
+
+**The fix is per column, with a clamp.** Each column of the sprite is projected
+from its own lowest opaque pixel, so the stable's body, its feed barrel, the
+camp's hut and each of the props in front of it all sit on their own shadow.
+
+The clamp is what makes it work rather than break. A column more than one TILE
+above the sprite's lowest pixel is not standing on anything — it is a roof eave,
+or a tower spike over the notch between two towers, and the evil keep has
+columns 250px up. Those fall back to the base line and behave as they always
+did. A first attempt without the clamp was reverted for exactly that reason, and
+so was a ground-line variant that picked one base line per sprite: the camp's
+overhang is 48px of scattered props, so its line jumped a whole tile and its
+shadow disappeared behind the hut.
+
+`shadow.anchorY` carries the lift — the distance from the sprite's lowest pixel
+to its highest ground contact — and the client already applies it. It is 48 for
+the camp, 44 for the dark keep, 26 for the siege, 0 for a shrine that really is
+flat.
+
+`art.test.js` check 4b guards it: no building may have lit ground between it and
+its own shadow. With the flat base line put back it fails the stable at 96% of
+its raised columns.
+
+## Scale is inherited, not chosen
+
+The keep's portcullis went on at its native 144x192 over a castle 288 wide — half
+the building — because `fitW` shrinks the keep from 432px to 288 and nothing
+shrank the gate with it. Both are drawn from the same 48px pack tiles.
+
+**Anything composited onto a resized sprite takes that sprite's resize factor.**
+It is a number the build already knows exactly, and using it needs no detection,
+no threshold and no measurement of the art. Detection is for *where* a thing
+goes; the size comes from the arithmetic.
+
+Two things about detecting where, learned the hard way on the same gate:
+
+- **A threshold picked on one building is not a threshold.** Luma 70 found the
+  pale keep's gateway and swallowed the dark keep whole, because that castle's
+  walls sit at 48-63. Both put their gateway alone below 32 — check a candidate
+  threshold against every sprite it will run on.
+- **A measured box that exactly fills its search window is not a measurement.**
+  It is the window. 116 wide in a window 116 wide, bottom clipped to the image
+  edge, and it read as a plausible arch for weeks.
+
 ## Things that do not work, tried and thrown away
 
 - **Hipping an A3 roof by narrowing its top course.** The autotiles draw a
@@ -154,6 +229,12 @@ From the woodsman's cabin in Map012, which is the clearest example in the pack:
 - **A letterboxed canvas.** 6.7 x 4.4 tiles forces everything onto one baseline
   because there is nowhere else to put it. Compose near square and the depth
   bands appear on their own.
+- **Moving art up so it stops overhanging, to stop a building floating.** The
+  dark keep's steps were raised two grid rows to cut a 27px overhang to 9px,
+  which did work — but it was treating the symptom, and it hid most of the
+  flight. The overhang was never the fault; the shadow was. With the shadow
+  projected per column the steps went back down to a full tile and read as
+  steps again. Fix the projection, not the art.
 
 ## The review rule
 
@@ -164,6 +245,10 @@ built these was made on a 2.4x crop, and at 1:1 in fog the result was a smudge.
 the keep for calibration, with the committed version on the row below and the
 whole thing dimmed as fog dims it underneath. If it looks weak beside the keep,
 it is weak.
+
+`--race=orc` switches it to the dark stone. It was hardcoded to human, so half
+the buildings in the game — and the dark keep, which is a different castle
+entirely — could not be looked at with this tool at all.
 
 ## The reference
 

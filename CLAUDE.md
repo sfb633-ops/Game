@@ -52,7 +52,8 @@ not restart, you are debugging a ghost.
 
 ```
 tools/make-building.js <name> --force   # recipe -> assets/buildings-src/<name>.png
-tools/build-assets.js                   # buildings-src -> public/assets + manifest
+tools/import-castle.js <Scene>          # Godot .tscn -> assets/CastleImport/<faction>/keep.png
+tools/build-assets.js                   # both of the above -> public/assets + manifest
 ```
 
 **`assets/buildings-src/` lives OUTSIDE the repo** (`C:/Users/seth/Desktop/assets/`)
@@ -62,6 +63,47 @@ has no copy. Back the folder up before a rebuild.
 
 The built assets in `public/assets/` **are** versioned, so `git revert` restores
 the game exactly.
+
+## Art: the keeps are imported, not drawn
+
+The two town centres are **assembled in Godot** by Seth, out of the same Winlu
+tiles everything else here is built from, and imported:
+
+```
+node tools/import-castle.js Goodcastle    # -> assets/CastleImport/pale/keep.png
+node tools/import-castle.js evilcastle    # -> assets/CastleImport/dark/keep.png
+```
+
+`build-assets.js` reads those folders first (`KEEP_DIRS`); the old
+background-removed screenshots sit behind them as a fallback, so emptying
+`CastleImport/` brings the previous keeps straight back.
+
+**Do not re-key or recolour a keep.** The import already carries alpha, so the
+build's colour-keying branches never fire. They exist to rescue a screenshot and
+running one over art that is already cut out punches holes in it — that shipped
+once, as speckle on every coping and merlon.
+
+The scenes live at `C:/Users/seth/Documents/catle/*.tscn`. Facts that each cost
+a round trip:
+
+- A scene can carry **two tile-data formats at once**. A legacy `TileMap` node
+  holds a flat `PackedInt32Array` of triples; a `TileMapLayer` holds a base64
+  `PackedByteArray` — two-byte header, then twelve bytes a cell, little-endian
+  (`int16 x, int16 y, uint16 source, uint16 atlas_x, uint16 atlas_y, uint16
+  alternative`). Reading only the first says the castle is empty.
+- **`tile_size` and `texture_region_size` both default to 16**, and Godot omits
+  them at the default. Getting the second wrong fails *silently*: a crop that
+  runs off a texture returns transparent, so the cells draw nothing and still
+  count as drawn. The importer now names them, and that check is the only reason
+  a hole under the dark keep's gate was ever found.
+- A migrated `TileMap` keeps a **cut-down TileSet** whose source ids no longer
+  match its own data. Where the set has exactly one source, use it. Searching
+  other tilesets for a matching id is wrong — it drew ivy across a gatehouse.
+
+**Editing the scene by script is fine and is the right place to fix keep art** —
+the cell data is base64 and appending is twelve bytes a cell. Back the file up
+first, and afterwards tell Seth to use **Scene -> Reload Saved Scene**, or
+Godot's next Ctrl+S writes its in-memory copy back over the change.
 
 ## Art: before composing anything
 
@@ -98,6 +140,23 @@ draws it at 1:1 on real ground, beside the keep for calibration, with the
 committed version below it and the whole thing dimmed as fog dims it. If it looks
 weak beside the keep, it is weak.
 
+`--race=orc` switches to the dark stone. This was hardcoded to human, which
+meant half the buildings in the game — and the whole of the dark keep, which is
+a different castle — could not be looked at with this tool at all, so "I checked
+it at 1:1" was only ever true of the pale set.
+
+Two more that came out of judging a keep on a crop:
+
+- **Draw it the way the client draws it.** Shadow at
+  `(worldX - shadow.anchorX, base - shadow.anchorY)`, sprite bottom on `base`,
+  and a line across `base` so "is it standing on the ground" is not a guess. A
+  building floating by twenty pixels is invisible in a crop and obvious the
+  moment the ground row is drawn.
+- **A silhouette question is answered by the numbers, not the eye.** Opaque
+  pixels per row down the last fifty rows told the floating story in one line —
+  the pale keep tapers 288 to 136, the dark keep held 262 then dropped to 81 —
+  after several renders had failed to.
+
 Also: **"does this cue work" and "does this object belong here" are two
 questions.** A castle turret bolted to a barracks answered only the first.
 
@@ -124,7 +183,59 @@ an early door rule ignored draw order and would have refused a recessed arch lai
 
 And be honest about what a check does NOT cover. The shadow check does not catch
 the off-by-one that made buildings float; that was tested and it passes with the
-bug reintroduced. It says so in the file.
+bug reintroduced. It says so in the file. Nor does the overlay check catch a gate
+that is merely too big while still inside the sprite's bounds — the dark keep's
+was, and only the pale keep's overflow tripped it. The gate's SIZE is correct by
+construction, not by test.
+
+**A check that only ever covered part of its list is the common shape here.**
+The overlay checks took `door` and `fire` and silently ignored the keep's `gate`,
+which is the same kind of overlay; a portcullis half the width of the castle sat
+there for weeks. When adding a check, enumerate what it is supposed to apply to
+and confirm every one of them is actually in the loop.
+
+**Widen a check and expect a false positive.** Adding the gate to the
+frames-differ check failed the dark keeps immediately — that check summed the red
+channel and alpha only, and the dark sets' gate is darkened to about half before
+it is written, so a real 60 arrived as 30 and fell under the bar. The animation
+was fine. Summing all four channels, every real strip differs in 10-43% of its
+pixels against a 0.5% threshold. Measure the margin; do not nudge the number.
+
+### The shadow model
+
+`buildShadow` finds **where each COLUMN of the sprite meets the ground** and
+projects that column from its own foot. It used to use one flat base line — the
+bbox foot — for the whole sprite, and almost none of these buildings has a flat
+bottom: the stable's body stands 20px above its feed barrel, the camp's hut
+37-48px above the props in front of it, the dark keep's walls above the steps at
+its gate. So the shadow began that far below where most of the building actually
+stood, and the strip of lit ground between a wall and its own shadow is exactly
+what "it looks like it is floating" means. It was on every building in the game.
+
+Two things make it work, and both matter:
+
+- **A column more than one TILE above the base is not touching the ground.** It
+  is a roof eave, or a tower spike over the notch between two towers — the evil
+  keep has columns 250px up — and its shadow belongs on the ground beneath it,
+  not hanging in the air at its own height. Those fall back to the base line.
+  Without that clamp the model is wrong, which is why a first attempt at this
+  was reverted.
+- **`shadow.anchorY` is now non-zero** and the client lifts the image by it
+  (`base - shadow.anchorY`, already in `drawBuilding`). It is the distance from
+  the sprite's lowest pixel to its highest ground contact: camp 48, red keep 44,
+  siege 26, tower 25, stable 20, castle 17, barracks 15, bank 1.
+
+A **ground-line** variant — one base line at the lowest row at least half as
+wide as the widest — was also tried and reverted. It reads well in principle,
+but the camp's overhang is 48px of scattered props, so its base line jumped a
+whole tile, its shadow went behind the hut and vanished. Per column is right;
+one line for the whole sprite is not, however that line is chosen.
+
+**Snapshot every built shadow before touching this**, and diff them after: the
+blast radius is all 27, and "it fixed the keep" is not evidence it did not break
+the camp. `art.test.js` check 4b now guards the invariant — no building may have
+lit ground between it and its own shadow — and with the flat base line put back
+it fails the stable at 96% of its raised columns.
 
 ## Looking at the game in a browser
 
@@ -170,8 +281,27 @@ is placed so it does not cover the building, take the sprite's height.
 - **A fixed tile coordinate in a test on a generated map is a bug with a rate.**
   Three seed flakes so far, all the same shape: a constant like `(60, 60)` that
   is water on one map in 250. Snap to walkable ground instead.
-- **Line endings.** Most files are CRLF. A multi-line match written with `\n`
-  will not find them.
+- **Line endings, and how to actually check.** It is not uniform: `README.md` is
+  CRLF, `CLAUDE.md` and `tools/DEPTH.md` are LF, `HANDOFF.md` is mixed, and the
+  `tools/*.js` are LF. A multi-line match written with `\n` will not find a CRLF
+  file. Check it in node — count bytes where `10` follows `13` — because
+  `grep -c $'\r'` and `awk '/\r$/'` both gave confidently wrong answers here.
+  When appending to a doc, normalise the new block to whatever that file already
+  uses.
+- **A crop that runs off its texture returns transparent, it does not throw.** So
+  a tile reference that points at nothing draws nothing and still counts as
+  drawn. That is how twenty-four cells went missing out of a castle while the
+  run reported `232 of 232`. Any code that crops by index should check the index
+  is in range and say so when it is not.
+- **Restore from one explicit path, and verify a marker afterwards.** A
+  `cp X /tmp/bak || cp X $SCRATCH/bak` fallback wrote one path and restored from
+  a stale file at the other, silently reverting a day of work on
+  `build-assets.js`. It was caught only because a measured number moved the wrong
+  way. After any restore, grep the file for something the work added.
+- **Requiring `build-assets.js` runs the whole build.** It has no
+  `require.main === module` guard, so `node -e 'require("./tools/build-assets")'`
+  to poke at one function rebuilds every asset. Harmless, but it is not a
+  no-op and it is not fast.
 
 ## Style
 

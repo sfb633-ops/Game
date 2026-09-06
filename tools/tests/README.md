@@ -4,20 +4,48 @@ Plain node scripts, no framework. Each one exits non-zero if a check fails.
 
 ```
 node tools/tests/invariants.test.js  # properties, not cases — start here
-node tools/tests/browser.test.js     # the cascade, in a real Chrome; skips if absent
+node tools/tests/fuzz.test.js        # random commands at the server; nothing may throw
 node tools/tests/rules.test.js       # game rules; needs no server
+node tools/tests/interactions.test.js # the command surface: selecting, garrisoning, deploying
 node tools/tests/spawns.test.js      # every opening circle is fully buildable
 node tools/tests/spawn-fairness.test.js # seats are the widest set, split evenly
+node tools/tests/art.test.js         # the BUILT assets: sizes, doors, shadows, overlays
 node tools/tests/client.test.js      # static checks on the browser client
+node tools/tests/smoke.test.js       # 1800 ticks of a real match, then invariants
+node tools/tests/browser.test.js     # the cascade, in a real Chrome; skips if absent
 node tools/tests/reconnect.test.js   # needs `npm start` running first
 node tools/tests/exit.test.js        # ditto
 node tools/tests/lobby.test.js       # ditto — host/join/start over real sockets
 ```
 
-`npm test` runs everything that needs no server — the first eight, about half a
+`npm test` runs everything that needs no server — the first ten, about half a
 minute. `npm run test:net` runs the last three, and does **not** start a server
 for you: without one already listening on :3000 it fails with `ECONNREFUSED`,
 which looks like a broken test and is not one.
+
+## art.test.js — for faults that are arithmetic, not taste
+
+It reads `public/assets/` and the manifest and nothing else, so it needs none of
+the source packs. Whether the art is any GOOD is a person's job; whether it is
+CORRECT is this file's.
+
+Every rule in it was added after the corresponding fault shipped: a trade sign
+lying across a door on four buildings at once, a fractional crop that wrote a
+white striped rectangle over a workshop, a shadow that sampled one row below the
+sprite and so never touched the ground, buildings that were 0% transparent, a
+portcullis half the width of the castle it was drawn on.
+
+**Negative-test every check you add.** Reintroduce the bug, confirm the check
+fails, then keep it. Two of the first rules written were themselves wrong — the
+door check failed a clean building on resize noise, and the shadow check failed
+a building whose lowest pixels were a prop hanging below the wall. A rule that
+enforces a mistake is worse than no rule.
+
+**And say what a check does not cover.** The shadow check does not catch the
+off-by-one that made buildings float; that was tested, and it passes with the
+bug reintroduced. The overlay check catches a gate that hangs off the sprite but
+not one that is merely too large while still inside it. Both facts are written
+in the file, and they should stay written there.
 
 ## browser.test.js — for anything the cascade decides
 

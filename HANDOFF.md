@@ -4768,6 +4768,285 @@ pixels rather than redrawing it per crop. Three crops of Highlands went from
 five minutes to fourteen seconds, which is the difference between iterating on
 cliff art and not.
 
+### The paving came off, and roads went in instead (5 Sep 2026)
+
+Buildings sat on a slab of cobble. Four passes at it, in order, because each one
+was a real fix that revealed the next problem.
+
+`addApron` paved the ground at a building's FEET rather than the ground it
+stands in, so the slab started below the sprite and the building overhung its
+own paving. Fixed. Then the correction went the other way and paved the sprite's
+whole HEIGHT — eight tiles for the keep, which put a dark slab up the map behind
+the castle. That mistake has its own section in `CLAUDE.md` now, because it has
+been made in both directions: **vertical extent on screen is height, not ground
+depth.** `APRON_DEPTH` is 2, and the keep's `footprint.up: 6` describes what the
+ART covers, not where the floor is.
+
+Then the paving itself went. The owner's call and the right one: ditch the stone
+paving, use the same ground as everywhere else, and pave from door to door with
+cobble. A building now suppresses scenery on its footprint but paints no ground,
+and `rebuildPaths`/`trackBetween` lay a track between doors. Two things were
+asked for and both are in: a captured camp far out on the map does not run a
+road home (there is a distance cutoff), and the tiles appear one after another
+rather than the whole road materialising with the building.
+
+The dark paving was also measured wrong. `pave-dark` was factored
+0.5/0.52/0.56 against grass, which put it at luma 60 against grass's 126 — not
+dark stone, a hole. It is 0.78/0.80/0.86 now, luma 93.
+
+### The keeps came out of Godot instead of out of a screenshot (5 Sep 2026)
+
+Both town centres were PNGs the owner made by assembling Winlu tiles in the
+Godot editor, screenshotting, and keying out the background. That is measurable
+and it is lossy: the pale keep had **344,530 fully opaque pixels and not one
+partly transparent one**, so every edge was a hard alpha cut and anything that
+had been blended with the backdrop was simply gone.
+
+It never needed exporting. A `.tscn` is a text file holding the whole
+arrangement — which atlas cell at which coordinate on which layer, referencing
+the same Winlu PNGs this project already builds everything else from. So
+`tools/import-castle.js` composes the keep here, from the original art, at full
+fidelity, and it becomes regenerable and versioned like every other building.
+
+Four things about the format cost a round trip each and are worth having written
+down:
+
+- **There are two tile-data formats and a scene can carry both.** The old
+  `TileMap` node keeps a flat `PackedInt32Array` of triples; a modern
+  `TileMapLayer` keeps a base64 `PackedByteArray` — a two-byte header, then
+  twelve bytes a cell, little-endian: `int16 x, int16 y, uint16 source,
+  uint16 atlas_x, uint16 atlas_y, uint16 alternative`. Reading only the first is
+  how this tool concluded that two saved castles were empty and told Seth to
+  save files he had already saved.
+- **`tile_size` defaults to 16, not 48.** Godot omits it when it is the default.
+  evilcastle has no `tile_size` line at all and lays 48px tiles on a 16px grid;
+  stepping by the art size scattered the castle into disconnected tiles with
+  gaps between them.
+- **`texture_region_size` also defaults to 16**, and getting that one wrong is
+  worse, because it fails silently — see the next section.
+- **A migrated `TileMap` is left holding a cut-down TileSet.** Its old `layer_0`
+  data still refers to source ids the tileset no longer contains. The good
+  keep's entire curtain wall is twenty such cells. When the set is down to a
+  SINGLE source there is only one thing they can mean, so it is used. Searching
+  the scene's OTHER tilesets for a matching id was tried first and is wrong — it
+  found a source 8 belonging to a different set and drew ivy across the
+  gatehouse.
+
+### A silent failure that left a hole in a castle (5 Sep 2026)
+
+The dark keep had a notch under its gatehouse: grass showing through where the
+gate's stone foot should be, and the two door leaves hanging into it.
+
+`texture_region_size` was being defaulted to 48 where Godot defaults to 16. One
+of evilcastle's atlas sources omits the line, so its twenty-four gatehouse-base
+cells were read as 48px tiles at atlas (18,28) on a sheet that is 768x720 — 16
+by 15 cells at that size. Every one of them cropped clean off the edge.
+
+**A crop that runs off a texture comes back transparent rather than failing.**
+So a cell pointing at a tile that is not there draws nothing and is
+indistinguishable from a cell that drew air, and the run reported `232 of 232
+cells drawn` the whole time. The importer now refuses those and names them:
+
+    24 cells point off their sheet and drew nothing:
+      Fantasy_Outside_A4.png has no cell 18,28 at 48px
+
+Recovering them was 863 pixels and did not close the notch, because twenty cells
+were also genuinely absent from the scene. Both wings reached y656; the
+gatehouse's 16px base course stopped at y624 and its doors at y640. Those cells
+were added to `TileMapLayer2` — which draws first, so the fill sits BEHIND the
+towers and closes the gap without touching their silhouette.
+
+### The gate was half again too big (5 Sep 2026)
+
+The keep's portcullis is the pack's own twelve-frame `!$Gate_Stone1.png`, and it
+was going on at its native 144x192 over a castle 288 wide — half the building's
+width, and 159+192 = 351 on a keep 337 tall, so it swallowed the gatehouse and
+buried the front steps.
+
+The cause is one line: `fitW` shrinks the keep art from 432px to 288 and the
+gate was never shrunk with it. Both are drawn from the same 48px pack tiles, so
+the gate now takes the keep's own resize factor — a number the build already
+knows exactly, with no detection involved in the sizing at all.
+
+Positioning had to change too, because the old code aligned the gate's box to
+the keep's arch corner to corner and the arch measurement was junk. It looked
+for dark pixels below luma **70** in a fixed window — but the dark keep's WALLS
+sit at 48-63, so 70 swallowed the whole castle and the box that came back was
+the search window itself: 116 wide in a window 116 wide, bottom clipped to the
+image edge. Both keeps put their gateway alone below **32**.
+
+And the doorway has to be **enclosed**. A gateway is a hole in a wall, so there
+is building either side of it; a flight of steps in front of the gate is not.
+When the dark keep got steps — near-black stone — the measurement ran straight
+down into them and stood the whole stone arch on the grass with the steps hidden
+behind it. A row now counts only when there are opaque pixels outside the search
+band on both sides.
+
+| | before | after |
+|---|---|---|
+| pale gate | 144x192 at (77,159) | 96x128 at (96,167) |
+| dark gate | 144x192 at (77,159) | 81x108 at (105,265) |
+
+### Three gaps in the verifier, found in one evening (5 Sep 2026)
+
+`art.test.js` exists so that whether the art is CORRECT is not a person's job.
+All three of these were things it was meant to catch and did not.
+
+**The keep's gate was not in the overlay checks.** Check 7 asserts that every
+overlay sits inside the sprite it belongs to, and its list was `door` and `fire`
+only. The gate is exactly the same kind of overlay. With the shipped geometry
+restored it now fails with `cyan/castle gate at 77,159 144x192 falls outside
+288x337`.
+
+**Adding the gate to the frames-differ check then failed it as a false
+positive.** That check summed only the red channel and alpha, and the dark sets'
+gate is darkened to about half before it is written, so a difference of 60
+arrived as 30 and fell under the bar. The portcullis was moving perfectly well.
+Summed across all four channels every real strip here differs in 10-43% of its
+pixels against a 0.5% threshold, and a strip of identical frames still differs
+in none of them — verified by flattening a gate to twelve copies of frame 0.
+
+**The importer's anti-aliasing warning was firing on a correct castle.** It said
+zero soft-edged pixels meant something was wrong. That is true of a keyed-out
+screenshot, which is the thing this tool exists to replace — and it is also true
+of a composite of hard-alpha pixel art. evilcastle is 55 distinct cells that
+between them hold not one partly-transparent pixel. The check now compares
+against the source and warns only when anti-aliasing the cells actually HAD was
+lost in compositing.
+
+Every one of these was negative-tested — the bug reintroduced, the check
+confirmed to fail — before being trusted. That rule keeps paying.
+
+### The floating keep, measured (5 Sep 2026)
+
+The dark keep read as hovering. The cause is not the art and not the shadow's
+colour; it is arithmetic, and comparing the two keeps' bottom profiles — opaque
+pixels per row — says it outright:
+
+| | last 17 rows |
+|---|---|
+| pale keep | tapers 288 -> 136, smoothly |
+| dark keep | **262 for 34 rows, then 81 for 27** |
+
+The pale keep's towers reach as deep as its steps, so it has no overhang at all.
+The dark keep's new steps were a lone 81px tab hanging 27px below everything
+else. `buildShadow` anchors to the sprite's LOWEST pixel, so the shadow began
+27px below where the walls actually stand and left a band of lit grass between
+the wall and its own shadow. That band is what reads as floating.
+
+Moving the steps up two grid rows takes the overhang to 9px — the same as the
+siege workshop — and the wall foot lands on the ground line with the shadow
+starting at it. That was a workaround, and it came back out once the shadow
+itself was fixed; the steps are a full tile below the wall base again.
+
+**Two general fixes were tried and both reverted.** Worth recording so they are
+not tried a third time.
+
+Sampling each COLUMN's own foot is the wrong model: an overhanging eave never
+touches the ground, so its shadow belongs on the ground beneath it rather than
+at the eave's own height. It changed all 27 shadows.
+
+A ground-line model — the lowest row still at least half as wide as the widest —
+is principled, and it correctly finds real overhangs. But the camp's overhang is
+48px of scattered props, so its base line jumped 48px, its shadow went behind
+the hut and effectively vanished. `buildShadow` was restored byte for byte from
+HEAD and all 27 shadows confirmed identical to a snapshot taken first.
+
+**What that leaves, and it is real.** Measured overhang below the contact line:
+stable **20px** (the feed barrel), camp **48px**, siege **9px**, tower **4px**.
+Every one of those shadows starts that far below where the building stands, so
+every one of those buildings is floating by that much. A single base line cannot
+describe a thing that touches the ground at several depths, which is why both
+attempts failed.
+
+That conclusion was right and the giving up was premature — see the next entry.
+The model that works is the first of the two rejected here, plus a clamp, and it
+was rejected without ever rendering the shadows it produced.
+
+### The shadows, fixed properly (5 Sep 2026)
+
+The entry above ends by saying the floating was general, that a single base line
+could not describe a building touching the ground at several depths, and that
+both attempted fixes had been reverted. All true, and it stopped one step short.
+Asked to fix it rather than work around it, the answer turned out to be the
+first rejected attempt plus one clamp.
+
+**The measurement that settled it.** For every building, the drop between each
+column's lowest opaque pixel and the sprite's lowest pixel:
+
+| building | median drop | 90th | max |
+|---|---|---|---|
+| barracks | 0 | 0 | 62 |
+| bank | 1 | 1 | 74 |
+| stable | 20 | 20 | 20 |
+| siege | 9 | 9 | 72 |
+| pale keep | 1 | 15 | 17 |
+| tower | 4 | 17 | 25 |
+| dark keep | 9 | 9 | **250** |
+| camp | 37 | **48** | 68 |
+| shrine | 0 | 0 | 0 |
+
+Two things fall out of that table. The typical column of a stable sits 20px
+above the sprite's lowest pixel and the typical column of a camp 37 — so those
+buildings were floating by that much, everywhere, not at an edge. And the dark
+keep has columns **250px** up, which is the V-notch between its two towers:
+project those from their own foot and a shadow hangs in mid-air across the
+middle of the castle.
+
+**So: per column, clamped to one TILE.** Each column projects from its own
+lowest pixel; a column more than 48px above the base is not standing on
+anything — an eave, a tower spike — and falls back to the base line exactly as
+before. 48 is not a tuned number, it is the game's ground unit: more than a tile
+above the base is a storey up, not a foot.
+
+`shadow.anchorY` carries the lift and `drawBuilding` already applied it, so
+there is no client change. Camp 48, dark keep 44, siege 26, tower 25, stable 20,
+pale keep 17, barracks 15, bank 1, shrine 0.
+
+**This was rejected once on reasoning and the reasoning was sound but partial.**
+"An overhanging eave never touches the ground" is true, and it is an argument
+for the clamp rather than against the model. The tell was that the first attempt
+was thrown out without ever rendering the 27 shadows it produced — the check
+that would have shown the eave problem *and* the stable being fixed in the same
+image. Looking is cheap; the reject cost a day and a workaround.
+
+**The workaround came back out.** The keep's steps had been raised two grid rows
+to cut their overhang from 27px to 9px, which stopped the floating and hid most
+of the flight. With the projection fixed they went back to a full tile below the
+wall base, where they read as steps.
+
+**And it is guarded now.** `art.test.js` check 4b: no building may have lit
+ground between it and its own shadow. For each column raised above the base by
+between 1 and 48 pixels, the shadow must have something at that column's own
+foot; more than 15% missing fails. With the flat base line reintroduced it fails
+the stable at 96% of its raised columns, the pale keep at 84%, the siege at 76%,
+the tower at 73%.
+### Steps in front of a gate, and what three tiles cost (5 Sep 2026)
+
+The dark keep had no steps where the pale one does. A5 is the only sheet in the
+pack with a staircase — row 7 columns 0-2 is the pale flight the good keep uses,
+row 6 is the same thing in dark stone — and evilcastle did not reference A5 at
+all.
+
+So the scene gained three things: the texture as an `ExtResource`, a
+`TileSetAtlasSource` over it wired in as `sources/9` on the tileset the
+gatehouse layers share, and three cells. The tiles are 48px on a 16px grid, so
+they sit three cells apart. Godot opened the result without complaint.
+
+Two working notes from this:
+
+- **The scene is the source of truth, and editing it by script is fine.** The
+  curtain wall's stone, the missing foot tiles and the steps were all set by
+  rewriting the `.tscn` — the cell data is a base64 `PackedByteArray` and
+  appending to it is twelve bytes a cell. Back the file up first, and tell the
+  owner to use **Scene -> Reload Saved Scene**, or Godot's next Ctrl+S writes
+  its in-memory copy straight back over the change.
+- **Do not restore a file from a backup path you are not certain of.** A
+  `cp X /tmp/bak || cp X $SCRATCH/bak` fallback wrote one path and restored from
+  the other, quietly reverting a day of work on `build-assets.js`. It was caught
+  only because a measured number moved the wrong way. Copy to one explicit path,
+  and check a marker in the restored file before trusting it.
+
 ### Verifying rules changes
 
 `client.test.js` is worth calling out on its own. The browser client has no

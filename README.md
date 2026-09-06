@@ -47,6 +47,21 @@ One server runs many games at once, so two groups can play side by side.
 If a friend is running their own copy, put their address in the Server
 field before hosting or joining.
 
+`public/` is read from disk on every request, so client changes need only a
+refresh. **`game.js` and `config.js` are read once at boot**, so a change to
+either needs a restart — and a stale server serving a new client against an old
+simulation produces baffling symptoms: gold spent and nothing appearing, a
+building that answers no clicks, a fix that "does not work".
+
+```
+npm run restart
+```
+
+kills whatever holds :3000, starts a fresh one, and asserts the new process is
+newer than `game.js` and `config.js`. Use it rather than killing by hand:
+`pkill` reports success and kills nothing against native Windows processes from
+Git Bash. `taskkill //PID <n> //F` is the one that works.
+
 ## Playing with people on other networks
 
 Everyone needs to reach the same server. On startup the server prints every
@@ -151,13 +166,22 @@ toggle to be believed.
 Plain node scripts, no framework — see `tools/tests/README.md`.
 
 ```
-npm test           # invariants, fuzz, rules, maps, client, smoke, browser — no server needed
+npm test           # invariants, fuzz, rules, maps, art, client, smoke, browser — no server needed
 npm start          # in one terminal...
 npm run test:net   # ...then the reconnect, exit and lobby checks over real sockets
 ```
 
 The whole of `npm test` is about half a minute. The browser check drives a
 headless Chrome and skips loudly if none is installed.
+
+`art.test.js` is the one that runs against the *built* assets rather than the
+rules: sizes integer and matching the manifest, silhouettes present, nothing
+drawn over any door, shadows anchored, animated strips whose frames actually
+differ, overlays inside the sprite they belong to. It reads only
+`public/assets/`, so it needs nothing outside the repo. Every art fault this
+project has shipped was mechanical, and that file is where each one gets a rule
+after the fact — so if you add a check, reintroduce the bug first and confirm it
+fails.
 
 ## Art assets
 
@@ -172,6 +196,31 @@ node tools/build-assets.js [path-to-packs]     # defaults to ../assets
 
 Re-run it whenever the source packs change; nothing else in the project
 reads them.
+
+
+### The keeps are imported from a Godot scene
+
+The two town centres are not drawn by a recipe like the other buildings. They
+are **assembled by hand in the Godot editor**, out of the same Winlu tiles
+everything else uses, and imported straight from the scene file:
+
+```
+node tools/import-castle.js Goodcastle    # -> assets/CastleImport/pale/keep.png
+node tools/import-castle.js evilcastle    # -> assets/CastleImport/dark/keep.png
+```
+
+A `.tscn` is a text file, and it records which atlas cell sits at which
+coordinate on which layer, referencing the same PNGs this project already builds
+from. So the keep is composed here from the original art rather than exported.
+
+That replaced a screenshot of the editor with the background keyed out, which
+was measurably lossy — the pale keep had 344,530 fully opaque pixels and not one
+partly transparent one, so every edge was a hard alpha cut. `build-assets.js`
+reads `CastleImport/` first and falls back to those old screenshots, so emptying
+the folder brings them back.
+
+The scenes are not in this repo. They live in a separate Godot project, and the
+importer is the only thing that reads them.
 
 ### Tile size, and the two places it lives
 
@@ -964,8 +1013,17 @@ public/artdefs.js    — tile-selection rules shared by the client and the previ
 public/assets/       — generated sprite sheets, UI frames + manifest.json
 public/media/        — hand-supplied menu background, music and ambience
 tools/build-assets.js— slices the raw art packs into public/assets/
+tools/make-building.js— composes a building from a recipe, and audits it before writing
 tools/slice-icons.js — cuts the icon sheet up, with a numbered contact sheet
 tools/rmautotile.js  — RPG Maker autotile blocks -> this game's blob sheet
+tools/import-castle.js— rebuilds a keep from the Godot scene it was assembled in
+tools/at-scale.js    — draws a building at 1:1 on real ground, beside the keep
+tools/mine-maps.js   — cuts every structure out of the pack's own sample maps
+tools/kinds.js       — draws every roof/wall autotile as the same slab, to compare
+tools/sample-map.js  — renders one of the pack's sample maps as the artist made it
+tools/inventory.js   — surveys the art packs; pass the assets root, not a pack
+tools/restart.js     — kills whatever holds :3000 and starts a checked fresh one
+tools/spawn-audit.js — reports how fair the generated starting positions are
 tools/preview.js     — renders a real match to a PNG, no browser needed
 tools/shoot-ui.js    — screenshots the real page in headless Chrome at several states
 tools/shoot-spell-fx.js — the same for the spell animations
