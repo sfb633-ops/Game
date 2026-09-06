@@ -113,7 +113,21 @@ const DEFAULT_ZOOM_STEP = ZOOM_STEPS.indexOf(1);
 let zoomStep = DEFAULT_ZOOM_STEP;
 let zoom = ZOOM_STEPS[zoomStep];
 let wallLast = null;       // { x, y } last tile visited during the drag
+let wallAnchor = null;     // { x, y } tile the drag started on, for the straight run
 let hoverTile = null;      // tile under the cursor, when it's one I could build on
+// The building whose ARTWORK the cursor is over, so it can light up. Kept as
+// {x, y} rather than the state object: state is replaced wholesale several
+// times a second and a held reference would be a stale copy within a tick.
+let hoverBuilding = null;
+// Warm gold rather than white, and not a faint one.
+//
+// White at 0.22 was tried first and looked right in a magnified crop. At 1:1 on
+// the keep it was invisible: the pale set's stone is already near-white, so
+// washing it whiter changes nothing you can see. The gold reads against grey
+// stone AND against the dark set's black, and it is the colour every other
+// "this is yours / this is selected" cue in the interface already uses.
+const HOVER_TINT = '#ffd76a';
+const HOVER_ALPHA = 0.34;
 let hoverPoint = null;     // tile under the cursor regardless — spells aim with this
 // Sized to the *art*, not to the frame: the mounted sprite sits in a 64px cell
 // but only fills 28x48 of it, and reaches at most 16px either side of its feet
@@ -652,7 +666,7 @@ function abandonSession(reason) {
   // half-drawn drag from the last one still in memory.
   armedClear = false;
   if (wallMode) toggleWallMode(false);
-  wallDrag = null; wallLast = null;
+  wallDrag = null; wallLast = null; wallAnchor = null;
   releaseHeldKeys();
   lobbyHostId = null;
   document.getElementById('game-ui').classList.add('hidden');
@@ -936,7 +950,7 @@ function onInit(msg) {
   canvas.addEventListener('contextmenu', onCanvasRightClick);
   canvas.addEventListener('mousedown', onCanvasMouseDown);
   canvas.addEventListener('mousemove', onCanvasMouseMove);
-  canvas.addEventListener('mouseleave', () => { hoverTile = null; hoverPoint = null; });
+  canvas.addEventListener('mouseleave', () => { hoverTile = null; hoverPoint = null; hoverBuilding = null; });
   canvas.addEventListener('wheel', onWheel, { passive: false });
   window.addEventListener('mouseup', onCanvasMouseUp);
   window.addEventListener('keydown', onKeyDown);
@@ -1348,7 +1362,7 @@ function disarmTools(keep) {
   }
   if (keep !== 'wall' && wallMode) {
     wallMode = false;
-    wallDrag = null; wallLast = null;
+    wallDrag = null; wallLast = null; wallAnchor = null;
     document.getElementById('wall-tool-btn').classList.remove('active');
   }
   if (keep !== 'clear' && armedClear) {
@@ -1515,7 +1529,7 @@ function toggleWallMode(on) {
   wallMode = !!on;
   if (wallMode) disarmTools('wall');
   document.getElementById('wall-tool-btn').classList.toggle('active', wallMode);
-  wallDrag = null; wallLast = null;
+  wallDrag = null; wallLast = null; wallAnchor = null;
   updateCursor();
   render(); renderPanel();
 }
@@ -2452,6 +2466,15 @@ function drawPlayerBuilding(b, p, ts, hasWall) {
     }
   }
   drawBuilding(b, px, py, color, hasWall, p.race, null);
+  // Under the cursor: the building's own outline lifts, so hovering says
+  // "this one" without a box being drawn around it. A wash of white over the
+  // silhouette rather than a stroke — an outline traced round pixel art at
+  // this scale reads as a halo stuck to the sprite, and the wash reads as
+  // light falling on the thing itself.
+  if (hoverBuilding && hoverBuilding.x === b.x && hoverBuilding.y === b.y && b.type !== 'wall') {
+    Sprites.drawBuildingSilhouette(ctx, b.type, px, py, HOVER_TINT, HOVER_ALPHA,
+      { race: p.race, level: b.level, time: clock });
+  }
   // The progress bar is NOT drawn here. It is collected and drawn after the
   // whole scene — see constructionBars — because a crew standing beside a site
   // is drawn after the site and would otherwise cover the one thing telling
@@ -2750,7 +2773,10 @@ function tileFromEvent(e) {
   const cx = (e.clientX - rect.left) * (canvas.width / rect.width) / zoom + camera.x;
   const cy = (e.clientY - rect.top) * (canvas.height / rect.height) / zoom + camera.y;
   const ts = mapCfg.tileSize;
-  return { fx: cx / ts, fy: cy / ts, ix: Math.round(cx / ts), iy: Math.round(cy / ts) };
+  // wx/wy are world PIXELS. Tiles are what most of the game reasons in, but a
+  // building's artwork is not tile-shaped, so anything asking "is the cursor on
+  // that building" has to work in the same units the sprite is drawn in.
+  return { fx: cx / ts, fy: cy / ts, ix: Math.round(cx / ts), iy: Math.round(cy / ts), wx: cx, wy: cy };
 }
 
 // Tiles on the straight line between two tiles (Bresenham) so fast drags don't
@@ -2788,6 +2814,47 @@ function tilesBetween(x0, y0, x1, y1) {
 //
 // Kept free of globals so it can be lifted out and tested on its own — the
 // browser client has no harness, and this is fiddly enough to be worth one.
+// Where a straight run from the anchor to the cursor ends.
+//
+// A drag used to follow the pointer exactly, and a wall drawn by hand is a wall
+// with every wobble of the mouse in it — a playtest called the tool ugly and
+// fiddly, and this is most of both. What people are drawing is a straight piece
+// of wall, so the run is snapped to a horizontal, a vertical or a true 45, and
+// the pointer only chooses which of the three and how long.
+//
+// The 2:1 band is the part worth stating: a vector more than twice as long in
+// one axis as the other is plainly meant to be along that axis, and everything
+// between the two is meant to be the diagonal. Snapping to the nearer axis
+// alone gives no diagonals at all, and snapping by angle to eight directions
+// gives shallow ones that come out as staircases.
+//
+// Holding shift gives the old freehand back, for the odd shape that really is
+// meant to bend.
+function wallRunEnd(anchor, ix, iy) {
+  const dx = ix - anchor.x, dy = iy - anchor.y;
+  const ax = Math.abs(dx), ay = Math.abs(dy);
+  if (ax > ay * 2) return { x: ix, y: anchor.y };
+  if (ay > ax * 2) return { x: anchor.x, y: iy };
+  const run = Math.min(ax, ay);
+  return { x: anchor.x + Math.sign(dx) * run, y: anchor.y + Math.sign(dy) * run };
+}
+
+// The straight run, rebuilt from scratch every time the cursor moves.
+//
+// Rebuilding rather than accumulating is what makes it predictable: the wall is
+// a function of where the pointer is now, so pulling back shortens it and there
+// is no history to unwind. That is also why this does not go through
+// stepWallDrag — its backtracking exists to undo a freehand path, and a run
+// that is recomputed has nothing to undo.
+function straightWallDrag(anchor, ix, iy, canPlace) {
+  const end = wallRunEnd(anchor, ix, iy);
+  const drag = new Set();
+  for (const t of tilesBetween(anchor.x, anchor.y, end.x, end.y)) {
+    if (canPlace(t.x, t.y)) drag.add(`${t.x},${t.y}`);
+  }
+  return drag;
+}
+
 function stepWallDrag(drag, tiles, canPlace) {
   for (const t of tiles) {
     const key = `${t.x},${t.y}`;
@@ -2808,6 +2875,7 @@ function onCanvasMouseDown(e) {
     const { ix, iy } = tileFromEvent(e);
     wallDrag = new Set();
     wallLast = { x: ix, y: iy };
+    wallAnchor = { x: ix, y: iy };
     stepWallDrag(wallDrag, [{ x: ix, y: iy }], canLayWall);
     render();
     return;
@@ -2831,6 +2899,22 @@ function onCanvasMouseMove(e) {
   const hover = tileFromEvent(e);
   hoverPoint = { x: hover.ix, y: hover.iy };
   hoverTile = isMyBuildable(hover.ix, hover.iy) ? { x: hover.ix, y: hover.iy } : null;
+  // What the cursor is over, by silhouette. Only my own: a highlight on
+  // somebody else's stonework would say "you can click this", and you cannot.
+  // Nothing is highlighted while something is armed, because the click already
+  // belongs to whatever is being carried.
+  const mineNow = myPlayer();
+  const busy = armedBuild || armedClear || armedAbility || armedSpell || wallMode;
+  const over = (!busy && mineNow)
+    ? buildingAtPoint(mineNow.buildings, mineNow.race, hover.wx, hover.wy, (b) => !b.builtin)
+    : null;
+  const wasOver = hoverBuilding;
+  hoverBuilding = over ? { x: over.x, y: over.y } : null;
+  const moved = (!!wasOver !== !!hoverBuilding) ||
+    (wasOver && hoverBuilding && (wasOver.x !== hoverBuilding.x || wasOver.y !== hoverBuilding.y));
+  // The cursor says it too, before anything is drawn.
+  canvas.style.cursor = hoverBuilding ? 'pointer' : '';
+  if (moved && !selectStart) render();
   if (selectStart) {
     selectBox = {
       x0: Math.min(selectStart.x, hover.fx), y0: Math.min(selectStart.y, hover.fy),
@@ -2842,10 +2926,14 @@ function onCanvasMouseMove(e) {
   if (!wallMode || !wallDrag || !wallLast) return;
   const { ix, iy } = tileFromEvent(e);
   if (ix === wallLast.x && iy === wallLast.y) return;
-  // The whole run between the last cursor tile and this one, so a fast drag
-  // lays — or takes back — every tile it swept over rather than only the ones a
-  // mousemove happened to fire on.
-  stepWallDrag(wallDrag, tilesBetween(wallLast.x, wallLast.y, ix, iy), canLayWall);
+  if (e.shiftKey || !wallAnchor) {
+    // Freehand. The whole run between the last cursor tile and this one, so a
+    // fast drag lays — or takes back — every tile it swept over rather than
+    // only the ones a mousemove happened to fire on.
+    stepWallDrag(wallDrag, tilesBetween(wallLast.x, wallLast.y, ix, iy), canLayWall);
+  } else {
+    wallDrag = straightWallDrag(wallAnchor, ix, iy, canLayWall);
+  }
   wallLast = { x: ix, y: iy };
   render();
 }
@@ -2894,7 +2982,7 @@ function wouldThicken(x, y) {
 function cancelDrag() {
   let had = false;
   if (selectStart || selectBox) { selectStart = null; selectBox = null; had = true; }
-  if (wallDrag) { wallDrag = null; wallLast = null; had = true; }
+  if (wallDrag) { wallDrag = null; wallLast = null; wallAnchor = null; had = true; }
   if (armedBuild) { armBuild(null); had = true; }
   if (armedClear) { armClear(false); had = true; }
   if (had) { log('Cancelled.'); render(); }
@@ -2905,7 +2993,7 @@ function onCanvasMouseUp(e) {
   if (wallMode) {
     if (!wallDrag) return;
     const tiles = [...wallDrag].map(k => { const [a, b] = k.split(','); return { x: +a, y: +b }; });
-    wallDrag = null; wallLast = null;
+    wallDrag = null; wallLast = null; wallAnchor = null;
     if (tiles.length) send({ type: 'buildWall', tiles });
     render();
     return;
@@ -3015,7 +3103,7 @@ function nearestMyArmy(fx, fy, maxDist = 0.8, exclude = null) {
 function onCanvasClick(e) {
   if (wallMode) return; // drag handlers own the canvas while the wall tool is on
   if (suppressNextClick) { suppressNextClick = false; return; }   // that was a drag
-  const { fx: tileX, fy: tileY, ix, iy } = tileFromEvent(e);
+  const { fx: tileX, fy: tileY, ix, iy, wx, wy } = tileFromEvent(e);
   if (!latestState) return;
 
   // Whatever is being carried takes the click before anything else can
@@ -3081,7 +3169,8 @@ function onCanvasClick(e) {
     // what is standing at home and open nothing. The KEEP used to be caught
     // here with them, which is why clicking it only ever logged the garrison —
     // it has a popup of its own now and has to fall through to it.
-    const wallHit = mine.buildings.find(b => b.builtin && withinBuilding(b, ix, iy));
+    const wallHit = buildingAtPoint(mine.buildings, mine.race, wx, wy, (b) => b.builtin)
+      || mine.buildings.find(b => b.builtin && withinBuilding(b, ix, iy));
     if (wallHit) {
       logGarrison(mine);
       selectedBuilding = null;
@@ -3095,7 +3184,9 @@ function onCanvasClick(e) {
     // The keep answers to a click anywhere on its artwork: it is six tiles wide
     // and asking for its anchor tile would be a guessing game. Everything else
     // stands on the one tile it occupies.
-    const hit = mine.buildings.find(b => b.type && !b.builtin && hitsBuilding(b, ix, iy));
+    const notBuiltin = (b) => !b.builtin;
+    const hit = buildingAtPoint(mine.buildings, mine.race, wx, wy, notBuiltin)
+      || mine.buildings.find(b => b.type && !b.builtin && hitsBuilding(b, ix, iy));
     if (hit) {
       // The BUILDING's tile, not the one under the cursor. Storing the clicked
       // tile worked for as long as every building was one tile: the moment the
@@ -3408,6 +3499,32 @@ function withinBuilding(b, x, y) {
 // CASTLE.footprint is the ground its art stands on and the client already has
 // it — the build placement rule uses it a few hundred lines up. Same box, so
 // what you can click is what you can see.
+// The building under a world point, by its ARTWORK rather than by its tile.
+//
+// A barracks stands on one tile and draws about three, so most of what you can
+// see of it did not answer a click at all; the keep needed a rectangle written
+// out in config to be clickable across its front, and everything else simply
+// was not. A playtest asked for the silhouette and this is it — Sprites.
+// buildingHit samples the sprite's own alpha, which is the same alpha the
+// shadow is projected from, so what looks clickable is what is.
+//
+// Scene order is by y, so where two sprites overlap the one drawn LAST is the
+// one on top and the one the click belongs to.
+function buildingAtPoint(buildings, race, wx, wy, filter) {
+  if (!buildings) return null;
+  const ts = mapCfg.tileSize;
+  let best = null;
+  for (const b of buildings) {
+    // Walls are excluded: they are drawn as rampart sections keyed off their
+    // neighbours rather than as a building sprite, so there is no single piece
+    // of artwork to sample. They keep the tile test they always had.
+    if (!b.type || b.type === 'wall' || (filter && !filter(b))) continue;
+    if (!Sprites.buildingHit(b.type, b.x * ts, b.y * ts, wx, wy, { race, level: b.level })) continue;
+    if (!best || b.y > best.y) best = b;
+  }
+  return best;
+}
+
 function hitsBuilding(b, x, y) {
   if (b.type === 'castle' && castleCfg && castleCfg.footprint) {
     const f = castleCfg.footprint, dx = x - b.x, dy = y - b.y;

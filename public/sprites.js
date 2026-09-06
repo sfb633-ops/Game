@@ -453,6 +453,107 @@ const Sprites = (function () {
     return def[level - 1];
   }
 
+  // ---- what a building actually covers ------------------------------------
+  //
+  // Clicking used to be answered by the TILE a building stands on, which is a
+  // different shape from the building. A barracks is one tile of ground and
+  // roughly three tiles of picture, so most of what you can see of it did not
+  // answer at all, and the keep — six tiles wide — needed a rectangle written
+  // out in config to be clickable across its front. A playtest called it out
+  // and the fix is to ask the artwork.
+  //
+  // Everything below shares drawBuilding's arithmetic deliberately. Where a
+  // sprite is drawn and where it can be clicked have to be the same number, and
+  // the way that goes wrong is two copies of it drifting apart, so this is the
+  // one place either is worked out.
+  function buildingRect(type, worldX, worldY, opts = {}) {
+    const def = buildingDef(type, opts);
+    if (!def) return null;
+    const base = buildingBase(worldY);
+    const w = def.w, h = def.h;
+    return {
+      def,
+      x: Math.round(worldX - def.anchorX),
+      y: Math.round(base - def.anchorY - (opts.lift || 0)),
+      w, h,
+    };
+  }
+
+  // One alpha byte per pixel of a sprite, built once and kept.
+  //
+  // Read off an offscreen canvas rather than guessed at: the shadow builder in
+  // tools/build-assets.js projects the same alpha to make the shadow, so the
+  // silhouette a player sees and the silhouette they can click are the same
+  // outline by construction.
+  const masks = new Map();
+  function alphaMask(file) {
+    let m = masks.get(file);
+    if (m) return m;
+    const img = get(file);
+    if (!img || !ready(file)) return null;          // still loading; caller falls back
+    const c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0);
+    let data;
+    try {
+      data = g.getImageData(0, 0, img.width, img.height).data;
+    } catch (err) {
+      return null;                                  // tainted canvas: fall back to the box
+    }
+    const out = new Uint8Array(img.width * img.height);
+    for (let i = 0; i < out.length; i++) out[i] = data[i * 4 + 3];
+    m = { w: img.width, h: img.height, a: out };
+    masks.set(file, m);
+    return m;
+  }
+
+  // Is this world point on the building's own artwork?
+  //
+  // Falls back to the sprite's bounding box while the mask is still loading or
+  // if the canvas cannot be read, which is still far closer to the truth than
+  // the single tile it replaces — and never smaller, so a click is never lost
+  // to a half-loaded image.
+  function buildingHit(type, worldX, worldY, px, py, opts = {}) {
+    const r = buildingRect(type, worldX, worldY, opts);
+    if (!r) return false;
+    if (px < r.x || py < r.y || px >= r.x + r.w || py >= r.y + r.h) return false;
+    const mask = alphaMask(r.def.file);
+    if (!mask) return true;                         // box hit; good enough until it loads
+    // Frame 0 for a strip. The frames of an animated building are the same
+    // object doing something small — a tower's banner, a camp's fire — and
+    // which frame is showing must not decide whether a click lands.
+    const mx = Math.floor(px - r.x), my = Math.floor(py - r.y);
+    if (mx < 0 || my < 0 || mx >= mask.w || my >= mask.h) return true;
+    return mask.a[my * mask.w + mx] > 32;
+  }
+
+  // The same silhouette, filled, for the hover highlight. Composed on a scratch
+  // canvas — `source-in` keeps the fill only where the sprite has pixels — so
+  // what lights up under the cursor is the building's own outline and not a
+  // rectangle around it.
+  let scratch = null;
+  function drawBuildingSilhouette(ctx, type, worldX, worldY, color, alpha, opts = {}) {
+    const r = buildingRect(type, worldX, worldY, opts);
+    if (!r || !ready(r.def.file)) return false;
+    if (!scratch) scratch = document.createElement('canvas');
+    if (scratch.width < r.w || scratch.height < r.h) { scratch.width = r.w; scratch.height = r.h; }
+    const g = scratch.getContext('2d');
+    g.clearRect(0, 0, scratch.width, scratch.height);
+    const img = get(r.def.file);
+    if (r.def.frames) g.drawImage(img, buildingFrame(r.def, opts.time) * r.def.w, 0, r.def.w, r.def.h, 0, 0, r.w, r.h);
+    else g.drawImage(img, 0, 0);
+    g.globalCompositeOperation = 'source-in';
+    g.fillStyle = color;
+    g.fillRect(0, 0, r.w, r.h);
+    g.globalCompositeOperation = 'source-over';
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(scratch, 0, 0, r.w, r.h, r.x, r.y, r.w, r.h);
+    ctx.restore();
+    return true;
+  }
+
   // Most buildings are a single image. One — the archer tower — is a strip of
   // frames, so its file is drawn through the sub-rectangle form instead. With
   // no `time` it settles on frame 0, which is what the build palette icons and
@@ -980,6 +1081,7 @@ const Sprites = (function () {
     isReady: ready,
     buildTerrainCanvas, terrainOrigin, drawPathTile,
     drawBuilding, drawBuildingDoor, drawBuildingFire, drawBanner, buildingDef, drawWall, groundShadow,
+    buildingHit, buildingRect, drawBuildingSilhouette,
     drawUnit, drawArmy,
     drawSmoke,
     drawSpellEffect,
